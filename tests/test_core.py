@@ -1,6 +1,8 @@
 import copy
+import json
+from pathlib import Path
 import unittest
-from app.core import generate, verify, revise, split_units, numeric_tokens
+from app.core import generate, verify, revise, run, split_units, numeric_tokens, locate_span
 from app.evidence import segments, model_input
 
 PACKET = {"question": "概括研究A", "evidence": [
@@ -208,6 +210,86 @@ class QualityTests(unittest.TestCase):
         review = {"draft": draft, "units": [dict(u, unit_id="U1")], "problem_units": ["U1"]}
         with self.assertRaises(ValueError):
             revise(PACKET, review, lambda *args: {"replacements": [{"unit_id": "U2", "text": "别的"}]})
+
+    def test_citation_location_examples_match_the_consumer_receipts(self):
+        fixture = json.loads((Path(__file__).parents[1] / "evaluation/citation_location_cases.json").read_text())
+        for case in fixture["cases"]:
+            with self.subTest(case=case["name"]):
+                result = verify(fixture["packet"], case["draft"],
+                                lambda *args: copy.deepcopy(case["model_reply"]))
+                self.assertEqual(result["status"], case["expected"]["status"])
+                self.assertEqual(bool(result["verification_errors"]), case["expected"]["has_verification_errors"])
+                for unit in result["units"]:
+                    for claim in unit["claims"]:
+                        self.assertEqual(unit["text"][claim["span_start"]:claim["span_end"]], claim["span"])
+                if "verification_result" in case:
+                    self.assertEqual(result, case["verification_result"])
+
+    def test_ambiguous_or_repeated_position_never_triggers_automatic_revision(self):
+        fixture = json.loads((Path(__file__).parents[1] / "evaluation/citation_location_cases.json").read_text())
+        for case in fixture["cases"]:
+            if not case["expected"]["has_verification_errors"]:
+                continue
+            with self.subTest(case=case["name"]):
+                stages = []
+                def call(stage, instruction, payload):
+                    stages.append(stage)
+                    if stage == "write_direct":
+                        return {"draft": case["draft"]}
+                    if stage == "verify":
+                        return copy.deepcopy(case["model_reply"])
+                    self.fail("无效核验回执不得触发自动修订")
+                result = run(fixture["packet"], call, method="direct")
+                self.assertEqual(stages, ["write_direct", "verify"])
+                self.assertIsNone(result["revision"])
+                self.assertEqual(result["final_text"], case["draft"])
+
+    def test_invalid_explicit_location_never_falls_back_to_text_search(self):
+        for offsets in (
+            {"span_start": 0}, {"span_end": 3}, {"span_start": -1, "span_end": 3},
+            {"span_start": 0, "span_end": 99}, {"span_start": True, "span_end": 3},
+            {"span_start": 0.0, "span_end": 3}, {"span_start": 1, "span_end": 3},
+        ):
+            with self.subTest(offsets=offsets):
+                with self.assertRaises(ValueError):
+                    locate_span("abc", dict(span="abc", **offsets))
+
+    def test_positions_are_relative_unicode_offsets_and_do_not_depend_on_claim_order(self):
+        text = "🙂 Treatment reduced pain [E1]. Treatment reduced pain [E2]."
+        span = "Treatment reduced pain"
+        second = text.rfind(span)
+        packet = {"question": "What happened?", "evidence": [
+            {"id": "E1", "version": "v1", "text": "Treatment reduced pain."},
+            {"id": "E2", "version": "v1", "text": "No effect on pain was found."}]}
+        ans = response(text)
+        ans["reviews"][0]["claims"] = [
+            {"span": span, "span_start": offset, "span_end": offset + len(span),
+             "verdict": "supported", "evidence": [{"evidence_id": "E1", "segment_id": "S1"}]}
+            for offset in (second, text.index(span))]
+        result = verify(packet, text, lambda *args: ans)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertFalse(result["verification_errors"])
+        self.assertEqual(result["units"][0]["claims"][0]["span_start"], second)
+
+    def test_claim_and_issue_can_share_a_valid_position(self):
+        text = "研究A缓解率40%[E2]。"
+        ans = response(text)
+        ans["reviews"][0]["issues"] = [
+            {"span": text, "labels": ["REF"], "reason": "引用不符",
+             "evidence": [{"evidence_id": "E1", "segment_id": "S1"}]}]
+        result = verify(PACKET, text, lambda *args: ans)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertFalse(result["verification_errors"])
+
+    def test_ambiguous_issue_is_an_incomplete_check(self):
+        text = "研究A缓解率40%[E1]。研究A缓解率40%[E1]。"
+        ans = response(text)
+        ans["reviews"][0]["issues"] = [
+            {"span": "研究A缓解率40%", "labels": ["STR"], "reason": "位置不明", "evidence": []}]
+        result = verify(PACKET, text, lambda *args: ans)
+        self.assertEqual(result["status"], "REVIEW")
+        self.assertTrue(result["verification_errors"])
+        self.assertFalse(result["units"][0]["issues"])
 
 
 if __name__ == "__main__":

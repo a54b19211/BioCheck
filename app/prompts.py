@@ -58,6 +58,10 @@ COND人群/研究条件，STR推断强度/因果/显著性，REF所引原文是�
  "coverage":{"verdict":"complete|incomplete|uncertain","reason":"是否回答了问题，遗漏什么重要结果/反证/条件"}}
 
 每个unit恰好一个review；claims要覆盖它所有可核查事实。span保留原稿原样，尽量包含紧随其后的引用。
+claims和issues都必须定位到该unit.text中唯一的一次出现。同文重复时，使用包含对应引用的唯一span，
+或同时提供span_start与span_end：所属unit.text内的Unicode码点下标，左闭右开，
+必须满足unit.text[span_start:span_end] == span。不要用原稿全局位置或按回执顺序猜位置。
+一个声明的位置只能报告一次；无法确定位置时说明不确定，不把第一次出现复用于后面的句子。
 evidence只选原文的segment_id，多个片段用多个对象；程序直接取回原文，禁止自行拼接或抄写quote。
 supported的事实必须有依据。正确的换算/舍入须引用参与运算的原文片段并解释计算。
 对于“本次摘要未提供某信息”这样的有范围缺省判断，可用

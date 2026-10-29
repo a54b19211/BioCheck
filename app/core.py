@@ -91,11 +91,28 @@ def numeric_hints(unit, evidence):
 
 
 
-def claim_citations(text, span):
-    """An explicit local citation takes precedence over a shared paragraph citation."""
+def locate_span(text, item):
+    """Resolve one exact occurrence; offsets are relative to the containing unit."""
+    span = item.get("span", "")
+    if not isinstance(span, str) or not span:
+        raise ValueError("陈述缺少非空原文span")
+    if "span_start" in item or "span_end" in item:
+        start, end = item.get("span_start"), item.get("span_end")
+        if (type(start) is not int or type(end) is not int
+                or not 0 <= start < end <= len(text) or text[start:end] != span):
+            raise ValueError("陈述位置无效或与span不一致")
+        return start, end
     start = text.find(span)
-    end = start + len(span)
-    explicit = CITATION.findall(span)
+    if start < 0:
+        raise ValueError("陈述未逐字对应原稿：" + span)
+    if text.find(span, start + 1) >= 0:
+        raise ValueError("陈述位置不唯一；请给出span_start/span_end或包含引用的唯一原句：" + span)
+    return start, start + len(span)
+
+
+def claim_citations(text, start, end):
+    """Read citations at the already resolved occurrence."""
+    explicit = CITATION.findall(text[start:end])
     following = re.match(r"\s*(?:\[[A-Za-z][A-Za-z0-9_.:-]*\]\s*)+", text[end:])
     if following:
         explicit.extend(CITATION.findall(following.group()))
@@ -136,26 +153,35 @@ def verify(packet, draft, call):
                 return []
 
         for issue in review.get("issues", []):
-            span = issue.get("span", "")
             labels = issue.get("labels", [])
             if not labels or set(labels) - LABELS:
                 raise ValueError("问题标签无效")
-            if not span or span not in unit["text"]:
-                unit_errors.append("问题位置未逐字对应原稿：" + str(span))
+            try:
+                start, end = locate_span(unit["text"], issue)
+            except ValueError as error:
+                unit_errors.append(str(error))
                 continue
-            issues.append(dict(issue, evidence=support(issue.get("evidence", []), allow_scope=True)))
+            issues.append(dict(issue, span_start=start, span_end=end,
+                               evidence=support(issue.get("evidence", []), allow_scope=True)))
         claims = review.get("claims", [])
         if not claims:
             raise ValueError("核验缺少对子陈述的检查")
         normalized = []
+        claim_positions = set()
         for claim in claims:
             span = claim.get("span", "")
             cv = claim.get("verdict")
             if cv not in {"supported", "contradicted", "insufficient"}:
                 raise ValueError("子陈述结论无效")
-            if not span or span not in unit["text"]:
-                unit_errors.append("子陈述未逐字对应原稿：" + str(span))
+            try:
+                start, end = locate_span(unit["text"], claim)
+            except ValueError as error:
+                unit_errors.append(str(error))
                 continue
+            if (start, end) in claim_positions:
+                unit_errors.append("同一陈述位置被重复核验，无法区分原稿中的不同陈述")
+                continue
+            claim_positions.add((start, end))
             previous_errors = len(unit_errors)
             absence = claim.get("kind") == "source_absence"
             if absence and not claim.get("missing_information"):
@@ -167,17 +193,18 @@ def verify(packet, draft, call):
                 cv = "insufficient"
             if cv == "supported":
                 used_refs = {e["evidence_id"] for e in supports}
-                local_targets = [reference_target(k, lookup) for k in claim_citations(unit["text"], span)]
+                local_targets = [reference_target(k, lookup) for k in claim_citations(unit["text"], start, end)]
                 local_refs = {key for key, part in local_targets}
                 wrong_part = any(
                     not any(key == e["evidence_id"] and (part is None or part == e.get("segment_id"))
                             for key, part in local_targets)
                     for e in supports)
                 if used_refs - local_refs or wrong_part:
-                    issues.append({"span": span, "labels": ["REF"], "evidence": supports,
+                    issues.append({"span": span, "span_start": start, "span_end": end,
+                                   "labels": ["REF"], "evidence": supports,
                                    "reason": "本句引用与核验依据不一致"})
                     cv = "contradicted"
-            normalized.append(dict(claim, verdict=cv, evidence=supports))
+            normalized.append(dict(claim, span_start=start, span_end=end, verdict=cv, evidence=supports))
         if any(c["verdict"] == "contradicted" for c in normalized):
             verdict = "contradicted"
         elif any(c["verdict"] == "insufficient" for c in normalized) and verdict == "supported":
