@@ -2,7 +2,7 @@
 import re
 from decimal import Decimal
 
-from .prompts import WRITE, PLAN, BOUND_PLAN, VERIFY, REVISE
+from .prompts import WRITE, PLAN, BOUND_PLAN, VERIFY, REVISE, SUPPORT_AUDIT
 from .evidence import model_input, locate_support, reference_target
 
 CITATION = re.compile(r"\[([A-Za-z][A-Za-z0-9_.:-]*)\]")
@@ -259,6 +259,90 @@ def verify(packet, draft, call):
         "REVIEW" if problems or coverage["verdict"] != "complete" else "PASS")
     return {"status": status, "draft": draft, "units": results, "problem_units": problems,
             "coverage": coverage, "verification_errors": verification_errors, "scope": "固定材料内的机器核验；段落覆盖由程序检查，子声明语义由模型判断"}
+
+
+
+def audit_support(packet, review, call, *, targets=None):
+    """Check selected passages only. This opt-in call never edits a draft or its old review."""
+    lookup = {e["id"]: e for e in packet_input(packet)["evidence"]}
+    requested = None if targets is None else set(targets)
+    found, items, skipped, errors = set(), [], [], []
+    result = {"status": "NOT_RUN", "original_status": review["status"], "checks": [],
+              "skipped": skipped, "verification_errors": errors,
+              "scope": "仅复核checks列出的陈述及所选片段；PASS不代表整稿通过，不判断事实整体真伪，不自动修订正文"}
+    if review.get("verification_errors"):
+        result.update(status="REVIEW", verification_errors=review["verification_errors"])
+        return result
+    for unit in review["units"]:
+        for index, claim in enumerate(unit["claims"]):
+            key = (unit["unit_id"], index)
+            found.add(key)
+            if requested is not None and key not in requested:
+                continue
+            identity = {"unit_id": key[0], "claim_index": index}
+            if claim.get("kind", "fact") != "fact" or claim["verdict"] != "supported":
+                skipped.append(dict(identity, reason="只复核已判支持的事实；材料缺省等判断须另查全文"))
+                continue
+            try:
+                start, end = locate_span(unit["text"], claim)
+                selected = claim.get("evidence", [])
+                passages = locate_support(selected, lookup)
+                if not passages:
+                    raise ValueError("缺少所选片段")
+                for saved, actual in zip(selected, passages):
+                    for field in ("version", "start", "end", "quote"):
+                        if field in saved and saved[field] != actual[field]:
+                            raise ValueError("保存的片段与当前固定材料不一致：" + field)
+                for passage in passages:
+                    source = lookup[passage["evidence_id"]]
+                    passage["source_identity"] = {k: source[k] for k in ("title", "record_id") if k in source}
+                items.append(dict(identity, span=claim["span"], span_start=start, span_end=end,
+                                  context=unit["text"], evidence=passages))
+            except ValueError as error:
+                errors.append(dict(identity, reason=str(error)))
+    if requested is not None and requested - found:
+        raise ValueError("复核目标不存在")
+    if errors:
+        result["status"] = "REVIEW"
+        return result
+    if not items:
+        return result
+    response = call("support_audit", SUPPORT_AUDIT, {"claims": items})
+    checks = response.get("checks", [])
+    expected = {(x["unit_id"], x["claim_index"]) for x in items}
+    valid_identity = isinstance(checks, list) and all(
+        isinstance(c, dict) and isinstance(c.get("unit_id"), str)
+        and type(c.get("claim_index")) is int for c in checks)
+    if (not valid_identity or len(checks) != len(items)
+            or {(c["unit_id"], c["claim_index"]) for c in checks} != expected):
+        errors.append({"reason": "片段复核回执缺项、重复或目标不一致"})
+        result["status"] = "REVIEW"
+        return result
+    by_id = {(c["unit_id"], c["claim_index"]): c for c in checks}
+    for item in items:
+        answer = by_id[(item["unit_id"], item["claim_index"])]
+        verdict, reason = answer.get("verdict"), answer.get("reason")
+        supports = answer.get("support", [])
+        try:
+            if (not isinstance(verdict, str) or verdict not in {"supported", "not_supported", "uncertain"}
+                    or not isinstance(reason, str) or not reason.strip()):
+                raise ValueError("片段复核缺少有效结论或理由")
+            if not isinstance(supports, list) or (verdict == "supported" and not supports):
+                raise ValueError("支持结论须摘录所选片段中的原文")
+            selected = {(p["evidence_id"], p["segment_id"]): p for p in item["evidence"]}
+            for support in supports:
+                if not isinstance(support, dict) or not all(isinstance(support.get(k), str) for k in ("evidence_id", "segment_id")):
+                    raise ValueError("复核摘录格式无效")
+                passage = selected.get((support.get("evidence_id"), support.get("segment_id")))
+                quote = support.get("quote")
+                if passage is None or not isinstance(quote, str) or not quote.strip() or quote not in passage["quote"]:
+                    raise ValueError("复核摘录不在本条所选片段中")
+        except ValueError as error:
+            errors.append({"unit_id": item["unit_id"], "claim_index": item["claim_index"], "reason": str(error)})
+            verdict = "uncertain"
+        result["checks"].append(dict(item, verdict=verdict, reason=reason, support=supports))
+    result["status"] = "PASS" if not errors and all(c["verdict"] == "supported" for c in result["checks"]) else "REVIEW"
+    return result
 
 
 def revise(packet, review, call):

@@ -1,0 +1,288 @@
+{
+  "original_status": "PASS",
+  "model_requested": "deepseek-flash",
+  "qualification": "同一已知失败样例的限定方法检查；S2由人工按固定原文重选，不是自动修正或独立泛化成绩。",
+  "cases": [
+    {
+      "name": "original_selection",
+      "targets": [
+        [
+          "U1",
+          0
+        ],
+        [
+          "U1",
+          2
+        ]
+      ],
+      "audit": {
+        "status": "REVIEW",
+        "original_status": "PASS",
+        "checks": [
+          {
+            "unit_id": "U1",
+            "claim_index": 0,
+            "span": "NCT05020236 的登记摘要称 elranatamab 为 BCMA-CD3 双特异性抗体",
+            "span_start": 20,
+            "span_end": 68,
+            "context": "机制证据目前只到“登记描述/相容”阶段：NCT05020236 的登记摘要称 elranatamab 为 BCMA-CD3 双特异性抗体，NCT06421675 的干预描述称其为人源化双特异性抗体，靶向 BCMA 表达的多发性骨髓瘤细胞和 CD3 表达 T 细胞。这些材料支持药物类别和双靶向描述，但本次材料没有直接检测同时结合、桥接形成、T 细胞活化、细胞因子释放或骨髓瘤细胞杀伤的原始实验，不能把登记描述写成功能机制已建立。[qef6ac51e879c][q78a8fc419026]",
+            "evidence": [
+              {
+                "evidence_id": "qef6ac51e879c",
+                "version": "dbf7ea89a8634b210d974c31c1113e0eec6fdae5d8f6d02683b4f4e231c0dbc6",
+                "segment_id": "S1",
+                "quote": "{\"protocolSection\":{\"identificationModule\":{\"nctId\":\"NCT05020236\",\"orgStudyIdInfo\":{\"id\":\"C1071005\"},\"secondaryIdInfos\":[{\"id\":\"MAGNETISMM-5\",\"type\":\"OTHER\",\"domain\":\"Alias Study Number\"},{\"id\":\"2023-509208-14-00\",\"type\":\"REGISTRY\",\"domain\":\"CTIS (EU)\"},{\"id\":\"2023\",\"type\":\"NIH\",\"link\":\"https://reporter.nih.gov/quickSearch/2023\"}],\"organization\":{\"fullName\":\"Pfizer\",\"class\":\"INDUSTRY\"},\"briefTitle\":\"A Study to Learn About the Study Medicine Elranatamab Alone and With Daratumumab in People With Multiple Myeloma Who Have Received Other Treatments\",\"officialTitle\":\"AN OPEN-LABEL, 3-ARM, MULTICENTER, RANDOMIZED PHASE 3 STUDY TO EVALUATE THE EFFICACY AND SAFETY OF ELRANATAMAB (PF-06863135) MONOTHERAPY AND ELRANATAMAB + DARATUMUMAB VERSUS DARATUMUMAB + POMALIDOMIDE + DEXAMETHASONE IN PARTICIPANTS WITH RELAPSED/REFRACTORY MULTIPLE MYELOMA WHO HAVE RECEIVED AT LEAST 1 PRIOR LINE OF THERAPY INCLUDING LENALIDOMIDE AND A PROTEASOME INHIBITOR\",\"acronym\":\"MAGNETISMM-5\"},\"statusModule\":{\"statusVerifiedDate\":\"2026-08\",\"overallStatus\":\"RECRUITING\",\"expandedAccessInfo\":{\"hasExpandedAccess\":false},\"startDateStruct\":{\"date\":\"2021-10-04\",\"type\":\"ACTUAL\"},\"primaryCompletionDateStruct\":{\"date\":\"2026-02-",
+                "start": 0,
+                "end": 1200,
+                "source_identity": {
+                  "title": "A Study to Learn About the Study Medicine Elranatamab Alone and With Daratumumab in People With Multiple Myeloma Who Have Received Other Treatments",
+                  "record_id": "[\"clinicaltrials\",\"NCT05020236\",false]"
+                }
+              }
+            ],
+            "verdict": "not_supported",
+            "reason": "所选片段仅包含研究标题、NCT编号、研究药物名称和试验设计信息，未出现“BCMA-CD3 双特异性抗体”或等效的靶点/双特异性描述，缺少支持该登记摘要内容的具体事实。",
+            "support": []
+          },
+          {
+            "unit_id": "U1",
+            "claim_index": 2,
+            "span": "这些材料支持药物类别和双靶向描述",
+            "span_start": 132,
+            "span_end": 148,
+            "context": "机制证据目前只到“登记描述/相容”阶段：NCT05020236 的登记摘要称 elranatamab 为 BCMA-CD3 双特异性抗体，NCT06421675 的干预描述称其为人源化双特异性抗体，靶向 BCMA 表达的多发性骨髓瘤细胞和 CD3 表达 T 细胞。这些材料支持药物类别和双靶向描述，但本次材料没有直接检测同时结合、桥接形成、T 细胞活化、细胞因子释放或骨髓瘤细胞杀伤的原始实验，不能把登记描述写成功能机制已建立。[qef6ac51e879c][q78a8fc419026]",
+            "evidence": [
+              {
+                "evidence_id": "qef6ac51e879c",
+                "version": "dbf7ea89a8634b210d974c31c1113e0eec6fdae5d8f6d02683b4f4e231c0dbc6",
+                "segment_id": "S1",
+                "quote": "{\"protocolSection\":{\"identificationModule\":{\"nctId\":\"NCT05020236\",\"orgStudyIdInfo\":{\"id\":\"C1071005\"},\"secondaryIdInfos\":[{\"id\":\"MAGNETISMM-5\",\"type\":\"OTHER\",\"domain\":\"Alias Study Number\"},{\"id\":\"2023-509208-14-00\",\"type\":\"REGISTRY\",\"domain\":\"CTIS (EU)\"},{\"id\":\"2023\",\"type\":\"NIH\",\"link\":\"https://reporter.nih.gov/quickSearch/2023\"}],\"organization\":{\"fullName\":\"Pfizer\",\"class\":\"INDUSTRY\"},\"briefTitle\":\"A Study to Learn About the Study Medicine Elranatamab Alone and With Daratumumab in People With Multiple Myeloma Who Have Received Other Treatments\",\"officialTitle\":\"AN OPEN-LABEL, 3-ARM, MULTICENTER, RANDOMIZED PHASE 3 STUDY TO EVALUATE THE EFFICACY AND SAFETY OF ELRANATAMAB (PF-06863135) MONOTHERAPY AND ELRANATAMAB + DARATUMUMAB VERSUS DARATUMUMAB + POMALIDOMIDE + DEXAMETHASONE IN PARTICIPANTS WITH RELAPSED/REFRACTORY MULTIPLE MYELOMA WHO HAVE RECEIVED AT LEAST 1 PRIOR LINE OF THERAPY INCLUDING LENALIDOMIDE AND A PROTEASOME INHIBITOR\",\"acronym\":\"MAGNETISMM-5\"},\"statusModule\":{\"statusVerifiedDate\":\"2026-08\",\"overallStatus\":\"RECRUITING\",\"expandedAccessInfo\":{\"hasExpandedAccess\":false},\"startDateStruct\":{\"date\":\"2021-10-04\",\"type\":\"ACTUAL\"},\"primaryCompletionDateStruct\":{\"date\":\"2026-02-",
+                "start": 0,
+                "end": 1200,
+                "source_identity": {
+                  "title": "A Study to Learn About the Study Medicine Elranatamab Alone and With Daratumumab in People With Multiple Myeloma Who Have Received Other Treatments",
+                  "record_id": "[\"clinicaltrials\",\"NCT05020236\",false]"
+                }
+              },
+              {
+                "evidence_id": "q78a8fc419026",
+                "version": "3c12f4acae04856d9a1861da0040dba162a8cad439db07d70d3e02bb417fe4d7",
+                "segment_id": "S13",
+                "quote": " If a participant does not meet CR criteria at Cycle 12, they will be continued on Q4W dosing.\",\"interventionNames\":[\"Drug: Elranatamab injection\"]}],\"interventions\":[{\"type\":\"DRUG\",\"name\":\"Elranatamab injection\",\"description\":\"Elranatamab (Elrexfio) is a humanized bispecific antibody that targets both BCMA-expressing multiple myeloma (MM) cells and CD3-expressing T cells.\",\"armGroupLabels\":[\"Elranatamab injection\"],\"otherNames\":[\"Elrexio\"]}]},\"outcomesModule\":{\"primaryOutcomes\":[{\"measure\":\"Hospitalization rate\",\"description\":\"Hospitalization rate, defined as the number of patients who are hospitalized within the first 2 weeks of Cycle 1 of treatment, due to any cause, divided by the number of patients who are treated with elranatamab.\",\"timeFrame\":\"2 weeks\"},{\"measure\":\"Rate of grade 3+ infections\",\"description\":\"Rate of grade 3+ infections as grade by NCI CTCAE v5 within the first 24 months of treatment, defined as the number of patients who experience a grade 3+ infection within 24 months of treatment, divided by the number of patients who are treated with elranatamab.\",\"timeFrame\":\"24 months\"}],\"secondaryOutcomes\":[{\"measure\":\"Overall response rate.\",\"description\":\"Overall res",
+                "start": 4128,
+                "end": 5328,
+                "source_identity": {
+                  "title": "Outpatient and Intermittent Dosing of Elranatamab in Relapsed/Refractory Multiple Myeloma",
+                  "record_id": "[\"clinicaltrials\",\"NCT06421675\",false]"
+                }
+              }
+            ],
+            "verdict": "supported",
+            "reason": "所选片段明确将 Elranatamab 描述为人源化双特异性抗体，并说明其同时靶向 BCMA 表达的骨髓瘤细胞和 CD3 表达的 T 细胞，足以支持药物类别及双靶向描述。",
+            "support": [
+              {
+                "evidence_id": "q78a8fc419026",
+                "segment_id": "S13",
+                "quote": "Elranatamab (Elrexfio) is a humanized bispecific antibody that targets both BCMA-expressing multiple myeloma (MM) cells and CD3-expressing T cells."
+              }
+            ]
+          }
+        ],
+        "skipped": [],
+        "verification_errors": [],
+        "scope": "仅复核checks列出的陈述及所选片段；PASS不代表整稿通过，不判断事实整体真伪，不自动修订正文"
+      },
+      "raw_output": {
+        "checks": [
+          {
+            "unit_id": "U1",
+            "claim_index": 0,
+            "verdict": "not_supported",
+            "reason": "所选片段仅包含研究标题、NCT编号、研究药物名称和试验设计信息，未出现“BCMA-CD3 双特异性抗体”或等效的靶点/双特异性描述，缺少支持该登记摘要内容的具体事实。",
+            "support": []
+          },
+          {
+            "unit_id": "U1",
+            "claim_index": 2,
+            "verdict": "supported",
+            "reason": "所选片段明确将 Elranatamab 描述为人源化双特异性抗体，并说明其同时靶向 BCMA 表达的骨髓瘤细胞和 CD3 表达的 T 细胞，足以支持药物类别及双靶向描述。",
+            "support": [
+              {
+                "evidence_id": "q78a8fc419026",
+                "segment_id": "S13",
+                "quote": "Elranatamab (Elrexfio) is a humanized bispecific antibody that targets both BCMA-expressing multiple myeloma (MM) cells and CD3-expressing T cells."
+              }
+            ]
+          }
+        ]
+      },
+      "receipt": {
+        "model": "deepseek-flash",
+        "usage": {
+          "prompt_tokens": 2420,
+          "completion_tokens": 1109,
+          "total_tokens": 3529,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 896
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2420
+        },
+        "seconds": 6.912,
+        "status": "received",
+        "finish_reason": "stop",
+        "response_id": "9e3f269b-91e6-4452-8947-b655e5eef867"
+      }
+    },
+    {
+      "name": "manual_s2_control",
+      "targets": [
+        [
+          "U1",
+          0
+        ],
+        [
+          "U1",
+          2
+        ]
+      ],
+      "audit": {
+        "status": "PASS",
+        "original_status": "PASS",
+        "checks": [
+          {
+            "unit_id": "U1",
+            "claim_index": 0,
+            "span": "NCT05020236 的登记摘要称 elranatamab 为 BCMA-CD3 双特异性抗体",
+            "span_start": 20,
+            "span_end": 68,
+            "context": "机制证据目前只到“登记描述/相容”阶段：NCT05020236 的登记摘要称 elranatamab 为 BCMA-CD3 双特异性抗体，NCT06421675 的干预描述称其为人源化双特异性抗体，靶向 BCMA 表达的多发性骨髓瘤细胞和 CD3 表达 T 细胞。这些材料支持药物类别和双靶向描述，但本次材料没有直接检测同时结合、桥接形成、T 细胞活化、细胞因子释放或骨髓瘤细胞杀伤的原始实验，不能把登记描述写成功能机制已建立。[qef6ac51e879c][q78a8fc419026]",
+            "evidence": [
+              {
+                "evidence_id": "qef6ac51e879c",
+                "version": "dbf7ea89a8634b210d974c31c1113e0eec6fdae5d8f6d02683b4f4e231c0dbc6",
+                "segment_id": "S2",
+                "quote": "26\",\"type\":\"ACTUAL\"},\"completionDateStruct\":{\"date\":\"2027-05-31\",\"type\":\"ESTIMATED\"},\"studyFirstSubmitDate\":\"2021-08-11\",\"studyFirstSubmitQcDate\":\"2021-08-18\",\"studyFirstPostDateStruct\":{\"date\":\"2021-08-25\",\"type\":\"ACTUAL\"},\"lastUpdateSubmitDate\":\"2026-08-20\",\"lastUpdatePostDateStruct\":{\"date\":\"2026-08-24\",\"type\":\"ACTUAL\"}},\"sponsorCollaboratorsModule\":{\"responsibleParty\":{\"type\":\"SPONSOR\"},\"leadSponsor\":{\"name\":\"Pfizer\",\"class\":\"INDUSTRY\"}},\"oversightModule\":{\"oversightHasDmc\":true,\"isFdaRegulatedDrug\":true,\"isFdaRegulatedDevice\":false},\"descriptionModule\":{\"briefSummary\":\"The purpose of this clinical trial is to (1) learn whether the BCMA-CD3 bispecific antibody elranatamab can provide more benefit to people with multiple myeloma compared to a combination therapy including daratumumab, pomalidomide, and dexamethasone, and (2) learn about the safety and activity of elranatamab in combination with the anti-CD38 monoclonal antibody daratumumab.",
+                "start": 1200,
+                "end": 2157,
+                "source_identity": {
+                  "title": "A Study to Learn About the Study Medicine Elranatamab Alone and With Daratumumab in People With Multiple Myeloma Who Have Received Other Treatments",
+                  "record_id": "[\"clinicaltrials\",\"NCT05020236\",false]"
+                }
+              }
+            ],
+            "verdict": "supported",
+            "reason": "S2 的登记摘要原文明确将 elranatamab 称为 BCMA-CD3 双特异性抗体，直接支持该陈述。",
+            "support": [
+              {
+                "evidence_id": "qef6ac51e879c",
+                "segment_id": "S2",
+                "quote": "the BCMA-CD3 bispecific antibody elranatamab"
+              }
+            ]
+          },
+          {
+            "unit_id": "U1",
+            "claim_index": 2,
+            "span": "这些材料支持药物类别和双靶向描述",
+            "span_start": 132,
+            "span_end": 148,
+            "context": "机制证据目前只到“登记描述/相容”阶段：NCT05020236 的登记摘要称 elranatamab 为 BCMA-CD3 双特异性抗体，NCT06421675 的干预描述称其为人源化双特异性抗体，靶向 BCMA 表达的多发性骨髓瘤细胞和 CD3 表达 T 细胞。这些材料支持药物类别和双靶向描述，但本次材料没有直接检测同时结合、桥接形成、T 细胞活化、细胞因子释放或骨髓瘤细胞杀伤的原始实验，不能把登记描述写成功能机制已建立。[qef6ac51e879c][q78a8fc419026]",
+            "evidence": [
+              {
+                "evidence_id": "qef6ac51e879c",
+                "version": "dbf7ea89a8634b210d974c31c1113e0eec6fdae5d8f6d02683b4f4e231c0dbc6",
+                "segment_id": "S1",
+                "quote": "{\"protocolSection\":{\"identificationModule\":{\"nctId\":\"NCT05020236\",\"orgStudyIdInfo\":{\"id\":\"C1071005\"},\"secondaryIdInfos\":[{\"id\":\"MAGNETISMM-5\",\"type\":\"OTHER\",\"domain\":\"Alias Study Number\"},{\"id\":\"2023-509208-14-00\",\"type\":\"REGISTRY\",\"domain\":\"CTIS (EU)\"},{\"id\":\"2023\",\"type\":\"NIH\",\"link\":\"https://reporter.nih.gov/quickSearch/2023\"}],\"organization\":{\"fullName\":\"Pfizer\",\"class\":\"INDUSTRY\"},\"briefTitle\":\"A Study to Learn About the Study Medicine Elranatamab Alone and With Daratumumab in People With Multiple Myeloma Who Have Received Other Treatments\",\"officialTitle\":\"AN OPEN-LABEL, 3-ARM, MULTICENTER, RANDOMIZED PHASE 3 STUDY TO EVALUATE THE EFFICACY AND SAFETY OF ELRANATAMAB (PF-06863135) MONOTHERAPY AND ELRANATAMAB + DARATUMUMAB VERSUS DARATUMUMAB + POMALIDOMIDE + DEXAMETHASONE IN PARTICIPANTS WITH RELAPSED/REFRACTORY MULTIPLE MYELOMA WHO HAVE RECEIVED AT LEAST 1 PRIOR LINE OF THERAPY INCLUDING LENALIDOMIDE AND A PROTEASOME INHIBITOR\",\"acronym\":\"MAGNETISMM-5\"},\"statusModule\":{\"statusVerifiedDate\":\"2026-08\",\"overallStatus\":\"RECRUITING\",\"expandedAccessInfo\":{\"hasExpandedAccess\":false},\"startDateStruct\":{\"date\":\"2021-10-04\",\"type\":\"ACTUAL\"},\"primaryCompletionDateStruct\":{\"date\":\"2026-02-",
+                "start": 0,
+                "end": 1200,
+                "source_identity": {
+                  "title": "A Study to Learn About the Study Medicine Elranatamab Alone and With Daratumumab in People With Multiple Myeloma Who Have Received Other Treatments",
+                  "record_id": "[\"clinicaltrials\",\"NCT05020236\",false]"
+                }
+              },
+              {
+                "evidence_id": "q78a8fc419026",
+                "version": "3c12f4acae04856d9a1861da0040dba162a8cad439db07d70d3e02bb417fe4d7",
+                "segment_id": "S13",
+                "quote": " If a participant does not meet CR criteria at Cycle 12, they will be continued on Q4W dosing.\",\"interventionNames\":[\"Drug: Elranatamab injection\"]}],\"interventions\":[{\"type\":\"DRUG\",\"name\":\"Elranatamab injection\",\"description\":\"Elranatamab (Elrexfio) is a humanized bispecific antibody that targets both BCMA-expressing multiple myeloma (MM) cells and CD3-expressing T cells.\",\"armGroupLabels\":[\"Elranatamab injection\"],\"otherNames\":[\"Elrexio\"]}]},\"outcomesModule\":{\"primaryOutcomes\":[{\"measure\":\"Hospitalization rate\",\"description\":\"Hospitalization rate, defined as the number of patients who are hospitalized within the first 2 weeks of Cycle 1 of treatment, due to any cause, divided by the number of patients who are treated with elranatamab.\",\"timeFrame\":\"2 weeks\"},{\"measure\":\"Rate of grade 3+ infections\",\"description\":\"Rate of grade 3+ infections as grade by NCI CTCAE v5 within the first 24 months of treatment, defined as the number of patients who experience a grade 3+ infection within 24 months of treatment, divided by the number of patients who are treated with elranatamab.\",\"timeFrame\":\"24 months\"}],\"secondaryOutcomes\":[{\"measure\":\"Overall response rate.\",\"description\":\"Overall res",
+                "start": 4128,
+                "end": 5328,
+                "source_identity": {
+                  "title": "Outpatient and Intermittent Dosing of Elranatamab in Relapsed/Refractory Multiple Myeloma",
+                  "record_id": "[\"clinicaltrials\",\"NCT06421675\",false]"
+                }
+              }
+            ],
+            "verdict": "supported",
+            "reason": "S13 明确写明 Elranatamab 是人源化双特异性抗体，并同时靶向 BCMA 表达的多发性骨髓瘤细胞和 CD3 表达的 T 细胞，足以支持药物类别和双靶向描述。",
+            "support": [
+              {
+                "evidence_id": "q78a8fc419026",
+                "segment_id": "S13",
+                "quote": "Elranatamab (Elrexfio) is a humanized bispecific antibody that targets both BCMA-expressing multiple myeloma (MM) cells and CD3-expressing T cells."
+              }
+            ]
+          }
+        ],
+        "skipped": [],
+        "verification_errors": [],
+        "scope": "仅复核checks列出的陈述及所选片段；PASS不代表整稿通过，不判断事实整体真伪，不自动修订正文"
+      },
+      "raw_output": {
+        "checks": [
+          {
+            "unit_id": "U1",
+            "claim_index": 0,
+            "verdict": "supported",
+            "reason": "S2 的登记摘要原文明确将 elranatamab 称为 BCMA-CD3 双特异性抗体，直接支持该陈述。",
+            "support": [
+              {
+                "evidence_id": "qef6ac51e879c",
+                "segment_id": "S2",
+                "quote": "the BCMA-CD3 bispecific antibody elranatamab"
+              }
+            ]
+          },
+          {
+            "unit_id": "U1",
+            "claim_index": 2,
+            "verdict": "supported",
+            "reason": "S13 明确写明 Elranatamab 是人源化双特异性抗体，并同时靶向 BCMA 表达的多发性骨髓瘤细胞和 CD3 表达的 T 细胞，足以支持药物类别和双靶向描述。",
+            "support": [
+              {
+                "evidence_id": "q78a8fc419026",
+                "segment_id": "S13",
+                "quote": "Elranatamab (Elrexfio) is a humanized bispecific antibody that targets both BCMA-expressing multiple myeloma (MM) cells and CD3-expressing T cells."
+              }
+            ]
+          }
+        ]
+      },
+      "receipt": {
+        "model": "deepseek-flash",
+        "usage": {
+          "prompt_tokens": 2280,
+          "completion_tokens": 1370,
+          "total_tokens": 3650,
+          "prompt_tokens_details": {
+            "cached_tokens": 384
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 1144
+          },
+          "prompt_cache_hit_tokens": 384,
+          "prompt_cache_miss_tokens": 1896
+        },
+        "seconds": 8.064,
+        "status": "received",
+        "finish_reason": "stop",
+        "response_id": "d92f0717-1656-4993-ada3-5d870fc1a1ce"
+      }
+    }
+  ],
+  "calls": 2
+}

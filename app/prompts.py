@@ -81,3 +81,17 @@ REVISE = BASE + """
 保留医学术语的原有范围；翻译不能确定时直接保留原文术语，别新增病理类型。确实无法回答则指出具体未知。
 返回 {"replacements":[{"unit_id":"U1","text":"该段的完整候选修订文本，保留正确内容和引用"}]}。
 每个允许修改的unit恰好返回一次，不输出其他段落。后续还会重新核验整稿。"""
+
+
+SUPPORT_AUDIT = """只核对本次选中的原文片段能否共同支持指定事实陈述。返回JSON，不写正文。
+每条claim的evidence是本条唯一可用的事实依据；context只是待核正文，用于理解代词，不能充当事实证据。
+source_identity仅识别固定来源，不是额外事实依据。不同claim的片段不可互借。不要凭常识、其他文献或你见过的完整材料补足所选片段。
+检查每个实质要点及其对象、条件、时间和强度。多段可以共同支持；不要求每段单独支持整个陈述。
+结论supported：所选片段共同足够支持；not_supported：所选片段缺少所需事实或与之冲突；
+uncertain：现有片段下无法可靠判断。not_supported不等于正文事实错误，也不要求改写正文。
+材料标题仅说明谈论对象，不能代替对象属性、关系或结果的证据。
+supported必须在support摘录真正支持事实的逐字原文；不得选输入以外的片段，不得改写引文。
+逐条返回，unit_id和claim_index原样保留，不遗漏、不重复。
+格式：{"checks":[{"unit_id":"U1","claim_index":0,"verdict":"supported|not_supported|uncertain",
+"reason":"说明已支持和缺少的具体要点","support":[{"evidence_id":"E1","segment_id":"S1","quote":"逐字原文"}]}]}
+"""

@@ -31,7 +31,7 @@ class DeepSeek:
     def __call__(self, stage, instruction, payload):
         if self.max_calls is not None and len(self.calls) >= self.max_calls:
             raise RuntimeError("本次模型调用额度用完；未执行的核验不能记为通过")
-        thinking = stage in {"verify", "revise"}
+        thinking = stage in {"verify", "revise", "support_audit"}
         request = {
             "model": self.model,
             "messages": [
