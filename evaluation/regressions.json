@@ -1,0 +1,102 @@
+[
+  {
+    "id": "study-design-correct",
+    "case_id": "dreamm",
+    "expected": "correct",
+    "labels": [],
+    "draft": "DREAMM-2为II期、双臂、开放标签研究，两个剂量组分别采用2.5和3.4 mg/kg[E1]。",
+    "origin": "development_regression_after_v2_review"
+  },
+  {
+    "id": "study-design-error",
+    "case_id": "dreamm",
+    "expected": "error",
+    "labels": [
+      "OBJ",
+      "COND"
+    ],
+    "draft": "DREAMM-2为II期、单臂、开放标签研究，两个剂量组分别采用2.5和3.4 mg/kg[E1]。",
+    "origin": "development_regression_after_v2_review"
+  },
+  {
+    "id": "retrospective-correct",
+    "case_id": "sequence",
+    "expected": "correct",
+    "labels": [],
+    "draft": "所给摘要报道10例talquetamab后接受BCMA治疗的患者，未提供可确定前瞻或回顾性设计的信息[E1]。",
+    "origin": "development_regression_after_v2_review"
+  },
+  {
+    "id": "retrospective-error",
+    "case_id": "sequence",
+    "expected": "error",
+    "labels": [
+      "COND"
+    ],
+    "draft": "这项回顾性研究报道10例talquetamab后接受BCMA治疗的患者[E1]。",
+    "origin": "development_regression_after_v2_review"
+  },
+  {
+    "id": "term-correct",
+    "case_id": "dreamm",
+    "expected": "correct",
+    "labels": [],
+    "draft": "DREAMM-2的2.5 mg/kg组报告的3/4级角膜病变（keratopathy）发生率为29%[E1]。",
+    "origin": "development_regression_after_v2_review"
+  },
+  {
+    "id": "term-error",
+    "case_id": "dreamm",
+    "expected": "error",
+    "labels": [
+      "OBJ",
+      "STR"
+    ],
+    "draft": "DREAMM-2的2.5 mg/kg组报告的3/4级角膜炎发生率为29%[E1]。",
+    "origin": "development_regression_after_v2_review"
+  },
+  {
+    "id": "natural-cross_study-bound",
+    "case_id": "cross_study",
+    "expected": "error",
+    "labels": [
+      "COND",
+      "STR"
+    ],
+    "draft": "DREAMM-2研究（NCT03525678）是一项II期、双臂、开放标签试验，纳入重度预处理的复发/难治多发性骨髓瘤（RRMM）患者，要求既往接受过≥3线治疗、对免疫调节剂和蛋白酶体抑制剂难治，且对CD38单抗难治或不耐受[E1]。患者接受belantamab mafodotin（belamaf）单药治疗，剂量为2.5 mg/kg或3.4 mg/kg，每3周一次[E1]。最终分析截止2022年3月31日，共223例患者，两个剂量组的中位随访时间分别为12.5个月和13.8个月[E1]。中位无进展生存期（PFS）在2.5 mg/kg组为2.8个月，在3.4 mg/kg组为3.9个月[E1]。\n\n另一份材料报告了10例在talquetamab治疗后接受BCMA基础疗法的RRMM患者[E2]。该研究未提供具体BCMA药物或剂量信息，仅描述为“BCMA based therapies”[E2]。中位随访时间为9.5个月（范围6-24个月），中位PFS为5.5个月（范围1-10个月）[E2]。患者出现不同级别的细胞因子释放综合征和免疫效应细胞相关神经毒性综合征[E2]。\n\n两份材料的人群和设计存在明显差异。DREAMM-2纳入的是对三类药物难治的RRMM患者，而talquetamab后研究纳入的是talquetamab进展后的患者，既往治疗史不同[E1][E2]。DREAMM-2为前瞻性II期试验，有明确的剂量和随访时间；talquetamab后研究为小样本回顾性病例系列，未报告具体BCMA药物和剂量[E1][E2]。\n\n因此，这些材料不支持直接给两类疗法排优劣。DREAMM-2是单臂试验，无与其他疗法的直接比较；talquetamab后研究仅为10例观察性数据，无对照组[E1][E2]。两者的PFS数值来自不同研究，人群、治疗背景和随访时间均不同，不能直接比较[E1][E2]。材料中也没有提供头对头比较或间接比较分析，无法得出孰优孰劣的结论。",
+    "origin": "development_regression_after_v2_review"
+  },
+  {
+    "id": "natural-dreamm-bound",
+    "case_id": "dreamm",
+    "expected": "error",
+    "labels": [
+      "COND",
+      "STR"
+    ],
+    "draft": "DREAMM-2（NCT03525678）是一项II期、双臂、开放标签试验，纳入既往接受过≥3线治疗、对免疫调节剂和蛋白酶体抑制剂难治、且对CD38单抗难治或不耐受的复发/难治性多发性骨髓瘤（RRMM）患者[E1]。患者每3周接受belantamab mafodotin 2.5 mg/kg或3.4 mg/kg治疗[E1]。本次最终分析数据截止日期为2022年3月31日，总样本量N=223，两组中位随访时间分别为12.5个月（2.5 mg/kg组）和13.8个月（3.4 mg/kg组）[E1]。\n\n疗效方面，2.5 mg/kg组和3.4 mg/kg组的客观缓解率（ORR）分别为32%和35%，中位无进展生存期（PFS）分别为2.8个月和3.9个月，中位总生存期（OS）分别为15.3个月和14.0个月[E1]。中位缓解持续时间分别为12.5个月和6.2个月[E1]。\n\n安全性方面，最常见的3/4级不良事件为角膜炎（2.5 mg/kg组29% vs 3.4 mg/kg组25%）、血小板减少（22% vs 29%）和贫血（21% vs 28%）[E1]。未观察到新的安全性信号[E1]。\n\n这些结果均为描述性数据，原文未提供组间统计检验或优效性结论[E1]。因此，不能基于现有数据证明某一剂量疗效更优；数值上的差异（如3.4 mg/kg组ORR略高、PFS略长，但OS略短）可能受随访时间不同、样本量有限及未进行假设检验等因素影响[E1]。",
+    "origin": "development_regression_after_v2_review"
+  },
+  {
+    "id": "natural-sequence-plain",
+    "case_id": "sequence",
+    "expected": "error",
+    "labels": [
+      "COND",
+      "STR"
+    ],
+    "draft": "该研究是一项针对10例复发/难治性多发性骨髓瘤（RRMM）患者的病例系列，这些患者在talquetamab治疗后接受了基于BCMA的治疗[E1]。中位随访时间为9.5个月（范围：6-24个月）[E1]。中位无进展生存期（PFS）为5.5个月（范围：1-10个月）[E1]。安全性方面，患者出现了不同级别的细胞因子释放综合征（CRS）和免疫效应细胞相关神经毒性综合征（ICANS），但摘要未提供具体级别、发生率或严重程度分布[E1]。\n\n研究结论为：talquetamab治疗后使用基于BCMA的治疗是可行的，可在临床需要时考虑[E1]。然而，该结论基于小样本观察性数据，未进行统计检验，作者使用“suggest”和“feasible”等措辞，并未声称优于其他顺序[E1]。\n\n关于能否确定该顺序优于其他标准方案：不能。摘要未提供与其他治疗顺序（如BCMA后talquetamab或其他方案）的比较数据，也无随机对照或匹配分析，仅呈现描述性结果，因此无法得出优劣结论[E1]。此外，样本量小（10例）、随访时间有限，且缺乏置信区间等统计指标，进一步限制了结论的推广性[E1]。",
+    "origin": "development_regression_after_v2_review"
+  },
+  {
+    "id": "natural-repair-term",
+    "case_id": "dreamm",
+    "expected": "error",
+    "labels": [
+      "OBJ",
+      "STR"
+    ],
+    "draft": "DREAMM-2最终分析未观察到新的安全信号，但报告了3级和4级不良事件，如角膜炎、血小板减少和贫血。[E1]",
+    "origin": "development_regression_after_v2_review"
+  }
+]

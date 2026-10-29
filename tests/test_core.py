@@ -1,44 +1,214 @@
-import json
-from pathlib import Path
+import copy
 import unittest
-from app.core import process
+from app.core import generate, verify, revise, split_units, numeric_tokens
+from app.evidence import segments, model_input
 
-BASE = Path(__file__).resolve().parents[1]
-
-
-def get_packet(name):
-    return json.loads((BASE / 'examples' / name).read_text(encoding='utf-8'))
-
-
-class FixedEvidenceTests(unittest.TestCase):
-    def test_good_answer_passes_implemented_rules(self):
-        result = process(get_packet('good.json'))
-        self.assertEqual(result['verification']['status'], 'PASS')
-        self.assertEqual(result['verification']['runtime_status'], 'OK')
-
-    def test_bad_answer_flags_mismatch(self):
-        result = process(get_packet('bad.json'))
-        self.assertEqual(result['verification']['status'], 'FAIL')
-        labels = {e['type'] for e in result['verification']['issues']}
-        self.assertTrue({'OBJ', 'NUM', 'COVERAGE', 'COND'} & labels)
-
-    def test_runtime_error_distinct_from_factual_error(self):
-        result = process({'evidence':[{'evidence_id':'E1','metric':'ORR'}]})
-        self.assertEqual(result['verification']['runtime_status'], 'ERROR')
-        self.assertIsNone(result['verification']['status'])
-
-    def test_answer_and_evidence_version_present(self):
-        result = process(get_packet('good.json'))['verification']
-        self.assertEqual(result['evidence_version'], 'frozen-2026-10-01')
-        self.assertEqual(result['answer_version'], 'draft-001')
-        self.assertTrue(result['evidence_hash'])
-
-    def test_template_generation(self):
-        result = process(get_packet('good.json'), use_supplied_answer=False)
-        self.assertIn('[E-A]', result['answer'])
-        self.assertIn('45.2%', result['answer'])
-        self.assertEqual(result['verification']['status'], 'PASS')
+PACKET = {"question": "概括研究A", "evidence": [
+    {"id": "E1", "version": "v1", "text": "研究A有50人，其中20人缓解，缓解率40%。"},
+    {"id": "E2", "version": "v2", "text": "研究B有100人，其中60人缓解，缓解率60%。"}]}
 
 
-if __name__ == '__main__':
+def response(draft="研究A缓解率40%[E1]。", verdict="supported"):
+    return {"reviews": [{"unit_id": "U1", "verdict": verdict, "reason": "核对原文",
+        "claims": [{"span": draft, "verdict": verdict, "reason": "原文",
+                    "evidence": [{"evidence_id": "E1", "segment_id": "S1"}]}],
+        "issues": [], "numeric_resolutions": []}],
+        "coverage": {"verdict": "complete", "reason": "回答了所问"}}
+
+
+class QualityTests(unittest.TestCase):
+    def test_paragraphs_preserve_trailing_newline_and_offsets(self):
+        text = " 第一段[E1]。\n\n第二段有40%。\n"
+        units = split_units(text)
+        self.assertEqual(len(units), 2)
+        for u in units:
+            self.assertEqual(text[u["start"]:u["end"]], u["text"])
+
+    def test_chinese_numbers_are_not_skipped(self):
+        self.assertEqual(numeric_tokens("缓解率40%，人数30，p<.01，NCT03525678[E1]"), ["40%", "30", ".01"])
+
+    def test_no_unknown_reference_pass(self):
+        draft = "研究A缓解率40%[E3]。"
+        result = verify(PACKET, draft, lambda *args: response(draft))
+        self.assertEqual(result["status"], "FAIL")
+
+    def test_wrong_source_citation_is_not_saved_by_other_source(self):
+        draft = "研究A缓解率40%[E2]。"
+        result = verify(PACKET, draft, lambda *args: response(draft))
+        self.assertEqual(result["status"], "FAIL")
+
+    def test_one_correct_number_does_not_pass_extra_wrong_number(self):
+        draft = "研究A缓解率40%，共30人缓解[E1]。"
+        result = verify(PACKET, draft, lambda *args: response(draft))
+        self.assertEqual(result["status"], "REVIEW")
+        self.assertIn("30", result["units"][0]["numeric_hints"])
+
+    def test_quote_must_be_in_exact_source(self):
+        bad = response()
+        bad["reviews"][0]["claims"][0]["evidence"][0]["segment_id"] = "S999"
+        result = verify(PACKET, "研究A缓解率40%[E1]。", lambda *args: bad)
+        self.assertEqual(result["status"], "REVIEW")
+        self.assertTrue(result["verification_errors"])
+
+    def test_missing_paragraph_is_a_runtime_failure(self):
+        with self.assertRaises(ValueError):
+            verify(PACKET, "第一段[E1]。\n\n第二段[E2]。", lambda *args: response("第一段[E1]。"))
+
+    def test_empty_check_cannot_pass(self):
+        with self.assertRaises(ValueError):
+            verify(PACKET, "", lambda *args: response())
+
+    def test_unsupported_subclaim_overrides_paragraph_pass(self):
+        bad = response()
+        bad["reviews"][0]["claims"][0]["verdict"] = "insufficient"
+        result = verify(PACKET, "研究A缓解率40%[E1]。", lambda *args: bad)
+        self.assertEqual(result["status"], "REVIEW")
+
+    def test_evaluation_labels_do_not_reach_model(self):
+        packet = dict(PACKET, expected="error", expected_labels=["NUM"])
+        seen = []
+        def call(stage, prompt, data):
+            seen.append(data)
+            return response()
+        verify(packet, "研究A缓解率40%[E1]。", call)
+        self.assertNotIn("expected", seen[0])
+        self.assertNotIn("expected_labels", seen[0])
+
+    def test_plan_invented_quote_stops_generation(self):
+        def call(*args):
+            return {"points": [{"evidence_ids": ["E1"], "binding": {},
+                                "support": [{"evidence_id": "E1", "segment_id": "S999"}]}]}
+        with self.assertRaises(ValueError):
+            generate(PACKET, call)
+
+    def test_segments_keep_all_original_characters(self):
+        text = "First 2.8 months. \n下一句。 " + "x" * 2500
+        parts = segments(text)
+        self.assertEqual("".join(p["text"] for p in parts), text)
+        for part in parts:
+            self.assertEqual(text[part["start"]:part["end"]], part["text"])
+
+    def test_model_sees_text_once_and_not_duplicate_abstract(self):
+        packet = copy.deepcopy(PACKET)
+        packet["evidence"][0]["facts"] = {"abstract": "duplicate"}
+        request = model_input(packet)
+        self.assertNotIn("text", request["evidence"][0])
+        self.assertNotIn("facts", request["evidence"][0])
+        self.assertEqual(request["evidence"][0]["segments"][0]["text"], packet["evidence"][0]["text"])
+
+    def test_swapped_citations_within_one_paragraph_are_detected(self):
+        draft = "研究A缓解率40%[E2]，研究B缓解率60%[E1]。"
+        ans = response(draft)
+        ans["reviews"][0]["claims"] = [
+            {"span": "研究A缓解率40%", "verdict": "supported",
+             "evidence": [{"evidence_id": "E1", "segment_id": "S1"}]},
+            {"span": "研究B缓解率60%", "verdict": "supported",
+             "evidence": [{"evidence_id": "E2", "segment_id": "S1"}]}]
+        result = verify(PACKET, draft, lambda *args: ans)
+        self.assertEqual(result["status"], "FAIL")
+
+    def test_correct_local_citations_are_retained(self):
+        draft = "研究A缓解率40%[E1]，研究B缓解率60%[E2]。"
+        ans = response(draft)
+        ans["reviews"][0]["claims"] = [
+            {"span": "研究A缓解率40%", "verdict": "supported",
+             "evidence": [{"evidence_id": "E1", "segment_id": "S1"}]},
+            {"span": "研究B缓解率60%", "verdict": "supported",
+             "evidence": [{"evidence_id": "E2", "segment_id": "S1"}]}]
+        self.assertEqual(verify(PACKET, draft, lambda *args: ans)["status"], "PASS")
+
+    def test_affirmative_fact_cannot_use_whole_source_as_support(self):
+        ans = response()
+        ans["reviews"][0]["claims"][0]["evidence"] = [{"evidence_id": "E1", "scope": "whole_source"}]
+        result = verify(PACKET, "研究A缓解率40%[E1]。", lambda *args: ans)
+        self.assertEqual(result["status"], "REVIEW")
+        self.assertTrue(result["verification_errors"])
+
+    def test_limited_absence_has_explicit_source_and_missing_item(self):
+        text = "本次材料未提供P值[E1]。"
+        ans = response(text)
+        claim = ans["reviews"][0]["claims"][0]
+        claim.update(kind="source_absence", missing_information="E1中未给出P值",
+                     evidence=[{"evidence_id": "E1", "scope": "whole_source"}])
+        self.assertEqual(verify(PACKET, text, lambda *args: ans)["status"], "PASS")
+
+    def test_invalid_check_does_not_erase_an_established_error(self):
+        draft = "研究A缓解率60%，研究B缓解率60%[E1][E2]。"
+        ans = response(draft)
+        ans["reviews"][0]["claims"] = [
+            {"span": "研究A缓解率60%", "verdict": "contradicted",
+             "evidence": [{"evidence_id": "E1", "segment_id": "S1"}]},
+            {"span": "研究B缓解率60%", "verdict": "supported",
+             "evidence": [{"evidence_id": "E2", "segment_id": "S999"}]}]
+        result = verify(PACKET, draft, lambda *args: ans)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertTrue(result["verification_errors"])
+
+    def test_valid_segment_citation_is_accepted(self):
+        draft = "研究A缓解率40%[E1:S1]。"
+        self.assertEqual(verify(PACKET, draft, lambda *args: response(draft))["status"], "PASS")
+
+    def test_segment_citation_must_match_used_segment(self):
+        packet = copy.deepcopy(PACKET)
+        packet["evidence"][0]["text"] = "研究A有50人。 \n缓解率40%。"
+        draft = "研究A缓解率40%[E1:S1]。"
+        ans = response(draft)
+        ans["reviews"][0]["claims"][0]["evidence"][0]["segment_id"] = "S3"
+        self.assertEqual(verify(packet, draft, lambda *args: ans)["status"], "FAIL")
+
+    def test_nonexistent_segment_citation_cannot_pass(self):
+        draft = "研究A缓解率40%[E1:S999]。"
+        self.assertEqual(verify(PACKET, draft, lambda *args: response(draft))["status"], "FAIL")
+
+    def test_writing_uses_original_text_without_internal_segment_ids(self):
+        requests = []
+        def call(stage, prompt, data):
+            requests.append((stage, data))
+            if stage.startswith("plan"):
+                return {"points": [{"intent": "概括研究", "evidence_ids": ["E1"],
+                                    "binding": {"study": "A"},
+                                    "support": [{"evidence_id": "E1", "segment_id": "S1"}]}]}
+            return {"draft": "研究A缓解率40%[E1]。"}
+        result = generate(PACKET, call, "bound")
+        self.assertIn("support", result["plan"]["points"][0])
+        write = requests[-1][1]
+        self.assertEqual(write["evidence"][0]["text"], PACKET["evidence"][0]["text"])
+        self.assertNotIn("segments", write["evidence"][0])
+        self.assertNotIn("support", write["plan"]["points"][0])
+
+    def test_rephrased_claim_becomes_incomplete_check_not_author_error(self):
+        ans = response(verdict="contradicted")
+        ans["reviews"][0]["claims"][0]["span"] = "研究A的缓解率是40%"
+        result = verify(PACKET, "研究A缓解率40%[E1]。", lambda *args: ans)
+        self.assertEqual(result["status"], "REVIEW")
+        self.assertTrue(result["verification_errors"])
+        self.assertEqual(result["units"][0]["claims"], [])
+
+    def test_rephrased_issue_is_not_used_to_rewrite_author(self):
+        ans = response()
+        ans["reviews"][0]["issues"] = [
+            {"span": "不在原稿里的表述", "labels": ["STR"], "reason": "错误指控", "evidence": []}]
+        result = verify(PACKET, "研究A缓解率40%[E1]。", lambda *args: ans)
+        self.assertEqual(result["status"], "REVIEW")
+        self.assertTrue(result["verification_errors"])
+        self.assertEqual(result["units"][0]["issues"], [])
+
+    def test_revision_preserves_other_paragraph_verbatim(self):
+        draft = "原句[E1]。\n\n正确句 [E2]。 \n"
+        units = split_units(draft)
+        review = {"draft": draft, "units": [dict(u, unit_id=u["id"]) for u in units],
+                  "problem_units": ["U1"]}
+        fixed = revise(PACKET, review, lambda *args: {
+            "replacements": [{"unit_id": "U1", "text": "修订句[E1]。"}]})
+        self.assertEqual(fixed["draft"], "修订句[E1]。\n\n正确句 [E2]。 \n")
+
+    def test_revision_rejects_unrequested_paragraph(self):
+        draft = "原句[E1]。"
+        u = split_units(draft)[0]
+        review = {"draft": draft, "units": [dict(u, unit_id="U1")], "problem_units": ["U1"]}
+        with self.assertRaises(ValueError):
+            revise(PACKET, review, lambda *args: {"replacements": [{"unit_id": "U2", "text": "别的"}]})
+
+
+if __name__ == "__main__":
     unittest.main()

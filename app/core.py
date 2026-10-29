@@ -1,225 +1,269 @@
-"""Fixed-evidence QA demonstrator (stdlib only).
-
-The implemented checks are deterministic, limited demonstrations, NOT
-validated medical factuality models or substitutes for domain review.
-
-Inputs are frozen upstream records; there is no search, graph processing,
-statistical recomputation or answer editing.
-"""
-from __future__ import annotations
-
-from dataclasses import dataclass, asdict
-from typing import Any
-import hashlib
-import json
+"""Evidence-bound writing and verification. No network or database calls here."""
 import re
+from decimal import Decimal
+
+from .prompts import WRITE, PLAN, BOUND_PLAN, VERIFY, REVISE
+from .evidence import model_input, locate_support, reference_target
+
+CITATION = re.compile(r"\[([A-Za-z][A-Za-z0-9_.:-]*)\]")
+NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")
+LABELS = {"OBJ", "NUM", "TIME", "COND", "STR", "REF"}
 
 
-VALUE_RE = re.compile(r'(?<!\d)(\d+(?:\.\d+)?)\s*(%|％|例|人|项|个)')
-CITATION_RE = re.compile(r'\[([A-Za-z0-9_.-]+)\]')
-SENTENCE_RE = re.compile(r'[^。！？；;\n]+[。！？；;]?')
-
-
-def canonical(s: Any) -> str:
-    return re.sub(r'\s+', '', str(s or '')).replace('％', '%').replace('≥', '>=').lower()
-
-
-def digest(value: Any) -> str:
-    blob = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
-    return hashlib.sha256(blob.encode('utf-8')).hexdigest()[:16]
-
-
-@dataclass
-class Fact:
-    evidence_id: str
-    study: str
-    arm: str
-    metric: str
-    value: float
-    unit: str
-    condition: str
-    time_range: str
-    dedup_rule: str
-    source_span: str
-    required: bool
-    kind: str
-
-
-def build_fact_objects(packet: dict[str, Any]) -> list[Fact]:
-    """Build task-scoped records from supplied structured upstream facts.
-
-    It does not hallucinate missing attributes or run an LLM extraction;
-    source_span is retained for independent human checking.
-    """
-    result = []
+def packet_input(packet):
+    if not isinstance(packet.get("question"), str) or not packet["question"].strip():
+        raise ValueError("question不能为空")
+    evidence = packet.get("evidence", [])
     ids = set()
-    for e in packet.get('evidence', []):
-        eid = e.get('evidence_id')
-        if not isinstance(eid, str) or not eid or eid in ids:
-            raise ValueError(f'Invalid/duplicate evidence ID: {eid!r}')
-        ids.add(eid)
-        if 'value' not in e or 'metric' not in e:
-            raise ValueError(f'evidence {eid}: missing metric/value')
-        result.append(Fact(
-            evidence_id=eid, study=str(e.get('study', '')),
-            arm=str(e.get('arm', '')), metric=str(e['metric']),
-            value=float(e['value']), unit=str(e.get('unit', '')),
-            condition=str(e.get('condition', '')),
-            time_range=str(e.get('time_range', '')),
-            dedup_rule=str(e.get('dedup_rule', '')),
-            source_span=str(e.get('source_span', '')),
-            required=bool(e.get('required', False)), kind=str(e.get('kind', 'core'))))
-    return result
+    for item in evidence:
+        key = item["id"]
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]*", key) or key in ids:
+            raise ValueError("证据id须唯一，并能直接作为引用")
+        ids.add(key)
+        if not item.get("text", "").strip() or not item.get("version"):
+            raise ValueError("每份证据须有text和version")
+    if not evidence:
+        raise ValueError("需要至少一份原文证据")
+    # Explicitly select model input; evaluation labels never enter model requests.
+    return {k: packet[k] for k in ("question", "evidence", "assessment") if k in packet}
 
 
-def plan_answer(facts: list[Fact]) -> list[dict]:
-    """Transparent content-plan demo using source-linked fact objects."""
-    return [dict(fact_id=f.evidence_id, study=f.study, arm=f.arm,
-                 metric=f.metric, value=f.value, unit=f.unit,
-                 condition=f.condition, time_range=f.time_range,
-                 dedup_rule=f.dedup_rule) for f in facts]
+def generate(packet, call, method="bound"):
+    source = packet_input(packet)
+    plan = None
+    if method not in {"direct", "plain", "bound"}:
+        raise ValueError("method须为direct/plain/bound")
+    if method != "direct":
+        plan = call("plan_" + method, BOUND_PLAN if method == "bound" else PLAN, model_input(source))
+        points = plan.get("points", [])
+        if not points:
+            raise ValueError("生成计划为空")
+        lookup = {e["id"]: e for e in source["evidence"]}
+        for point in points:
+            refs = point.get("evidence_ids", [])
+            if not refs or any(key not in lookup for key in refs):
+                raise ValueError("计划缺少有效依据")
+            if method == "bound":
+                supports = locate_support(point.get("support", []), lookup)
+                if not supports or any(x["evidence_id"] not in refs for x in supports):
+                    raise ValueError("绑定计划缺少对应原文")
+                if not isinstance(point.get("binding"), dict):
+                    raise ValueError("绑定计划缺少binding")
+    request = dict(source)
+    if plan is not None:
+        request["plan"] = {"points": [{k: v for k, v in point.items() if k != "support"}
+                                     for point in plan["points"]]}
+    output = call("write_" + method, WRITE, model_input(request, numbered=False))
+    draft = output.get("draft")
+    if not isinstance(draft, str) or not draft.strip():
+        raise ValueError("生成结果缺少非空draft")
+    return {"method": method, "plan": plan, "draft": draft}
 
 
-def fmt_num(number: float) -> str:
-    return str(int(number)) if number.is_integer() else f'{number:g}'
+def split_units(draft):
+    """Keep original paragraph spans; do not silently fix the author's statements."""
+    units = []
+    for match in re.finditer(r".+?(?=\n[ \t]*\n|\Z)", draft, re.S):
+        text = match.group()
+        start = match.start() + len(text) - len(text.lstrip())
+        end = match.end() - (len(text) - len(text.rstrip()))
+        if start < end:
+            units.append({"id": f"U{len(units)+1}", "text": draft[start:end], "start": start, "end": end})
+    return units
 
 
-def generate_template_answer(facts: list[Fact]) -> str:
-    """A simple template demonstration, not the proposed M3 LLM system."""
-    lines = []
-    for f in facts:
-        head = f'{f.study}{f.arm}' if f.study else ''
-        conditions = f'在{f.condition}条件下，' if f.condition else ''
-        period = f'{f.time_range}期间，' if f.time_range else ''
-        dedup = f'按{f.dedup_rule}，' if f.dedup_rule else ''
-        lines.append(f'{period}{dedup}{head}{conditions}{f.metric}为{fmt_num(f.value)}{f.unit}[{f.evidence_id}]。')
-    return ''.join(lines)
+def numeric_tokens(text):
+    text = CITATION.sub("", text)
+    text = re.sub(r"\b(?:NCT\d+|PMID\s*:?\s*\d+)\b", "", text)
+    return list(dict.fromkeys(m.group() for m in NUMBER.finditer(text)))
 
 
-def chunk_claims(answer: str) -> list[str]:
-    return [s.strip() for s in SENTENCE_RE.findall(answer) if s.strip()]
+def number_value(token):
+    return Decimal(token.replace(",", "").replace("−", "-").rstrip("%"))
 
 
-def issue(code: str, severity: str, claim: str, evidence_id: str, reason: str) -> dict:
-    return {'type': code, 'severity': severity, 'answer_span': claim,
-            'evidence_id': evidence_id, 'reason': reason}
+def numeric_hints(unit, evidence):
+    refs = [reference_target(k, evidence)[0] for k in CITATION.findall(unit["text"])]
+    refs = [k for k in refs if k in evidence]
+    text = " ".join(evidence[k]["text"] for k in refs)
+    available = {number_value(x) for x in numeric_tokens(text)}
+    return [token for token in numeric_tokens(unit["text"]) if number_value(token) not in available]
 
 
-def check_answer(packet: dict[str, Any], answer: str) -> dict:
-    """Rule-limited reference verifier; never silently corrects the answer."""
-    facts = build_fact_objects(packet)
-    known = {f.evidence_id: f for f in facts}
-    checked, unchecked, undetermined, issues = [], [], [], []
-    claims = chunk_claims(answer)
-    cited_ids = set()
-    supported_ids = set()
 
-    if not facts:
-        return {'status': 'REVIEW', 'runtime_status': 'OK',
-                'issues': [issue('INPUT', 'review', '', '', '未提供有效固定证据')],
-                'scope': {'checked': [], 'unchecked': claims, 'undetermined': claims}}
+def claim_citations(text, span):
+    """An explicit local citation takes precedence over a shared paragraph citation."""
+    start = text.find(span)
+    end = start + len(span)
+    explicit = CITATION.findall(span)
+    following = re.match(r"\s*(?:\[[A-Za-z][A-Za-z0-9_.:-]*\]\s*)+", text[end:])
+    if following:
+        explicit.extend(CITATION.findall(following.group()))
+    if explicit:
+        return set(explicit)
+    # The remainder of this sentence may carry a shared citation.
+    tail = re.split(r"[。！？!?;\n；]", text[end:], maxsplit=1)[0]
+    sentence_refs = CITATION.findall(tail)
+    return set(sentence_refs or CITATION.findall(text))
 
-    for claim in claims:
-        citations = CITATION_RE.findall(claim)
-        cited_ids.update(citations)
-        values = [(float(num), unit.replace('％', '%')) for num, unit in VALUE_RE.findall(claim)]
-        if not citations:
-            unchecked.append(claim)
-            if values:
-                issues.append(issue('REF', 'definite', claim, '', '数字陈述缺少证据编号'))
-            else:
-                undetermined.append(claim)
-            continue
 
-        verified_any = False
-        for cid in citations:
-            if cid not in known:
-                issues.append(issue('REF', 'definite', claim, cid, '引用编号不在冻结证据中'))
+def verify(packet, draft, call):
+    source = packet_input(packet)
+    if not isinstance(draft, str) or not draft.strip():
+        raise ValueError("待核稿不能为空")
+    units = split_units(draft)
+    lookup = {e["id"]: e for e in source["evidence"]}
+    model_units = [dict(u, numeric_hints=numeric_hints(u, lookup)) for u in units]
+    response = call("verify", VERIFY, model_input(dict(source, draft=draft, units=model_units)))
+    reviews = response.get("reviews", [])
+    if len(reviews) != len(units) or {r.get("unit_id") for r in reviews} != {u["id"] for u in units}:
+        raise ValueError("核验结果遗漏或重复了原稿段落")
+    by_id = {r["unit_id"]: r for r in reviews}
+    problems, results, verification_errors = [], [], []
+    for unit in model_units:
+        review = by_id[unit["id"]]
+        verdict = review.get("verdict")
+        if verdict not in {"supported", "contradicted", "insufficient"}:
+            raise ValueError("无效核验结论")
+        issues = []
+        unit_errors = []
+
+        def support(items, *, allow_scope=False):
+            try:
+                return locate_support(items, lookup, allow_scope=allow_scope)
+            except ValueError as error:
+                unit_errors.append(str(error))
+                return []
+
+        for issue in review.get("issues", []):
+            span = issue.get("span", "")
+            labels = issue.get("labels", [])
+            if not labels or set(labels) - LABELS:
+                raise ValueError("问题标签无效")
+            if not span or span not in unit["text"]:
+                unit_errors.append("问题位置未逐字对应原稿：" + str(span))
                 continue
-            f = known[cid]
-            verified_any = True
-            # Check source assignment when a different named study explicitly appears.
-            other_studies = [x.study for x in facts if x.study and x.study != f.study and x.study in claim]
-            if other_studies and (not f.study or f.study not in claim):
-                issues.append(issue('OBJ', 'definite', claim, cid,
-                                    f'引用证据归属为{f.study or "（无研究名）"}，陈述出现其他研究名：{other_studies[0]}'))
-            if f.metric and canonical(f.metric) not in canonical(claim):
-                issues.append(issue('REF', 'review', claim, cid, '引用证据指标未能与陈述对应，需人工检查别名'))
+            issues.append(dict(issue, evidence=support(issue.get("evidence", []), allow_scope=True)))
+        claims = review.get("claims", [])
+        if not claims:
+            raise ValueError("核验缺少对子陈述的检查")
+        normalized = []
+        for claim in claims:
+            span = claim.get("span", "")
+            cv = claim.get("verdict")
+            if cv not in {"supported", "contradicted", "insufficient"}:
+                raise ValueError("子陈述结论无效")
+            if not span or span not in unit["text"]:
+                unit_errors.append("子陈述未逐字对应原稿：" + str(span))
+                continue
+            previous_errors = len(unit_errors)
+            absence = claim.get("kind") == "source_absence"
+            if absence and not claim.get("missing_information"):
+                unit_errors.append("缺省判断未说明本次材料缺少什么")
+            supports = support(claim.get("evidence", []), allow_scope=absence)
+            if cv in {"supported", "contradicted"} and not supports:
+                unit_errors.append("核验判断缺少原文位置：" + span)
+            if len(unit_errors) > previous_errors:
+                cv = "insufficient"
+            if cv == "supported":
+                used_refs = {e["evidence_id"] for e in supports}
+                local_targets = [reference_target(k, lookup) for k in claim_citations(unit["text"], span)]
+                local_refs = {key for key, part in local_targets}
+                wrong_part = any(
+                    not any(key == e["evidence_id"] and (part is None or part == e.get("segment_id"))
+                            for key, part in local_targets)
+                    for e in supports)
+                if used_refs - local_refs or wrong_part:
+                    issues.append({"span": span, "labels": ["REF"], "evidence": supports,
+                                   "reason": "本句引用与核验依据不一致"})
+                    cv = "contradicted"
+            normalized.append(dict(claim, verdict=cv, evidence=supports))
+        if any(c["verdict"] == "contradicted" for c in normalized):
+            verdict = "contradicted"
+        elif any(c["verdict"] == "insufficient" for c in normalized) and verdict == "supported":
+            verdict = "insufficient"
+        cited = [reference_target(k, lookup)[0] for k in CITATION.findall(unit["text"])]
+        used = {e["evidence_id"] for c in normalized if c["verdict"] == "supported" for e in c["evidence"]}
+        if used - set(cited):
+            issues.append({"span": unit["text"], "labels": ["REF"],
+                           "reason": "支持依据未绑定到本段的实际引用：" + ", ".join(sorted(used - set(cited))),
+                           "evidence": []})
+            verdict = "contradicted"
+        unknown = sorted(set(cited) - lookup.keys())
+        if unknown:
+            issues.append({"span": unit["text"], "labels": ["REF"],
+                           "reason": "未知引用：" + ", ".join(unknown), "evidence": []})
+            verdict = "contradicted"
+        if not cited:
+            issues.append({"span": unit["text"], "labels": ["REF"],
+                           "reason": "本段没有绑定原文引用", "evidence": []})
+            if verdict == "supported":
+                verdict = "insufficient"
+        resolutions = {}
+        for item in review.get("numeric_resolutions", []):
+            token = item.get("token")
+            if token in unit["numeric_hints"] and item.get("reason"):
+                supports = support(item.get("evidence", []))
+                if supports:
+                    resolutions[token] = dict(item, evidence=supports)
+        unresolved = [t for t in unit["numeric_hints"] if t not in resolutions]
+        if unresolved and verdict == "supported":
+            verdict = "insufficient"
+            issues.append({"span": unit["text"], "labels": ["NUM"],
+                           "reason": "下列数字尚缺原文或换算解释：" + ", ".join(unresolved),
+                           "evidence": []})
+        if issues and verdict == "supported":
+            verdict = "insufficient"
+        if unit_errors:
+            if not any(c["verdict"] == "contradicted" for c in normalized):
+                verdict = "insufficient"
+            verification_errors.append({"unit_id": unit["id"], "errors": unit_errors})
+        item = {"unit_id": unit["id"], "text": unit["text"], "start": unit["start"], "end": unit["end"],
+                "verdict": verdict, "reason": review.get("reason", ""), "claims": normalized,
+                "issues": issues, "numeric_hints": unit["numeric_hints"],
+                "numeric_resolutions": list(resolutions.values())}
+        results.append(item)
+        if verdict != "supported":
+            problems.append(unit["id"])
+    coverage = response.get("coverage", {})
+    if coverage.get("verdict") not in {"complete", "incomplete", "uncertain"}:
+        raise ValueError("核验结果缺少任务覆盖评价")
+    status = "FAIL" if any(x["verdict"] == "contradicted" for x in results) else (
+        "REVIEW" if problems or coverage["verdict"] != "complete" else "PASS")
+    return {"status": status, "draft": draft, "units": results, "problem_units": problems,
+            "coverage": coverage, "verification_errors": verification_errors, "scope": "固定材料内的机器核验；段落覆盖由程序检查，子声明语义由模型判断"}
 
-            if values:
-                matches = any(abs(v-f.value) <= 1e-8 and u == f.unit.replace('％','%') for v,u in values)
-                if not matches:
-                    # A value belonging to a *different* study's same metric is an attribution issue.
-                    belongs_other = any(
-                        x.evidence_id != cid and x.metric == f.metric and
-                        x.study != f.study and any(abs(v-x.value) < 1e-8 and u == x.unit for v,u in values)
-                        for x in facts
-                    )
-                    kind = 'OBJ' if belongs_other else 'NUM'
-                    reason = ('陈述数值属于另一个研究的相同指标，可能发生事实错配' if belongs_other
-                              else f'陈述数值或单位与引用证据不一致（参考值{fmt_num(f.value)}{f.unit}）')
-                    issues.append(issue(kind, 'definite', claim, cid, reason))
-                else:
-                    supported_ids.add(cid)
-            else:
-                issues.append(issue('REF', 'review', claim, cid, '未识别到可比对的数值，尚不能完成本项规则检查'))
 
-            if f.condition and canonical(f.condition) not in canonical(claim):
-                issues.append(issue('COND', 'review', claim, cid, '证据中的必要条件未在本条陈述中识别到，可能由上下文承接'))
-            if f.time_range and canonical(f.time_range) not in canonical(claim):
-                issues.append(issue('TIME', 'review', claim, cid, '证据时间范围未在本条陈述中识别到'))
-            if f.dedup_rule and canonical(f.dedup_rule) not in canonical(claim):
-                issues.append(issue('COND', 'review', claim, cid, '未在本条陈述中识别到去重口径'))
-        if verified_any:
-            checked.append(claim)
-        else:
-            unchecked.append(claim)
-
-    # Task-scoped coverage only when upstream marked a fact required.
-    for f in facts:
-        if f.required and f.evidence_id not in cited_ids:
-            issues.append(issue('COVERAGE', 'definite', '', f.evidence_id,
-                                '上游指定的必答证据未被引用；需人工复核其是否通过其他表述覆盖'))
-
-    if not claims:
-        status = 'REVIEW'
-    elif any(x['severity'] == 'definite' for x in issues):
-        status = 'FAIL'
-    elif any(x['severity'] == 'review' for x in issues) or unchecked:
-        status = 'REVIEW'
-    else:
-        status = 'PASS'
-
-    return {
-        'status': status,
-        'status_definition': '仅表示本次限定的规则检查状态，不是医学审核或发布许可',
-        'runtime_status': 'OK',
-        'answer_version': packet.get('answer_version', 'unspecified'),
-        'evidence_version': packet.get('evidence_version', 'unspecified'),
-        'analysis_version': packet.get('analysis_version', 'unspecified'),
-        'answer_hash': digest(answer),
-        'evidence_hash': digest(packet.get('evidence', [])),
-        'checked_rules': ['evidence_id','metric_surface','number_unit','study_surface','required_condition_surface','time_range_surface','dedup_surface','required_coverage'],
-        'unchecked_rules': ['CONCLUSION_STRENGTH_semantics','semantic_entailment','unseen_external_evidence','cross_sentence_coreference'],
-        'scope': {'checked': checked, 'unchecked': unchecked,
-                  'undetermined': undetermined},
-        'issues': issues,
-    }
+def revise(packet, review, call):
+    units = review["units"]
+    editable = [u for u in units if u["unit_id"] in review["problem_units"]]
+    if not editable:
+        return {"draft": review["draft"], "changed_units": [], "reason": "无可定位修改项；覆盖缺口交回调查方"}
+    request = dict(packet_input(packet), draft=review["draft"], editable_units=editable)
+    result = call("revise", REVISE, model_input(request, numbered=False))
+    replacements = result.get("replacements", [])
+    if len(replacements) != len(editable) or {r.get("unit_id") for r in replacements} != {u["unit_id"] for u in editable}:
+        raise ValueError("修订没有严格对应允许修改的段落")
+    mapped = {r["unit_id"]: r["text"] for r in replacements}
+    draft = review["draft"]
+    changes = []
+    for unit in reversed(units):
+        if unit["unit_id"] in mapped:
+            text = mapped[unit["unit_id"]]
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError("不能用删除整段代替修订")
+            draft = draft[:unit["start"]] + text + draft[unit["end"]:]
+            changes.append({"unit_id": unit["unit_id"], "before": unit["text"], "after": text})
+    return {"draft": draft, "changed_units": list(reversed(changes))}
 
 
-def process(packet: dict[str, Any], use_supplied_answer: bool = True) -> dict:
-    try:
-        facts = build_fact_objects(packet)
-        answer = packet.get('answer') if use_supplied_answer else None
-        if not isinstance(answer, str):
-            answer = generate_template_answer(facts)
-        return {'question': packet.get('question', ''),
-                'facts': [asdict(f) for f in facts],
-                'content_plan': plan_answer(facts),
-                'answer': answer,
-                'verification': check_answer(packet, answer)}
-    except Exception as err:
-        # Process failure has a distinct runtime status, not a factual FAIL.
-        return {'question': packet.get('question',''), 'answer': packet.get('answer'),
-                'verification': {'runtime_status': 'ERROR', 'error': str(err),
-                                 'status': None, 'issues': []}}
+def run(packet, call, method="bound", *, repair=True):
+    generated = generate(packet, call, method)
+    review = verify(packet, generated["draft"], call)
+    result = {"generated": generated, "initial_review": review, "final_review": review, "revision": None}
+    if repair and review["problem_units"] and not review["verification_errors"]:
+        revision = revise(packet, review, call)
+        result.update(revision=revision, final_review=verify(packet, revision["draft"], call))
+    result["final_text"] = result["final_review"]["draft"]
+    result["status"] = result["final_review"]["status"]
+    return result

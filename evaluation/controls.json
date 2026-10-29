@@ -1,0 +1,269 @@
+[
+  {
+    "id": "dose-pfs-correct",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2中，2.5 mg/kg组ORR为32%，中位PFS为2.8个月。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "dose-pfs-error",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2中，2.5 mg/kg组ORR为32%，中位PFS为14.0个月。[E1]",
+    "expected": "error",
+    "labels": [
+      "OBJ",
+      "NUM"
+    ]
+  },
+  {
+    "id": "extra-number-correct",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2的最终分析纳入223人，2.5 mg/kg组ORR为32%。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "extra-number-error",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2的最终分析纳入999人，2.5 mg/kg组ORR为32%。[E1]",
+    "expected": "error",
+    "labels": [
+      "NUM"
+    ]
+  },
+  {
+    "id": "dose-swap-correct",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2中，2.5和3.4 mg/kg组的ORR分别为32%和35%。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "dose-swap-error",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2中，2.5和3.4 mg/kg组的ORR分别为35%和32%。[E1]",
+    "expected": "error",
+    "labels": [
+      "OBJ",
+      "NUM"
+    ]
+  },
+  {
+    "id": "scope-correct",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2研究对象为重度预处理的复发/难治性多发性骨髓瘤患者，既往接受过至少三种治疗，并符合所列耐药或不耐受条件。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "scope-error",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2研究对象为未接受过治疗的新诊断多发性骨髓瘤患者。[E1]",
+    "expected": "error",
+    "labels": [
+      "COND",
+      "OBJ"
+    ]
+  },
+  {
+    "id": "safety-negation-correct",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2最终分析未观察到新的安全信号，但仍报告了3/4级角膜病变、血小板减少和贫血。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "safety-negation-error",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2最终分析未观察到新的安全信号，说明所有受试者均没有任何严重不良事件。[E1]",
+    "expected": "error",
+    "labels": [
+      "STR",
+      "COND"
+    ]
+  },
+  {
+    "id": "percentage-points-correct",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2两组ORR为32%和35%，数值相差3个百分点；这只是两组报告值的差，不表示统计学优效。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "percentage-points-error",
+    "case_id": "dreamm",
+    "draft": "DREAMM-2两组ORR为32%和35%，数值相差30个百分点。[E1]",
+    "expected": "error",
+    "labels": [
+      "NUM"
+    ]
+  },
+  {
+    "id": "followup-pfs-correct",
+    "case_id": "sequence",
+    "draft": "该10例患者系列的中位随访为9.5个月，中位PFS为5.5个月。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "followup-pfs-error",
+    "case_id": "sequence",
+    "draft": "该10例患者系列的中位随访为5.5个月，中位PFS为9.5个月。[E1]",
+    "expected": "error",
+    "labels": [
+      "TIME",
+      "OBJ"
+    ]
+  },
+  {
+    "id": "sequence-strength-correct",
+    "case_id": "sequence",
+    "draft": "这份10例患者的结果提示talquetamab后采用BCMA治疗可行，可按临床情况考虑。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "sequence-strength-error",
+    "case_id": "sequence",
+    "draft": "这份10例随机对照试验已证实talquetamab后采用BCMA治疗优于所有其他顺序。[E1]",
+    "expected": "error",
+    "labels": [
+      "STR",
+      "COND"
+    ]
+  },
+  {
+    "id": "crs-cohort-correct",
+    "case_id": "crs",
+    "draft": "未接受过TCRT的talquetamab QW和Q2W队列分别为143和145人；既往TCRT队列为51人。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "crs-cohort-error",
+    "case_id": "crs",
+    "draft": "未接受过TCRT的talquetamab QW和Q2W队列分别为51和145人；既往TCRT队列为143人。[E1]",
+    "expected": "error",
+    "labels": [
+      "OBJ",
+      "NUM"
+    ]
+  },
+  {
+    "id": "crs-severity-correct",
+    "case_id": "crs",
+    "draft": "该分析中大多数CRS为1或2级，3级事件罕见。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "crs-severity-error",
+    "case_id": "crs",
+    "draft": "该分析中所有CRS都是1或2级，从未发生3级事件。[E1]",
+    "expected": "error",
+    "labels": [
+      "STR",
+      "COND"
+    ]
+  },
+  {
+    "id": "economic-metric-correct",
+    "case_id": "economics",
+    "draft": "美国模型在25.4个月期间估算cilta-cel每治疗患者成本为704641美元，每完全缓解患者成本为963941美元。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "economic-metric-error",
+    "case_id": "economics",
+    "draft": "美国模型在25.4个月期间估算cilta-cel每治疗患者成本为963941美元，每完全缓解患者成本为704641美元。[E1]",
+    "expected": "error",
+    "labels": [
+      "OBJ",
+      "NUM"
+    ]
+  },
+  {
+    "id": "payment-conditions-correct",
+    "case_id": "economics",
+    "draft": "加拿大建议有条件支付Carvykti，要求专门中心、相应患者条件且降低费用；按公开标价不具良好经济价值。[E2]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "payment-conditions-error",
+    "case_id": "economics",
+    "draft": "加拿大建议按公开标价无条件支付Carvykti，患者既往是否接受过BCMA治疗不影响支付资格。[E2]",
+    "expected": "error",
+    "labels": [
+      "COND",
+      "STR"
+    ]
+  },
+  {
+    "id": "wrong-citation-correct",
+    "case_id": "cross_study",
+    "draft": "DREAMM-2中，2.5 mg/kg组ORR为32%，中位PFS为2.8个月。[E1]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "wrong-citation-error",
+    "case_id": "cross_study",
+    "draft": "DREAMM-2中，2.5 mg/kg组ORR为32%，中位PFS为2.8个月。[E2]",
+    "expected": "error",
+    "labels": [
+      "REF"
+    ]
+  },
+  {
+    "id": "association-cause-correct",
+    "case_id": "kinetics",
+    "draft": "KarMMa-3的暴露反应分析显示较高细胞扩增与较长PFS相关；实际ide-cel剂量与细胞扩增缺乏强关联。[E2]",
+    "expected": "correct",
+    "labels": []
+  },
+  {
+    "id": "association-cause-error",
+    "case_id": "kinetics",
+    "draft": "KarMMa-3已证明增加实际ide-cel给药剂量必然通过提高细胞扩增导致更长PFS。[E2]",
+    "expected": "error",
+    "labels": [
+      "STR"
+    ]
+  },
+  {
+    "id": "local-citation-correct",
+    "case_id": "cross_study",
+    "expected": "correct",
+    "labels": [],
+    "draft": "DREAMM-2中2.5 mg/kg组的ORR为32%[E1]，talquetamab后接受BCMA治疗的10例患者中位PFS为5.5个月[E2]。"
+  },
+  {
+    "id": "local-citation-error",
+    "case_id": "cross_study",
+    "expected": "error",
+    "labels": [
+      "REF"
+    ],
+    "draft": "DREAMM-2中2.5 mg/kg组的ORR为32%[E2]，talquetamab后接受BCMA治疗的10例患者中位PFS为5.5个月[E1]。"
+  },
+  {
+    "id": "absence-scope-correct",
+    "case_id": "dreamm",
+    "expected": "correct",
+    "labels": [],
+    "draft": "本次提供的DREAMM-2摘要没有给出两剂量组间比较的P值；仅凭这份摘要无法判断差异是否具有统计学意义[E1]。"
+  },
+  {
+    "id": "absence-scope-error",
+    "case_id": "dreamm",
+    "expected": "error",
+    "labels": [
+      "STR",
+      "COND"
+    ],
+    "draft": "本次提供的DREAMM-2摘要没有给出两剂量组间比较的P值，因此证明整个研究从未进行组间统计学检验[E1]。"
+  }
+]

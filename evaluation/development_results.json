@@ -1,0 +1,3132 @@
+{
+  "date": "2026-10-29",
+  "purpose": "开发实验与交接，非独立测试集结论",
+  "model": "deepseek-v4-pro",
+  "current_processing": "核验回执坏span转verification_errors；离线严格匹配stage/system/payload后复用V4回执，未新增模型调用。",
+  "data": {
+    "fabric_records_read": 78,
+    "selected_source_records": 9,
+    "questions": 8,
+    "controlled_statements": 32,
+    "development_regressions": 10
+  },
+  "summaries": {
+    "experiment-v1": {
+      "jobs": 52,
+      "runtime": {
+        "error": 17,
+        "ok": 35
+      },
+      "calls": 124,
+      "known_tokens": 603035,
+      "usage_unknown_calls": 0,
+      "generation": {
+        "direct": {
+          "jobs": 8,
+          "initial": {
+            "ERROR": 4,
+            "FAIL": 2,
+            "REVIEW": 1,
+            "PASS": 1
+          },
+          "final": {
+            "ERROR": 4,
+            "FAIL": 2,
+            "PASS": 2
+          },
+          "known_tokens": 152902
+        },
+        "plain": {
+          "jobs": 8,
+          "initial": {
+            "ERROR": 4,
+            "FAIL": 2,
+            "PASS": 2
+          },
+          "final": {
+            "ERROR": 4,
+            "PASS": 4
+          },
+          "known_tokens": 185123
+        },
+        "bound": {
+          "jobs": 8,
+          "initial": {
+            "PASS": 4,
+            "FAIL": 1,
+            "ERROR": 3
+          },
+          "final": {
+            "PASS": 5,
+            "ERROR": 3
+          },
+          "known_tokens": 123978
+        }
+      },
+      "controls": {
+        "correct": {
+          "jobs": 11,
+          "initial": {
+            "PASS": 11
+          },
+          "final": {
+            "PASS": 11
+          }
+        },
+        "error": {
+          "jobs": 11,
+          "initial": {
+            "FAIL": 11
+          },
+          "final": {
+            "PASS": 11
+          }
+        }
+      },
+      "cases": [
+        {
+          "name": "dreamm-direct",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "支持判断缺少原文依据",
+          "labels": []
+        },
+        {
+          "name": "dreamm-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "dreamm-plain",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "E1的quote不是该版本原文",
+          "labels": []
+        },
+        {
+          "name": "economics-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "economics-plain",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "E1的quote不是该版本原文",
+          "labels": []
+        },
+        {
+          "name": "economics-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "sequence-direct",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "支持判断缺少原文依据",
+          "labels": []
+        },
+        {
+          "name": "kinetics-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-plain",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "E1的quote不是该版本原文",
+          "labels": []
+        },
+        {
+          "name": "sequence-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "kinetics-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "kinetics-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "crs-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND",
+            "NUM"
+          ]
+        },
+        {
+          "name": "crs-plain",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "E1的quote不是该版本原文",
+          "labels": []
+        },
+        {
+          "name": "preclinical-direct",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "支持判断缺少原文依据",
+          "labels": []
+        },
+        {
+          "name": "crs-bound",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "支持判断缺少原文依据",
+          "labels": []
+        },
+        {
+          "name": "preclinical-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "preclinical-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "trial-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "trial-bound",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "E1的quote不是该版本原文",
+          "labels": []
+        },
+        {
+          "name": "trial-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "dose-pfs-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "cross_study-direct",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "E1的quote不是该版本原文",
+          "labels": []
+        },
+        {
+          "name": "extra-number-correct",
+          "kind": "controls",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "E1的quote不是该版本原文",
+          "labels": []
+        },
+        {
+          "name": "dose-pfs-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "extra-number-error",
+          "kind": "controls",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "E1的quote不是该版本原文",
+          "labels": []
+        },
+        {
+          "name": "dose-swap-correct",
+          "kind": "controls",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "E1的quote不是该版本原文",
+          "labels": []
+        },
+        {
+          "name": "dose-swap-error",
+          "kind": "controls",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "E1的quote不是该版本原文",
+          "labels": []
+        },
+        {
+          "name": "scope-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "cross_study-bound",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "支持判断缺少原文依据",
+          "labels": []
+        },
+        {
+          "name": "safety-negation-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "percentage-points-correct",
+          "kind": "controls",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "支持判断缺少原文依据",
+          "labels": []
+        },
+        {
+          "name": "scope-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND",
+            "OBJ"
+          ]
+        },
+        {
+          "name": "safety-negation-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "STR"
+          ]
+        },
+        {
+          "name": "followup-pfs-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "sequence-strength-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "percentage-points-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "crs-cohort-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "followup-pfs-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "crs-severity-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "crs-cohort-error",
+          "kind": "controls",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "E1的quote不是该版本原文",
+          "labels": []
+        },
+        {
+          "name": "sequence-strength-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "OBJ",
+            "STR"
+          ]
+        },
+        {
+          "name": "economic-metric-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "cross_study-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "crs-severity-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "payment-conditions-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "wrong-citation-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "economic-metric-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "association-cause-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "wrong-citation-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "payment-conditions-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND",
+            "OBJ"
+          ]
+        },
+        {
+          "name": "association-cause-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF",
+            "STR"
+          ]
+        }
+      ]
+    },
+    "experiment-v2": {
+      "jobs": 56,
+      "runtime": {
+        "ok": 56
+      },
+      "calls": 148,
+      "known_tokens": 748597,
+      "usage_unknown_calls": 0,
+      "generation": {
+        "direct": {
+          "jobs": 8,
+          "initial": {
+            "PASS": 3,
+            "FAIL": 5
+          },
+          "final": {
+            "PASS": 4,
+            "FAIL": 4
+          },
+          "known_tokens": 270551
+        },
+        "plain": {
+          "jobs": 8,
+          "initial": {
+            "PASS": 7,
+            "FAIL": 1
+          },
+          "final": {
+            "PASS": 7,
+            "FAIL": 1
+          },
+          "known_tokens": 151186
+        },
+        "bound": {
+          "jobs": 8,
+          "initial": {
+            "PASS": 3,
+            "FAIL": 5
+          },
+          "final": {
+            "PASS": 4,
+            "FAIL": 4
+          },
+          "known_tokens": 184066
+        }
+      },
+      "controls": {
+        "correct": {
+          "jobs": 16,
+          "initial": {
+            "PASS": 16
+          },
+          "final": {
+            "PASS": 16
+          }
+        },
+        "error": {
+          "jobs": 16,
+          "initial": {
+            "FAIL": 16
+          },
+          "final": {
+            "PASS": 16
+          }
+        }
+      },
+      "cases": [
+        {
+          "name": "dreamm-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "dreamm-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "dreamm-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "economics-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "economics-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "economics-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "kinetics-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "kinetics-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "kinetics-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "crs-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "crs-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "preclinical-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "preclinical-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "crs-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "preclinical-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "trial-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "cross_study-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "trial-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "dose-pfs-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "extra-number-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "dose-pfs-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ"
+          ]
+        },
+        {
+          "name": "dose-swap-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "extra-number-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "scope-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "cross_study-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "dose-swap-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "cross_study-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "trial-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "safety-negation-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "percentage-points-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "scope-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND"
+          ]
+        },
+        {
+          "name": "followup-pfs-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "sequence-strength-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "percentage-points-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "safety-negation-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "STR"
+          ]
+        },
+        {
+          "name": "crs-cohort-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "followup-pfs-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "crs-severity-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "sequence-strength-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND",
+            "STR"
+          ]
+        },
+        {
+          "name": "economic-metric-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "crs-cohort-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ"
+          ]
+        },
+        {
+          "name": "crs-severity-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "wrong-citation-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "payment-conditions-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "economic-metric-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "association-cause-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "local-citation-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "payment-conditions-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND"
+          ]
+        },
+        {
+          "name": "absence-scope-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "wrong-citation-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "association-cause-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "local-citation-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "absence-scope-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "STR"
+          ]
+        }
+      ]
+    },
+    "experiment-v3": {
+      "jobs": 4,
+      "runtime": {
+        "ok": 3,
+        "error": 1
+      },
+      "calls": 18,
+      "known_tokens": 218501,
+      "usage_unknown_calls": 0,
+      "generation": {
+        "direct": {
+          "jobs": 2,
+          "initial": {
+            "FAIL": 2
+          },
+          "final": {
+            "FAIL": 2
+          },
+          "known_tokens": 110237
+        },
+        "plain": {
+          "jobs": 1,
+          "initial": {
+            "ERROR": 1
+          },
+          "final": {
+            "ERROR": 1
+          },
+          "known_tokens": 58535
+        },
+        "bound": {
+          "jobs": 1,
+          "initial": {
+            "FAIL": 1
+          },
+          "final": {
+            "FAIL": 1
+          },
+          "known_tokens": 49729
+        }
+      },
+      "controls": {},
+      "cases": [
+        {
+          "name": "economics-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "dreamm-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "OBJ",
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "dreamm-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "dreamm-plain",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "子陈述与原稿不一致",
+          "labels": []
+        }
+      ]
+    },
+    "experiment-v4": {
+      "jobs": 56,
+      "runtime": {
+        "ok": 50,
+        "error": 6
+      },
+      "calls": 158,
+      "known_tokens": 1308524,
+      "usage_unknown_calls": 0,
+      "generation": {
+        "direct": {
+          "jobs": 8,
+          "initial": {
+            "REVIEW": 3,
+            "ERROR": 2,
+            "FAIL": 3
+          },
+          "final": {
+            "REVIEW": 3,
+            "ERROR": 2,
+            "FAIL": 2,
+            "PASS": 1
+          },
+          "known_tokens": 326904
+        },
+        "plain": {
+          "jobs": 8,
+          "initial": {
+            "PASS": 1,
+            "FAIL": 3,
+            "REVIEW": 3,
+            "ERROR": 1
+          },
+          "final": {
+            "PASS": 3,
+            "FAIL": 2,
+            "REVIEW": 2,
+            "ERROR": 1
+          },
+          "known_tokens": 351853
+        },
+        "bound": {
+          "jobs": 8,
+          "initial": {
+            "REVIEW": 2,
+            "FAIL": 4,
+            "ERROR": 2
+          },
+          "final": {
+            "PASS": 2,
+            "FAIL": 2,
+            "ERROR": 2,
+            "REVIEW": 2
+          },
+          "known_tokens": 379139
+        }
+      },
+      "controls": {
+        "correct": {
+          "jobs": 16,
+          "initial": {
+            "PASS": 16
+          },
+          "final": {
+            "PASS": 16
+          }
+        },
+        "error": {
+          "jobs": 16,
+          "initial": {
+            "FAIL": 15,
+            "REVIEW": 1
+          },
+          "final": {
+            "PASS": 15,
+            "ERROR": 1
+          }
+        }
+      },
+      "cases": [
+        {
+          "name": "dreamm-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "kinetics-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "COND",
+            "REF"
+          ]
+        },
+        {
+          "name": "dreamm-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "dreamm-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-direct",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "子陈述与原稿不一致",
+          "labels": []
+        },
+        {
+          "name": "economics-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ",
+            "REF"
+          ]
+        },
+        {
+          "name": "kinetics-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "OBJ",
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "economics-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "NUM",
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "kinetics-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "economics-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ",
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-bound",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "子陈述与原稿不一致",
+          "labels": []
+        },
+        {
+          "name": "preclinical-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "COND",
+            "STR"
+          ]
+        },
+        {
+          "name": "crs-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "OBJ"
+          ]
+        },
+        {
+          "name": "trial-direct",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "子陈述与原稿不一致",
+          "labels": []
+        },
+        {
+          "name": "preclinical-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "STR"
+          ]
+        },
+        {
+          "name": "crs-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "OBJ",
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "dose-pfs-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "trial-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "OBJ"
+          ]
+        },
+        {
+          "name": "extra-number-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "preclinical-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "COND",
+            "REF"
+          ]
+        },
+        {
+          "name": "trial-bound",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "子陈述与原稿不一致",
+          "labels": []
+        },
+        {
+          "name": "dose-swap-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "dose-pfs-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM",
+            "REF"
+          ]
+        },
+        {
+          "name": "extra-number-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "scope-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "dose-swap-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ"
+          ]
+        },
+        {
+          "name": "crs-plain",
+          "kind": "generation",
+          "runtime": "error",
+          "expected": null,
+          "initial": "ERROR",
+          "final": "ERROR",
+          "error": "子陈述与原稿不一致",
+          "labels": []
+        },
+        {
+          "name": "safety-negation-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "followup-pfs-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "scope-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "OBJ"
+          ]
+        },
+        {
+          "name": "sequence-strength-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "percentage-points-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "crs-cohort-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "percentage-points-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "crs-severity-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "followup-pfs-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "safety-negation-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "STR"
+          ]
+        },
+        {
+          "name": "economic-metric-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "crs-severity-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "payment-conditions-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "crs-cohort-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ",
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-strength-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND",
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "wrong-citation-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "economic-metric-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ"
+          ]
+        },
+        {
+          "name": "association-cause-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "local-citation-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "payment-conditions-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND"
+          ]
+        },
+        {
+          "name": "absence-scope-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "wrong-citation-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "cross_study-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "COND",
+            "OBJ"
+          ]
+        },
+        {
+          "name": "cross_study-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "COND",
+            "REF"
+          ]
+        },
+        {
+          "name": "cross_study-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND",
+            "OBJ",
+            "REF"
+          ]
+        },
+        {
+          "name": "association-cause-error",
+          "kind": "controls",
+          "runtime": "error",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "ERROR",
+          "error": "核验结果缺少任务覆盖评价",
+          "labels": [
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "local-citation-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "absence-scope-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "REVIEW",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "STR"
+          ]
+        }
+      ]
+    },
+    "reprocessed-v4": {
+      "jobs": 56,
+      "runtime": {
+        "ok": 55,
+        "error": 1
+      },
+      "calls": 0,
+      "known_tokens": 0,
+      "usage_unknown_calls": 0,
+      "generation": {
+        "direct": {
+          "jobs": 8,
+          "initial": {
+            "REVIEW": 5,
+            "FAIL": 3
+          },
+          "final": {
+            "REVIEW": 5,
+            "FAIL": 2,
+            "PASS": 1
+          },
+          "known_tokens": 0
+        },
+        "plain": {
+          "jobs": 8,
+          "initial": {
+            "PASS": 1,
+            "FAIL": 3,
+            "REVIEW": 4
+          },
+          "final": {
+            "PASS": 3,
+            "FAIL": 2,
+            "REVIEW": 3
+          },
+          "known_tokens": 0
+        },
+        "bound": {
+          "jobs": 8,
+          "initial": {
+            "REVIEW": 3,
+            "FAIL": 5
+          },
+          "final": {
+            "PASS": 2,
+            "FAIL": 3,
+            "REVIEW": 3
+          },
+          "known_tokens": 0
+        }
+      },
+      "controls": {
+        "correct": {
+          "jobs": 16,
+          "initial": {
+            "PASS": 16
+          },
+          "final": {
+            "PASS": 16
+          }
+        },
+        "error": {
+          "jobs": 16,
+          "initial": {
+            "FAIL": 15,
+            "REVIEW": 1
+          },
+          "final": {
+            "PASS": 15,
+            "ERROR": 1
+          }
+        }
+      },
+      "cases": [
+        {
+          "name": "dreamm-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "kinetics-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "COND",
+            "REF"
+          ]
+        },
+        {
+          "name": "dreamm-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "dreamm-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "COND"
+          ]
+        },
+        {
+          "name": "economics-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ",
+            "REF"
+          ]
+        },
+        {
+          "name": "kinetics-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "OBJ",
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "economics-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "NUM",
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "kinetics-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "economics-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ",
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "COND",
+            "STR"
+          ]
+        },
+        {
+          "name": "preclinical-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "COND",
+            "STR"
+          ]
+        },
+        {
+          "name": "crs-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "OBJ"
+          ]
+        },
+        {
+          "name": "trial-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "preclinical-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "STR"
+          ]
+        },
+        {
+          "name": "crs-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "OBJ",
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "dose-pfs-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "trial-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "OBJ"
+          ]
+        },
+        {
+          "name": "extra-number-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "preclinical-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "COND",
+            "REF"
+          ]
+        },
+        {
+          "name": "trial-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "OBJ"
+          ]
+        },
+        {
+          "name": "dose-swap-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "dose-pfs-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM",
+            "REF"
+          ]
+        },
+        {
+          "name": "extra-number-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "scope-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "dose-swap-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ"
+          ]
+        },
+        {
+          "name": "crs-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "COND",
+            "NUM"
+          ]
+        },
+        {
+          "name": "safety-negation-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "followup-pfs-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "scope-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "OBJ"
+          ]
+        },
+        {
+          "name": "sequence-strength-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "percentage-points-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "crs-cohort-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "percentage-points-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "crs-severity-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "followup-pfs-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM"
+          ]
+        },
+        {
+          "name": "safety-negation-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "STR"
+          ]
+        },
+        {
+          "name": "economic-metric-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "crs-severity-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "payment-conditions-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "crs-cohort-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ",
+            "REF"
+          ]
+        },
+        {
+          "name": "sequence-strength-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND",
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "wrong-citation-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "economic-metric-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "NUM",
+            "OBJ"
+          ]
+        },
+        {
+          "name": "association-cause-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "local-citation-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "payment-conditions-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND"
+          ]
+        },
+        {
+          "name": "absence-scope-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "wrong-citation-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "cross_study-bound",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "COND",
+            "OBJ"
+          ]
+        },
+        {
+          "name": "cross_study-direct",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "REVIEW",
+          "final": "FAIL",
+          "error": null,
+          "labels": [
+            "COND",
+            "REF"
+          ]
+        },
+        {
+          "name": "cross_study-plain",
+          "kind": "generation",
+          "runtime": "ok",
+          "expected": null,
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND",
+            "OBJ",
+            "REF"
+          ]
+        },
+        {
+          "name": "association-cause-error",
+          "kind": "controls",
+          "runtime": "error",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "ERROR",
+          "error": "核验结果缺少任务覆盖评价",
+          "labels": [
+            "REF",
+            "STR"
+          ]
+        },
+        {
+          "name": "local-citation-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "REF"
+          ]
+        },
+        {
+          "name": "absence-scope-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "REVIEW",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "STR"
+          ]
+        }
+      ]
+    },
+    "regressions-v3": {
+      "jobs": 10,
+      "runtime": {
+        "ok": 10
+      },
+      "calls": 20,
+      "known_tokens": 146575,
+      "usage_unknown_calls": 0,
+      "generation": {},
+      "controls": {
+        "correct": {
+          "jobs": 3,
+          "initial": {
+            "PASS": 3
+          },
+          "final": {
+            "PASS": 3
+          }
+        },
+        "error": {
+          "jobs": 7,
+          "initial": {
+            "FAIL": 2,
+            "PASS": 1,
+            "REVIEW": 4
+          },
+          "final": {
+            "PASS": 5,
+            "REVIEW": 2
+          }
+        }
+      },
+      "cases": [
+        {
+          "name": "study-design-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "retrospective-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "study-design-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "OBJ"
+          ]
+        },
+        {
+          "name": "term-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "retrospective-error",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "REVIEW",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND"
+          ]
+        },
+        {
+          "name": "term-correct",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "correct",
+          "initial": "PASS",
+          "final": "PASS",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "natural-dreamm-bound",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": []
+        },
+        {
+          "name": "natural-repair-term",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "REVIEW",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "OBJ"
+          ]
+        },
+        {
+          "name": "natural-sequence-plain",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "REVIEW",
+          "final": "REVIEW",
+          "error": null,
+          "labels": [
+            "COND",
+            "STR"
+          ]
+        },
+        {
+          "name": "natural-cross_study-bound",
+          "kind": "controls",
+          "runtime": "ok",
+          "expected": "error",
+          "initial": "FAIL",
+          "final": "PASS",
+          "error": null,
+          "labels": [
+            "COND",
+            "OBJ"
+          ]
+        }
+      ]
+    }
+  },
+  "timing_v4": {
+    "generation": {
+      "median_seconds": 308.47,
+      "max_seconds": 514.29
+    },
+    "controls": {
+      "median_seconds": 36.38,
+      "max_seconds": 116.75
+    }
+  },
+  "interrupted_v3": {
+    "reason": "停止开发中的旧写作输入实验；内部片段编号污染成稿，最终版本改用完整原文和来源编号。旧结果保留。",
+    "planned_jobs": 56,
+    "completed_jobs": 4,
+    "started_unfinished_jobs": [
+      "economics-bound",
+      "economics-plain",
+      "kinetics-plain",
+      "kinetics-direct"
+    ],
+    "not_started_jobs": 48,
+    "unfinished_known_tokens": 160570,
+    "unfinished_usage_unknown_calls": 4
+  },
+  "review_notes": [
+    {
+      "run": "experiment-v2",
+      "case": "cross_study-bound",
+      "finding": "双臂研究写成单臂、另文未说明设计却补成回顾性；当时机器支持，原始稿回归检查发现了问题。",
+      "type": "natural_false_negative"
+    },
+    {
+      "run": "experiment-v2",
+      "case": "safety-negation-error",
+      "finding": "修订把角膜病变变成角膜炎，属于原文概念范围变窄的新增错候选。",
+      "type": "revision_harm"
+    },
+    {
+      "run": "regressions-v3",
+      "case": "term-error",
+      "finding": "短句中的角膜炎仍被PASS；另一份长句natural-repair-term里相同概念错误被发现并改回，核验存在语境敏感性。",
+      "type": "unresolved_false_negative"
+    },
+    {
+      "run": "regressions-v3",
+      "case": "natural-dreamm-bound",
+      "finding": "返回REVIEW包含核验回执类型问题，不能将待核状态直接计为语义识错成功。",
+      "type": "invalid_verifier_reply"
+    },
+    {
+      "run": "regressions-v3",
+      "case": "natural-sequence-plain",
+      "finding": "修后对未改变的病例系列表述新报问题，是核验判断变化，不应计成修订引入错误。",
+      "type": "review_instability"
+    },
+    {
+      "run": "experiment-v4",
+      "case": "dreamm-direct",
+      "finding": "开放标签可能偏倚等方法学评价被标为STR，需要先约定允许的分析前提，再由独立专业标注裁定。",
+      "type": "disputed_inference"
+    },
+    {
+      "run": "experiment-v4",
+      "case": "economics-bound",
+      "finding": "摘要没提价格折扣被写成模型未考虑，首次核验漏过、后续核验才提出不足，原错误并非修订新造。",
+      "type": "natural_false_negative"
+    },
+    {
+      "run": "experiment-v4",
+      "case": "trial-plain",
+      "finding": "核验指出treatment-emergent被写成治疗相关，术语范围检查在此例有效，不能推广为所有医学翻译均可靠。",
+      "type": "detected_natural_error"
+    }
+  ],
+  "reviewer": "AI交叉审读；尚未进行临床专家独立标注"
+}

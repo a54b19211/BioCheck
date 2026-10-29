@@ -1,0 +1,105 @@
+[
+  {
+    "case_id": "dreamm",
+    "question": "请对比DREAMM-2两种剂量的ORR、PFS、OS和安全性。说明研究人群、研究设计、数据截止；这些结果是否证明某剂量疗效更优？",
+    "sources": [
+      {
+        "source_id": "europe_pmc",
+        "record_id": "MED:37622738",
+        "version": "08123b33502ad05085be339229ffadb07cb529fff5361b9646b7bac988e7fced"
+      }
+    ]
+  },
+  {
+    "case_id": "economics",
+    "question": "两份材料对cilta-cel经济性的结论是否矛盾？分别说明研究地区、视角、金额币种/单位、时间范围和支付条件，不能把模型估算写成实际财务收入。",
+    "sources": [
+      {
+        "source_id": "europe_pmc",
+        "record_id": "MED:39234256",
+        "version": "c4de3c82a421628a9d6b2f62d6e70b4d43cb63451b7b2a80497fd7eaec1d5f13"
+      },
+      {
+        "source_id": "europe_pmc",
+        "record_id": "MED:39693466",
+        "version": "6af28619e33236d68387c0b07ab5bd7dac23a2ae51d72119823327f32140af76"
+      }
+    ]
+  },
+  {
+    "case_id": "kinetics",
+    "question": "这两份KarMMa-3分析能否证明增加ide-cel剂量会导致更长PFS？区分样本、人群、细胞暴露、实际给药剂量和相关关系，不把同一试验的两篇分析算独立临床验证。",
+    "sources": [
+      {
+        "source_id": "europe_pmc",
+        "record_id": "MED:40461939",
+        "version": "a6b45cb6365729b1c75183bc7e6b9ee337496378e090a4fc0f08bc9a0878ea6e"
+      },
+      {
+        "source_id": "europe_pmc",
+        "record_id": "MED:40641008",
+        "version": "a20b5a98a53f7beb2bce5e057569c6e0ad495ee6f27125e522bc5841710e1447"
+      }
+    ]
+  },
+  {
+    "case_id": "sequence",
+    "question": "仅依据这份10例材料，概括talquetamab后BCMA治疗的随访、PFS与结论范围，能否确定是优于其他顺序的标准方案？",
+    "sources": [
+      {
+        "source_id": "europe_pmc",
+        "record_id": "MED:38895072",
+        "version": "bb4b30237b78842d0534c51be4c5f5c6fa4e71b47889b8d6c373cb9e292ac906"
+      }
+    ]
+  },
+  {
+    "case_id": "crs",
+    "question": "概括MonumenTAL-1的三个队列、剂量和CRS特点。能否断言所有患者都只有1—2级CRS，或托珠单抗已被随机试验证实可减少复发？",
+    "sources": [
+      {
+        "source_id": "europe_pmc",
+        "record_id": "MED:41036677",
+        "version": "3499f79c92e3a823cc555766f4166e745c2edf2e32224093e967ddfcc04a2b6f"
+      }
+    ]
+  },
+  {
+    "case_id": "preclinical",
+    "question": "这篇POU2AF1研究支持哪些发现？它能否直接证明抑制POU2AF1已经改善患者生存，说明证据层级和缺口。",
+    "sources": [
+      {
+        "source_id": "europe_pmc",
+        "record_id": "MED:17621271",
+        "version": "d6e1b3387a7a938341a4fe8dfb0167d6f433fc6fd1851cab335ce09102cf4311"
+      }
+    ]
+  },
+  {
+    "case_id": "trial",
+    "question": "请根据登记原件说明这项elranatamab试验的设计、干预、人群、入组信息、主要终点和状态。原件是否已经提供可用于判断疗效优劣的实际结果？",
+    "sources": [
+      {
+        "source_id": "clinicaltrials",
+        "record_id": "NCT05020236",
+        "version": "dbf7ea89a8634b210d974c31c1113e0eec6fdae5d8f6d02683b4f4e231c0dbc6"
+      }
+    ]
+  },
+  {
+    "case_id": "cross_study",
+    "question": "比较DREAMM-2与talquetamab后BCMA治疗的这两份材料，分别列出人群、样本/剂量、PFS与随访。它们是否支持直接给两类疗法排优劣？",
+    "sources": [
+      {
+        "source_id": "europe_pmc",
+        "record_id": "MED:37622738",
+        "version": "08123b33502ad05085be339229ffadb07cb529fff5361b9646b7bac988e7fced"
+      },
+      {
+        "source_id": "europe_pmc",
+        "record_id": "MED:38895072",
+        "version": "bb4b30237b78842d0534c51be4c5f5c6fa4e71b47889b8d6c373cb9e292ac906"
+      }
+    ]
+  }
+]

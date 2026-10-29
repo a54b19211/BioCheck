@@ -1,2 +1,1 @@
-"""Drug R&D fixed-evidence QA: independently written teaching prototype."""
-__version__ = '0.1.0'
+"""BioCheck: evidence-bound generation and checking for biomedical research text."""

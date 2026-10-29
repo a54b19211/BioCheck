@@ -1,24 +1,36 @@
-"""Offline demonstrator: python -m app.cli examples/good.json"""
-from __future__ import annotations
+"""python3 -m app.cli CASE.json --output runs/example --method bound"""
 import argparse
 import json
 from pathlib import Path
-from .core import process
+
+from .core import run, verify
+from .model import DeepSeek
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description='固定证据问答与规则核验参考原型')
-    parser.add_argument('input', help='JSON 固定证据包路径')
-    parser.add_argument('--output', help='保存结果路径（可选）')
-    parser.add_argument('--generate', action='store_true', help='忽略输入答案，按模板生成回答')
+def main():
+    parser = argparse.ArgumentParser(description="BioCheck：真实材料上的生成、核验与有限修订")
+    parser.add_argument("input", help="question/evidence组成的JSON")
+    parser.add_argument("--output", required=True, help="本次输出目录")
+    parser.add_argument("--method", choices=["direct", "plain", "bound"], default="bound")
+    parser.add_argument("--check", help="仅核验这份UTF-8文本")
+    parser.add_argument("--no-repair", action="store_true")
+    parser.add_argument("--model")
+    parser.add_argument("--max-calls", type=int)
     args = parser.parse_args()
-    data = json.loads(Path(args.input).read_text(encoding='utf-8'))
-    result = process(data, use_supplied_answer=not args.generate)
-    output = json.dumps(result, ensure_ascii=False, indent=2)
-    print(output)
-    if args.output:
-        Path(args.output).write_text(output, encoding='utf-8')
+    output = Path(args.output)
+    if (output / "result.json").exists() or (output / "calls").exists():
+        parser.error("输出目录已有运行记录，请选新目录")
+    output.mkdir(parents=True, exist_ok=True)
+    packet = json.loads(Path(args.input).read_text())
+    model = DeepSeek(output / "calls", model=args.model, max_calls=args.max_calls)
+    result = (verify(packet, Path(args.check).read_text(), model) if args.check
+              else run(packet, model, args.method, repair=not args.no_repair))
+    (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))
+    text = result.get("final_text", result.get("draft", ""))
+    (output / "answer.txt").write_text(text)
+    print(json.dumps({"status": result["status"], "calls": len(model.calls),
+                      "output": str(output)}, ensure_ascii=False))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
