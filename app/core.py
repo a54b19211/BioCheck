@@ -296,6 +296,8 @@ def audit_support(packet, review, call, *, targets=None):
                 for passage in passages:
                     source = lookup[passage["evidence_id"]]
                     passage["source_identity"] = {k: source[k] for k in ("title", "record_id") if k in source}
+                    if source.get("text_basis") in {"prior_report", "retrieval_log"}:
+                        passage["source_identity"]["text_basis"] = source["text_basis"]
                 items.append(dict(identity, span=claim["span"], span_start=start, span_end=end,
                                   context=unit["text"], evidence=passages))
             except ValueError as error:
@@ -345,11 +347,91 @@ def audit_support(packet, review, call, *, targets=None):
     return result
 
 
-def revise(packet, review, call):
+
+def quality_feedback(review, audit=None, *, source_errors=()):
+    """Route existing findings; choosing queries, stopping and version storage stay with Radar."""
+    review = review or {}
+    gaps, waiting, candidates, blocked = [], [], [], set()
+    result = {"machine_status": review.get("status"), "evidence_gaps": gaps,
+              "repair_units": [], "review_required": waiting,
+              "audit_status": audit.get("status") if audit is not None else "not_requested"}
+    if review.get("status") not in {"PASS", "REVIEW", "FAIL"} or not review.get("units"):
+        waiting.append({"kind": "verification_unavailable", "reason": "没有完整成稿核验回执"})
+    waiting.extend({"kind": "source_failure", "detail": x} for x in source_errors)
+    errors = review.get("verification_errors", [])
+    waiting.extend({"kind": "verification_error", "detail": x} for x in errors)
+    invalid_units = {x.get("unit_id") for x in errors}
+    units = {u["unit_id"]: u for u in review.get("units", [])}
+
+    def gap(kind, unit_id, reason, **extra):
+        gaps.append(dict(kind=kind, unit_id=unit_id, reason=reason, **extra))
+        blocked.add(unit_id)
+
+    if audit is not None:
+        waiting.extend({"kind": "audit_error", "detail": x} for x in audit.get("verification_errors", []))
+        if audit.get("status") not in {"PASS", "REVIEW", "NOT_RUN"}:
+            waiting.append({"kind": "audit_error", "reason": "片段复核没有有效状态"})
+        for check in audit.get("checks", []):
+            if (audit.get("verification_errors") or audit.get("status") not in {"PASS", "REVIEW"}
+                    or check.get("unit_id") in invalid_units or None in invalid_units):
+                continue
+            unit = units.get(check.get("unit_id"))
+            index = check.get("claim_index")
+            if unit is None or type(index) is not int or not 0 <= index < len(unit.get("claims", [])):
+                waiting.append({"kind": "audit_mismatch", "reason": "片段复核不属于本稿陈述"})
+                continue
+            claim = unit["claims"][index]
+            fields = ("evidence_id", "version", "segment_id", "start", "end", "quote")
+            same_support = ([{k: e.get(k) for k in fields} for e in claim.get("evidence", [])]
+                            == [{k: e.get(k) for k in fields} for e in check.get("evidence", [])])
+            if check.get("span") != claim["span"] or check.get("context") != unit["text"] or not same_support:
+                waiting.append({"kind": "audit_mismatch", "reason": "片段复核的正文或选段已经变化"})
+            elif audit.get("verification_errors"):
+                continue
+            elif check.get("verdict") == "not_supported":
+                gap("evidence_selection", unit["unit_id"], check.get("reason", ""),
+                    claim_index=index, span=claim["span"], evidence=check.get("evidence", []),
+                    action="reselect_or_retrieve")
+            elif check.get("verdict") != "supported":
+                waiting.append({"kind": "audit_uncertain", "unit_id": unit["unit_id"],
+                                "claim_index": index, "reason": check.get("reason", "")})
+
+    for unit_id, unit in units.items():
+        if unit_id in invalid_units or None in invalid_units:
+            continue
+        claims = unit.get("claims", [])
+        for index, claim in enumerate(claims):
+            if claim.get("verdict") == "insufficient":
+                gap("missing_support", unit_id, claim.get("reason", ""),
+                    claim_index=index, span=claim["span"], action="check_existing_then_retrieve")
+            elif (claim.get("verdict") == "supported" and claim.get("kind") == "source_absence"
+                  and claim.get("missing_information")):
+                gap("material_absence", unit_id, claim["missing_information"],
+                    claim_index=index, span=claim["span"], action="assess_need_for_retrieval")
+            elif claim.get("verdict") == "contradicted" and claim.get("evidence"):
+                candidates.append(unit_id)
+        for issue in unit.get("issues", []):
+            if "REF" in issue.get("labels", []) and issue.get("evidence"):
+                candidates.append(unit_id)
+        if unit_id in review.get("problem_units", []) and unit_id not in blocked and unit_id not in candidates:
+            waiting.append({"kind": "unresolved_check", "unit_id": unit_id,
+                            "reason": unit.get("reason", "缺少可安全修订的原文依据")})
+    coverage = review.get("coverage", {})
+    if coverage.get("verdict") in {"incomplete", "uncertain"}:
+        gap("coverage", None, coverage.get("reason", ""), action="check_scope_and_existing_evidence")
+    # A whole paragraph edit can alter a correct-but-unproven statement in that paragraph.
+    if not waiting:
+        result["repair_units"] = list(dict.fromkeys(u for u in candidates if u not in blocked))
+    return result
+
+
+def revise(packet, review, call, *, audit=None, source_errors=()):
     units = review["units"]
-    editable = [u for u in units if u["unit_id"] in review["problem_units"]]
+    feedback = quality_feedback(review, audit, source_errors=source_errors)
+    editable = [u for u in units if u["unit_id"] in feedback["repair_units"]]
     if not editable:
-        return {"draft": review["draft"], "changed_units": [], "reason": "无可定位修改项；覆盖缺口交回调查方"}
+        return {"draft": review["draft"], "changed_units": [], "feedback": feedback,
+                "reason": "没有可安全自动修订的段落；补查与待核问题见feedback"}
     request = dict(packet_input(packet), draft=review["draft"], editable_units=editable)
     result = call("revise", REVISE, model_input(request, numbered=False))
     replacements = result.get("replacements", [])
@@ -372,9 +454,11 @@ def run(packet, call, method="bound", *, repair=True):
     generated = generate(packet, call, method)
     review = verify(packet, generated["draft"], call)
     result = {"generated": generated, "initial_review": review, "final_review": review, "revision": None}
-    if repair and review["problem_units"] and not review["verification_errors"]:
+    result["initial_feedback"] = quality_feedback(review)
+    if repair and result["initial_feedback"]["repair_units"]:
         revision = revise(packet, review, call)
         result.update(revision=revision, final_review=verify(packet, revision["draft"], call))
+    result["feedback"] = quality_feedback(result["final_review"])
     result["final_text"] = result["final_review"]["draft"]
     result["status"] = result["final_review"]["status"]
     return result

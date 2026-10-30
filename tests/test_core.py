@@ -198,8 +198,11 @@ class QualityTests(unittest.TestCase):
     def test_revision_preserves_other_paragraph_verbatim(self):
         draft = "原句[E1]。\n\n正确句 [E2]。 \n"
         units = split_units(draft)
-        review = {"draft": draft, "units": [dict(u, unit_id=u["id"]) for u in units],
-                  "problem_units": ["U1"]}
+        replies = [response(units[0]["text"], "contradicted")["reviews"][0],
+                   dict(response(units[1]["text"])["reviews"][0], unit_id="U2")]
+        replies[1]["claims"][0]["evidence"] = [{"evidence_id": "E2", "segment_id": "S1"}]
+        review = verify(PACKET, draft, lambda *args: {
+            "reviews": replies, "coverage": {"verdict": "complete", "reason": "测试覆盖"}})
         fixed = revise(PACKET, review, lambda *args: {
             "replacements": [{"unit_id": "U1", "text": "修订句[E1]。"}]})
         self.assertEqual(fixed["draft"], "修订句[E1]。\n\n正确句 [E2]。 \n")
@@ -207,7 +210,7 @@ class QualityTests(unittest.TestCase):
     def test_revision_rejects_unrequested_paragraph(self):
         draft = "原句[E1]。"
         u = split_units(draft)[0]
-        review = {"draft": draft, "units": [dict(u, unit_id="U1")], "problem_units": ["U1"]}
+        review = verify(PACKET, draft, lambda *args: response(draft, "contradicted"))
         with self.assertRaises(ValueError):
             revise(PACKET, review, lambda *args: {"replacements": [{"unit_id": "U2", "text": "别的"}]})
 
