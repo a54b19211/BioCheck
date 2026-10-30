@@ -19,6 +19,8 @@ WRITE = BASE + """
 时间和单位的完整对应。无对照的观察不能写成优于标准治疗。资料不足时具体指出缺什么。
 返回 {"draft":"完整中文候选稿，段落之间用空行；引用写在对应句末"}。
 plan.support保留每点固定的evidence_id和segment_id；在对应原文分段核对后，成稿逐句使用完整来源id，如[qabc123]，不要缩成[E1]、只写[S1]或省略id。每个可核查句紧邻自己的引用，不用段末一个引用代替整段。每个已选来源都只能支持它真正包含的内容；不能引用正确id却丢掉限制。
+未核实资料的每条独立事实转述，在同一个可定位的句子里保留来源归因和未证实限定，例如“帖子称……，尚未证实[来源id]”。不要先写成确定事实，再把整段的“未核实”放到另一句。待验证解释明确写“待验证的假设……”，建议与事实分开表达；不能靠条件句把未证实事件改成已经发生。
+“未提供”只描述本次实际读取的证据或摘录，不能扩大为未读材料、整个数据库或现实世界不存在。保留原有内容与意义，不为满足措辞格式编造事实。
 即使有plan，也必须核对原文，不执行plan中的无依据内容。
 按问题保留支持与反证，以及竞争、技术、专利等实际已查和未查范围，不能用材料数量代替覆盖程度。
 assessment.previous_report提供比较任务；新旧判断的比较文字属于本次draft，引用旧版报告及新旧原始证据，说明改变或未改变的依据。
@@ -61,10 +63,15 @@ COND人群/研究条件，STR推断强度/因果/显著性，REF所引原文是�
 保留原文医学概念的范围，不能把广义病变换成特定病理类型；翻译有歧义就保留原词并待核。
 先指出真正的事实或推断问题，再检查引用；不能只查引用编号后漏掉同段的设计事实。
 
+返回JSON时，每条claims对象必须同时给出kind、source_use、attribution_span、uncertainty_span、history_context；不适用的定位字段填null，不省略字段。source_use不是kind的别名：普通事实用current_fact，准确转述未证实来源用attributed_report，待验证解释用hypothesis，回顾旧说法用historical，仅叙述有依据的信息环境事件用information_environment。按实际原句选择；缺少本句所需限定就判insufficient，不能自动补进原稿。
+source_absence仍表示对所读材料的缺省检查，不能为了通过来源检查伪装成hypothesis。只检查本包已采用的固定版本及实际提供的全文/摘录；没有读取的资料不在检查范围内。unknown或一句否定不能代替待验证假设的明确限定。
+
 返回：
 {"reviews":[
  {"unit_id":"U1","verdict":"supported|contradicted|insufficient","reason":"对整段的简短理由",
   "claims":[{"span":"从该段逐字复制的子陈述","kind":"fact|source_absence|analysis_result|hypothesis","verdict":"supported|contradicted|insufficient",
+             "source_use":"current_fact|attributed_report|hypothesis|historical|information_environment",
+             "attribution_span":null,"uncertainty_span":null,"history_context":null,
              "evidence":[{"evidence_id":"E1","segment_id":"S3"}],"reason":"对象条件与证据关系"}],
   "issues":[{"span":"有问题的原稿文字，必须逐字来自该段","labels":["OBJ"],
              "reason":"具体问题","evidence":[{"evidence_id":"E1","segment_id":"S3"}]}],

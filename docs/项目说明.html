@@ -80,6 +80,10 @@ python3 -m unittest discover -s tests -v
 python3 -m evaluation.replay_research_loop --output /tmp/biocheck-my-loop-example</pre></div>
 <p>selected_support_gap 重放真实错选：保留原 PASS，只给 U1/claim0 返回重选或补取，claim2 的 S13 支持仍有效。report_versions 使用已保存公开登记节选演示两版生成、旧版保留和比较段核验；文字和回执为人工编写的离线协议样例，不冒充新模型输出、历史回测或方法成绩。每次指定新输出目录，避免覆盖结果。</p>
 <p>本轮新增 API 调用为0。反馈只整理已经发现的问题，不保证全部事实都被拆出、不证明查全；原有选段和医学术语范围漏检继续保留。语义准确率与专业结论仍需独立评价。</p>
+<h3 id="social-contract-review">真实社媒调用暴露的提示合同问题</h3>
+<p>10月31日核对一轮实际运行：采用4份固定摘录，报告5段、核验21条声明。模型原始回执全部写supported，但16条没有source_use，另外3条虽标hypothesis，其uncertainty_span不符合当前限定规则，最终仍为REVIEW。这19处降级不能解释成19处“把传言写成事实”；里面包括材料缺省和“不能确认”的范围限制。</p>
+<p>实际宿主提示、输入、原始输出与BioCheck保存的交换完全一致，未发生字段丢失。问题之一在方法自身：提示末尾要求source_use及定位字段，主JSON示例却没有列出。现在补齐主示例，并要求写作时在同一可定位句中保留来源归因与未证实限定。程序的词表、范围和来源支持规则保持不变，不替旧回执补字段，也不改旧报告状态。</p>
+<p>旧固定输入与原始回执再次离线执行，结果仍完全一致。新增正确与缺字段对照使用人工回执，证明协议传递和待核规则，没有证明新提示已改善模型表现。真实R2由雷达统一运行。材料缺省只能覆盖实际读取的4份摘录，不能推广到未读资料或全库；source_absence及少见限制性措辞仍可能被保守转为待核，不能用否定词或改成hypothesis绕过。</p>
 <h3 id="source-changes">这次要解决的三个问题</h3>
 <p>10月30日的三场景审查发现：A/B 的模型说“有依据”，回执却缺来源编号或具体位置；C 仍引用了已被更正的旧订单。这里分别处理补读、来源更正和稿件修订，不把格式问题当成医学结论错误。</p>
 <ol><li><b>让雷达知道补读什么。</b>核验回执的 read_requests 和质量反馈 evidence_gaps 里，给出 record_id、version、needed_for；能确定时带 requested_segment_id。这个片段编号只属于 BioCheck 对固定原文的分段，雷达应先读取该版本全文，再重核。定位未知时明确 unknown，不猜位置，也不因缺 evidence_id 自动把 S1 配到某篇材料。verification_errors 继续阻止自动改稿，但不会抹去这些补读目标。</li>
