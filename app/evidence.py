@@ -5,6 +5,13 @@ import json
 from .source_context import SOURCE_FIELDS
 
 
+class ReferenceLocationError(ValueError):
+    """A malformed reference, distinct from source/version or input failures."""
+    def __init__(self, code, message, field, provided=None):
+        super().__init__(message)
+        self.code, self.field, self.provided = code, field, provided
+
+
 def segments(text, size=1200):
     result = []
     start = 0
@@ -34,26 +41,31 @@ def model_input(packet, *, numbered=True):
 
 
 def locate_support(items, evidence, *, allow_scope=False):
+    if not isinstance(items, list):
+        raise ReferenceLocationError("source_reference_structure", "核验依据须为列表", "support")
     result = []
     for item in items:
+        if not isinstance(item, dict):
+            raise ReferenceLocationError("source_reference_structure", "核验依据须为对象", "support")
         key = item.get("evidence_id")
         if not isinstance(key, str):
-            raise ValueError("核验依据缺少evidence_id")
+            raise ReferenceLocationError("source_reference_structure", "核验依据缺少evidence_id", "evidence_id")
         source = evidence.get(key)
         if source is None:
-            raise ValueError("核验结果引用了未知证据")
+            raise ReferenceLocationError("evidence_id_unknown", "核验结果引用了未知证据", "evidence_id", key)
         if "version" in item and item["version"] != source["version"]:
             raise ValueError("核验依据与固定原文版本不一致")
         if item.get("scope") == "whole_source":
             if not allow_scope:
-                raise ValueError("本步骤需要具体原文片段")
+                raise ReferenceLocationError("source_segment_required", "本步骤需要具体原文片段", "scope", "whole_source")
             result.append({"evidence_id": key, "version": source["version"],
                            "scope": "whole_source", "start": 0, "end": len(source["text"])})
             continue
         parts = {s["id"]: s for s in segments(source["text"])}
-        part = parts.get(item.get("segment_id"))
+        segment = item.get("segment_id")
+        part = parts.get(segment) if isinstance(segment, str) else None
         if part is None:
-            raise ValueError(f"{key}的原文片段编号无效")
+            raise ReferenceLocationError("source_segment_invalid", f"{key}的原文片段编号无效", "segment_id", segment)
         result.append({"evidence_id": key, "version": source["version"],
                        "segment_id": part["id"], "quote": part["text"],
                        "start": part["start"], "end": part["end"]})
@@ -120,20 +132,20 @@ def analysis_results(packet):
 def locate_analysis(items, results):
     """Resolve a JSON pointer into a provided output, without recomputing it."""
     if not isinstance(items, list):
-        raise ValueError("analysis_refs须为列表")
+        raise ReferenceLocationError("analysis_reference_structure", "analysis_refs须为列表", "analysis_refs")
     located = []
     for item in items:
         if not isinstance(item, dict):
-            raise ValueError("分析引用须为对象")
+            raise ReferenceLocationError("analysis_reference_structure", "分析引用须为对象", "analysis_refs")
         key = item.get("analysis_id")
         if not isinstance(key, str):
-            raise ValueError("分析引用缺少analysis_id")
+            raise ReferenceLocationError("analysis_reference_structure", "分析引用缺少analysis_id", "analysis_id")
         result = results.get(key)
         if result is None:
-            raise ValueError("核验引用了未知分析结果")
+            raise ReferenceLocationError("analysis_id_unknown", "核验引用了未知分析结果", "analysis_id", key)
         path = item.get("output_path")
         if not isinstance(path, str) or (path and not path.startswith("/")):
-            raise ValueError("分析引用须给出output_path JSON pointer")
+            raise ReferenceLocationError("analysis_path_invalid", "分析引用须给出output_path JSON pointer", "output_path", path)
         value = result["output"]
         requested_path = path
         # Models sometimes give a pointer rooted at the analysis record rather than its output.
@@ -155,7 +167,8 @@ def locate_analysis(items, results):
                 else:
                     raise ValueError("路径未指向分析输出")
         except (KeyError, IndexError, ValueError) as error:
-            raise ValueError("分析输出位置无效：" + key + path) from error
+            raise ReferenceLocationError("analysis_path_invalid", "分析输出位置无效：" + key + path,
+                                         "output_path", requested_path) from error
         located.append({"analysis_id": key, "output_path": path, "value": value,
                         **({"requested_output_path": requested_path} if path != requested_path else {}),
                         **{k: result[k] for k in ("dataset_ref", "method_version", "parameters",

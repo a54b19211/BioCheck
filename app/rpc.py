@@ -10,10 +10,10 @@ SCHEMA_VERSION = "bioradar.professional.v1"
 PROVIDER = "biocheck"
 MAX_MODEL_CALLS = 8
 OPERATIONS = {
-    "plan": ({"packet"}, {"method"}),
+    "plan": ({"packet"}, {"method", "max_plan_retries"}),
     "write": ({"packet"}, {"method", "plan"}),
-    "generate": ({"packet"}, {"method"}),
-    "verify": ({"packet", "draft"}, set()),
+    "generate": ({"packet"}, {"method", "max_plan_retries"}),
+    "verify": ({"packet", "draft"}, {"max_verify_retries"}),
     "audit_support": ({"packet", "review"}, {"targets"}),
     "quality_feedback": ({"review"}, {"audit", "source_errors"}),
     "revise": ({"packet", "review"}, {"audit", "source_errors"}),
@@ -41,7 +41,7 @@ def digest(value):
 def method_version():
     # Hash executable methods and this transport, never environment files or model credentials.
     folder = Path(__file__).parent
-    names = ("core.py", "evidence.py", "prompts.py", "analysis.py", "source_context.py", "rpc.py", "service.py")
+    names = ("core.py", "contracts.py", "evidence.py", "prompts.py", "analysis.py", "source_context.py", "rpc.py", "service.py")
     code = [(name, (folder / name).read_text()) for name in names if (folder / name).is_file()]
     return digest(code)
 
@@ -60,7 +60,12 @@ def capabilities():
         "max_model_calls_per_operation": MAX_MODEL_CALLS,
         "model_execution": "host_only",
         "features": ["versioned_read_requests", "source_updates", "unconfirmed_source_scope",
-                     "full_draft_audit_binding", "revision_requires_verification"],
+                     "full_draft_audit_binding", "revision_requires_verification", "bounded_plan_repair", "bounded_verify_contract_repair"],
+        "plan_retry_policy": {"argument": "max_plan_retries", "default": 0, "maximum": 1,
+                              "stages": ["replan_plain", "replan_bound"],
+                              "diagnostic_limit": core.PLAN_DIAGNOSTIC_LIMIT},
+        "verify_retry_policy": {"argument": "max_verify_retries", "default": 0, "maximum": 1,
+                                "stages": ["verify_repair"], "diagnostic_limit": 8},
     }
 
 
@@ -86,6 +91,9 @@ def _validate(request):
         raise ProtocolError("invalid_arguments", "audit必须为对象或null")
     if "source_errors" in arguments and not isinstance(arguments["source_errors"], list):
         raise ProtocolError("invalid_arguments", "source_errors必须为数组")
+    for name in ("max_plan_retries", "max_verify_retries"):
+        if name in arguments and (type(arguments[name]) is not int or arguments[name] not in (0, 1)):
+            raise ProtocolError("invalid_arguments", name + "只允许0或1")
     receipts = request.get("model_receipts", [])
     if not isinstance(receipts, list) or len(receipts) > MAX_MODEL_CALLS:
         raise ProtocolError("invalid_receipts", "model_receipts须为有界数组")
@@ -159,6 +167,22 @@ def execute(request):
         return dict(reply, status="completed", result=result)
     except ModelRequired as needed:
         return dict(reply, status="model_required", model_call=needed.model_call)
+    except core.VerificationContractError as error:
+        attempted = error.repair_attempted
+        return dict(reply, status="failed",
+                    error_code="verification_repair_exhausted" if attempted else "verification_contract_invalid",
+                    message="核验回执结构不合要求，不能据此宣布成稿通过",
+                    diagnostics=error.diagnostics, diagnostics_omitted=error.omitted,
+                    verify_retry={"eligible": not attempted and error.retry_eligible,
+                                  "attempted": attempted, "limit": 1})
+    except core.PlanReferenceError as error:
+        attempted = error.repair_attempted
+        eligible = operation in {"plan", "generate"} and not attempted
+        return dict(reply, status="failed",
+                    error_code="plan_repair_exhausted" if attempted else "plan_reference_invalid",
+                    message="计划引用校验失败，未进入后续写作；原回执保持不变",
+                    diagnostics=error.diagnostics, diagnostics_omitted=error.omitted,
+                    plan_retry={"eligible": eligible, "attempted": attempted, "limit": 1})
     except ProtocolError as error:
         return dict(reply, status="failed", error_code=error.code, message=error.message)
     except (ValueError, TypeError, KeyError, IndexError, AttributeError, RecursionError, OverflowError):

@@ -130,3 +130,19 @@ supported必须在support摘录真正支持事实的逐字原文；不得选输�
 格式：{"checks":[{"unit_id":"U1","claim_index":0,"verdict":"supported|not_supported|uncertain",
 "reason":"说明已支持和缺少的具体要点","support":[{"evidence_id":"E1","segment_id":"S1","quote":"逐字原文"}]}]}
 """
+
+
+REPLAN = """
+这是本操作唯一一次重规划机会。plan_repair.failed_plan是上次原始回执，diagnostics只指出引用结构或位置错误，不提供替代事实或自动修正值。
+重新核对本次固定材料中的实际id、原文片段和分析output层级，返回完整计划，格式与首次规划相同。保留必要问题覆盖、来源限制和反证；不能删除困难要点来制造成功，也不能把分析结果改成原文事实。
+JSON pointer相对于对应analysis_results条目的output根，逐层使用真实键名和数组下标，不按同名叶子字段猜层级。原文版本和绑定条件不变，完整check_plan仍会执行；不得修改来源内容或借用未提供资料。
+本步骤只纠正计划的可定位引用，不等于正文或语义已通过。无法确定时如实保留缺口，不能编造合法引用。
+"""
+
+
+VERIFY_REPAIR = """
+这是核验输出唯一一次结构纠错，不是重新评出更高分。verify_repair.failed_output是原始核验，diagnostics列出明确缺失或类型/枚举非法的位置；诊断最多列8项，若diagnostics_omitted大于0，仍须检查全部必需字段。
+基于同一完整draft、units、固定packet与来源版本，返回完整核验JSON。只补齐或纠正报错的结构字段；原来有效的声明文本、verdict、理由、来源引用、来源用途和范围限定全部保持，不重排段落或声明。
+不能用段落supported代填子声明；缺失的子声明结论仍须逐条核对原正文和原证据。不得把insufficient/contradicted改成supported，不补写原稿没有的限定，不更换证据来制造通过。
+JSON字段排序不影响结果，但改动未报错的已有内容将被拒绝。纠错后仍执行完整原验证器；正确结构不等于事实或语义正确。
+"""

@@ -4,9 +4,12 @@ import json
 from copy import deepcopy
 from decimal import Decimal
 
-from .prompts import WRITE, PLAN, BOUND_PLAN, VERIFY, REVISE, SUPPORT_AUDIT
+from .prompts import WRITE, PLAN, BOUND_PLAN, VERIFY, REVISE, SUPPORT_AUDIT, REPLAN, VERIFY_REPAIR
 from .evidence import model_input, locate_support, reference_target, analysis_results, locate_analysis, analysis_signature
 from .source_context import evidence_catalog, source_updates, read_requests, check_source_use
+from .contracts import (check_plan, PlanReferenceError, PLAN_DIAGNOSTIC_LIMIT,
+                        check_verification_contract, VerificationContractError,
+                        same_outside_errors)
 
 CITATION = re.compile(r"\[([A-Za-z][A-Za-z0-9_.:-]*)\]")
 NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")
@@ -39,43 +42,31 @@ def packet_input(packet):
     return dict({k: packet[k] for k in ("question", "assessment") if k in packet}, evidence=evidence)
 
 
-def check_plan(source, planned, method):
-    if method not in {"direct", "plain", "bound"}:
-        raise ValueError("method须为direct/plain/bound")
-    if method == "direct":
-        if planned is not None:
-            raise ValueError("direct不使用计划")
-        return
-    if not isinstance(planned, dict) or not isinstance(planned.get("points"), list) or not planned["points"]:
-        raise ValueError("生成计划为空")
-    lookup = {e["id"]: e for e in source["evidence"]}
-    analyses = analysis_results(source)
-    for point in planned["points"]:
-        if not isinstance(point, dict):
-            raise ValueError("计划要点须为对象")
-        refs, analysis_ids = point.get("evidence_ids", []), point.get("analysis_ids", [])
-        if (not isinstance(refs, list) or not isinstance(analysis_ids, list) or not (refs or analysis_ids)
-                or any(key not in lookup for key in refs) or any(key not in analyses for key in analysis_ids)):
-            raise ValueError("计划缺少有效依据")
-        if method == "bound":
-            supports = locate_support(point.get("support", []), lookup)
-            computed = locate_analysis(point.get("analysis_refs", []), analyses)
-            if (set(refs) != {x["evidence_id"] for x in supports}
-                    or set(analysis_ids) != {x["analysis_id"] for x in computed}):
-                raise ValueError("绑定计划缺少对应原文或分析输出")
-            if not isinstance(point.get("binding"), dict):
-                raise ValueError("绑定计划缺少binding")
-
-
-def plan(packet, call, method="bound"):
-    """Plan one writing step using the injected model callback."""
+def plan(packet, call, method="bound", *, max_plan_retries=0):
+    """Optionally request one new plan; the host owns sending, payment and replay."""
+    if type(max_plan_retries) is not int or max_plan_retries not in (0, 1):
+        raise ValueError("max_plan_retries只允许0或1")
     source = packet_input(packet)
     if method not in {"direct", "plain", "bound"}:
         raise ValueError("method须为direct/plain/bound")
     if method == "direct":
         return None
-    planned = call("plan_" + method, BOUND_PLAN if method == "bound" else PLAN, model_input(source))
-    check_plan(source, planned, method)
+    instruction = BOUND_PLAN if method == "bound" else PLAN
+    planned = call("plan_" + method, instruction, model_input(source))
+    try:
+        check_plan(source, planned, method)
+    except PlanReferenceError as error:
+        if not max_plan_retries:
+            raise
+        repair = {"attempt": 1, "max_attempts": 1, "failed_plan": deepcopy(planned),
+                  "diagnostics": error.diagnostics, "diagnostics_omitted": error.omitted}
+        planned = call("replan_" + method, instruction + REPLAN,
+                       model_input(dict(source, plan_repair=repair)))
+        try:
+            check_plan(source, planned, method)
+        except PlanReferenceError as second:
+            second.repair_attempted = 1
+            raise
     return planned
 
 
@@ -93,8 +84,8 @@ def write(packet, call, method="bound", *, plan=None):
     return {"method": method, "plan": plan, "draft": draft}
 
 
-def generate(packet, call, method="bound"):
-    planned = plan(packet, call, method)
+def generate(packet, call, method="bound", *, max_plan_retries=0):
+    planned = plan(packet, call, method, max_plan_retries=max_plan_retries)
     return write(packet, call, method, plan=planned)
 
 
@@ -167,7 +158,9 @@ def claim_citations(text, start, end):
     return set(sentence_refs or CITATION.findall(text))
 
 
-def verify(packet, draft, call):
+def verify(packet, draft, call, *, max_verify_retries=0):
+    if type(max_verify_retries) is not int or max_verify_retries not in (0, 1):
+        raise ValueError("max_verify_retries只允许0或1")
     source = packet_input(packet)
     if not isinstance(draft, str) or not draft.strip():
         raise ValueError("待核稿不能为空")
@@ -178,7 +171,24 @@ def verify(packet, draft, call):
     model_units = [dict(u, numeric_hints=numeric_hints(u, lookup, analyses),
                         citations=[{"reference": m.group(1), "start": m.start(), "end": m.end()}
                                    for m in CITATION.finditer(u["text"])]) for u in units]
-    response = call("verify", VERIFY, model_input(dict(source, draft=draft, units=model_units)))
+    payload = model_input(dict(source, draft=draft, units=model_units))
+    response = call("verify", VERIFY, payload)
+    try:
+        check_verification_contract(response, model_units)
+    except VerificationContractError as error:
+        if not max_verify_retries or not error.retry_eligible:
+            raise
+        original = deepcopy(response)
+        repair = {"attempt": 1, "max_attempts": 1, "failed_output": original,
+                  "diagnostics": error.diagnostics, "diagnostics_omitted": error.omitted}
+        response = call("verify_repair", VERIFY + VERIFY_REPAIR, dict(payload, verify_repair=repair))
+        try:
+            check_verification_contract(response, model_units)
+        except VerificationContractError as second:
+            second.repair_attempted = 1
+            raise
+        if not same_outside_errors(original, response, error.invalid_paths):
+            raise ValueError("结构纠错改动了未报错的核验内容，不能采用")
     reviews = response.get("reviews", [])
     if len(reviews) != len(units) or {r.get("unit_id") for r in reviews} != {u["id"] for u in units}:
         raise ValueError("核验结果遗漏或重复了原稿段落")

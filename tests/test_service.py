@@ -200,6 +200,48 @@ class HTTPTests(unittest.TestCase):
         features = self.http("/v1/capabilities")[1]["features"]
         self.assertIn("source_updates", features)
 
+    def test_plan_repair_budget_pause_restart_and_exact_receipt_resume(self):
+        from test_plan_retry import bad_plan
+        body = request("generate", {"packet": PACKET, "max_plan_retries": 1}, operation_id="http-plan-repair")
+        initial = self.step(body)
+        body.update(provider_version=initial["provider_version"], model_receipts=[receipt(initial, bad_plan())])
+        repair = self.step(body)
+        self.assertEqual(repair["model_call"]["stage"], "replan_bound")
+        # A host without budget keeps this request pending and sends no model call.
+        self.assertEqual(self.step(body), repair)
+        self.stop_server()
+        self.start_server()
+        self.assertEqual(self.step(body), repair)
+        body["model_receipts"].append(receipt(repair, PLAN))
+        write = self.step(body)
+        self.assertEqual(write["model_call"]["stage"], "write_bound")
+        self.assertEqual(self.step(body), write)
+        body["model_receipts"].append(receipt(write, {"draft": DRAFT}))
+        result = self.step(body)
+        self.assertEqual(result["result"]["draft"], DRAFT)
+        self.assertEqual(self.step(body), result)
+
+    def test_verify_repair_preserves_original_receipt_across_restart(self):
+        from test_verify_retry import incomplete
+        body = request("verify", {"packet": PACKET, "draft": DRAFT, "max_verify_retries": 1},
+                       operation_id="http-verify-repair")
+        first = self.step(body)
+        body.update(provider_version=first["provider_version"], model_receipts=[receipt(first, incomplete())])
+        repair = self.step(body)
+        self.assertEqual(repair["model_call"]["stage"], "verify_repair")
+        self.assertEqual(self.step(body), repair)
+        self.stop_server()
+        self.start_server()
+        self.assertEqual(self.step(body), repair)
+        unknown = copy.deepcopy(body)
+        unknown["model_receipts"].append(dict(receipt(repair, VERIFY), status="unknown"))
+        self.assertEqual(self.step(unknown)["error_code"], "invalid_receipt")
+        body["model_receipts"].append(receipt(repair, VERIFY))
+        result = self.step(body)
+        self.assertEqual(result["result"]["status"], "PASS")
+        self.assertEqual(body["model_receipts"][0]["output"], incomplete())
+        self.assertEqual(self.step(body), result)
+
     def test_analysis_only_json_result_matches_local_with_fixed_calculation_basis(self):
         basis = {"analysis_unit": "project", "unit": "项目", "period": "2026-10-30截点",
                  "population": "本窗口项目", "denominator": 4}
