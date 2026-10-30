@@ -1,5 +1,8 @@
 """Locate fixed source passages and supplied calculation outputs; perform no mining."""
 import re
+import hashlib
+import json
+from .source_context import SOURCE_FIELDS
 
 
 def segments(text, size=1200):
@@ -21,7 +24,7 @@ def segments(text, size=1200):
 def model_input(packet, *, numbered=True):
     evidence = []
     for source in packet["evidence"]:
-        item = {k: source[k] for k in ("id", "version", "title", "record_id", "text_basis") if k in source}
+        item = {k: source[k] for k in SOURCE_FIELDS if k in source}
         if numbered:
             item["segments"] = [{"id": s["id"], "text": s["text"]} for s in segments(source["text"])]
         else:
@@ -159,3 +162,10 @@ def locate_analysis(items, results):
                                                   "input_refs", "limitations")},
                         "calculation_basis": result.get("calculation_basis", {})})
     return located
+
+
+def analysis_signature(packet):
+    """A saved review cannot authorize edits after its supplied calculations change."""
+    encoded = json.dumps(analysis_results(packet), ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":"), allow_nan=False).encode()
+    return hashlib.sha256(encoded).hexdigest()

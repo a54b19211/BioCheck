@@ -142,7 +142,9 @@ class SupportAuditTests(unittest.TestCase):
                 audit = audit_support(self.packet, review, lambda *args: copy.deepcopy(row["raw_output"]),
                                       targets=[tuple(x) for x in row["targets"]])
                 self.assertEqual(audit.pop("raw_response"), row["raw_output"])
-                self.assertEqual(audit, row["audit"])
+                self.assertEqual({k: v for k, v in audit.items()
+                                  if k not in {"draft", "evidence_catalog", "source_updates", "analysis_signature"}}, row["audit"])
+                self.assertEqual(audit["draft"], self.review["draft"])
                 self.assertEqual(review, before)
 
 

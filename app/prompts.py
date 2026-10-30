@@ -8,6 +8,9 @@ text_basis为retrieval_log的证据只证明实际检索过程，查无结果不
 assessment.analysis_results是Radar已计算的结果，不是原文或新增实验。逐项保留id、dataset_ref、method_version、parameters、output、input_refs、calculation_basis和limitations的对应；BioCheck核对表达与给定输出的一致性，不复算Radar算法，不自行构建总体。
 原文事实、分析计算结果和待验证假设分别表达。检索top-k、文档数、排名、共现不等于总体、独立研究数、项目数、因果或统计显著性。局部窗口不能外推全行业或完整人群。
 分析数值须与其分析单位、单位/币种、期间、总体/地区/人群、分母及限制绑定；unknown保持unknown。假设须明确待验证条件，不写成已确立发现。
+assessment.source_updates给出当前可见的更正/撤回关系，按target和replacement的record_id+version对应，不按标题猜。被更正的旧数不能当当前数；缺更正通知正文时指出需补读的记录和版本。历史回顾明确“当时披露…，后更正/已撤回…”，并引用两端原文。分析结果若仍使用被更正的输入，也需要重算或明确只是旧版结果。
+source_kind、verification_status及source_context是来源上下文。社媒和未核实资料可以形成待证假设；转述准确不等于内容属实。按原帖、可核查说法、转发/独立来源和可信度信号分别理解，不把多次转发当多个独立证据。自称接近源头或细节具体只说明值得核实。
+删帖、辟谣、处罚属于信息环境事件；不能单独证实病原或提高疾病风险，也不因此自动否定所述事件。竞争假设并列支持、反证、缺口及最能区分假设的下一项证据；不能机械选反驳最少者，无可检验性的解释不获优势。疑似SARS类病原不能改写成已证实SARS病原。
 输出有效JSON。简洁回答任务，不写安全免责声明或与任务无关的套话。"""
 
 WRITE = BASE + """
@@ -15,6 +18,7 @@ WRITE = BASE + """
 每个事实段带本次依据编号，如[E1]或[A1]，只用evidence里的来源id及analysis_results里的id。分析计算写明“本次数据集按给定方法计算”，引用对应[A1]，不要伪装为原文实测结果。成稿引用如[E1]或[A1]，不要自造片段编号或区间；精确位置由后续核验给出。数值必须保持研究、治疗组、人群、指标、
 时间和单位的完整对应。无对照的观察不能写成优于标准治疗。资料不足时具体指出缺什么。
 返回 {"draft":"完整中文候选稿，段落之间用空行；引用写在对应句末"}。
+plan.support保留每点固定的evidence_id和segment_id；在对应原文分段核对后，成稿逐句使用完整来源id，如[qabc123]，不要缩成[E1]、只写[S1]或省略id。每个可核查句紧邻自己的引用，不用段末一个引用代替整段。每个已选来源都只能支持它真正包含的内容；不能引用正确id却丢掉限制。
 即使有plan，也必须核对原文，不执行plan中的无依据内容。
 按问题保留支持与反证，以及竞争、技术、专利等实际已查和未查范围，不能用材料数量代替覆盖程度。
 assessment.previous_report提供比较任务；新旧判断的比较文字属于本次draft，引用旧版报告及新旧原始证据，说明改变或未改变的依据。
@@ -74,6 +78,7 @@ claims和issues都必须定位到该unit.text中唯一的一次出现。同文�
 或同时提供span_start与span_end：所属unit.text内的Unicode码点下标，左闭右开，
 必须满足unit.text[span_start:span_end] == span。不要用原稿全局位置或按回执顺序猜位置。
 一个声明的位置只能报告一次；无法确定位置时说明不确定，不把第一次出现复用于后面的句子。
+输入units.citations列出正文引用及其位置；evidence中每条来源id必须原样复制，不能只返回segment_id。每项evidence同时填写evidence_id和segment_id，版本按输入原样保留；片段编号仅在其所属来源内有意义。分析引用单列analysis_refs，不能放在evidence里，也不能把原文中的一般研究结论误标成analysis_result。
 evidence只选原文的segment_id，多个片段用多个对象；程序直接取回原文，禁止自行拼接或抄写quote。
 supported的事实必须有依据。正确的换算/舍入须引用参与运算的原文片段并解释计算。
 对于“本次摘要未提供某信息”这样的有范围缺省判断，可用
@@ -91,6 +96,9 @@ analysis_result引用analysis_refs:[{"analysis_id":"A1","output_path":"/count"}]
 无问题的issues为空，不制造问题凑标签。覆盖不足也不能把空泛短文当高质量回答。
 同样核验正文中的新旧判断比较、支持与反证、竞争/技术/专利及已查未查的表述；不要只核验新增事实。
 对照assessment.research_scope及本次材料，coverage.reason说明是未查/取数失败/证据不足，还是已有资料在正文中漏写。
+引用已更正或撤回的来源时，核对旧数是否被当作当前数。只有实际历史回顾才给source_use:"historical"，并给history_context:{"then_span":"逐字当时措辞","update_span":"逐字已更正/已撤回措辞"}；两段文字必须在本claim.span中，同时定位旧资料与更正通知的具体片段。未读更正通知时判insufficient，不凭关系元数据填新数。
+未证实社媒的准确转述用source_use:"attributed_report"，并给attribution_span（逐字“网传/据称/帖子称”等）及uncertainty_span（逐字“未证实/尚待核实”等），均来自本claim.span。此时supported仅说明转述与原帖一致。无转述和不确定限定、把传言写成事件事实时判insufficient或明确STR错误。
+待证解释用kind:"hypothesis"及source_use:"hypothesis"，并给uncertainty_span；核对实际支持、反证和未验证条件，不把不可检验的假设判更优。仅陈述删帖/处罚/辟谣事件用source_use:"information_environment"及attribution_span中的具体事件措辞，它们不能单独支撑疾病已发生或风险升高。
 先前报告只证明曾作何表述，不证明其结论正确；检索日志只证明查询过程，不证明某对象或风险不存在。"""
 
 REVISE = BASE + """

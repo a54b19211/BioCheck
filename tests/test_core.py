@@ -162,7 +162,7 @@ class QualityTests(unittest.TestCase):
         draft = "研究A缓解率40%[E1:S999]。"
         self.assertEqual(verify(PACKET, draft, lambda *args: response(draft))["status"], "FAIL")
 
-    def test_writing_uses_original_text_without_internal_segment_ids(self):
+    def test_writing_keeps_original_segments_and_bound_plan(self):
         requests = []
         def call(stage, prompt, data):
             requests.append((stage, data))
@@ -174,9 +174,9 @@ class QualityTests(unittest.TestCase):
         result = generate(PACKET, call, "bound")
         self.assertIn("support", result["plan"]["points"][0])
         write = requests[-1][1]
-        self.assertEqual(write["evidence"][0]["text"], PACKET["evidence"][0]["text"])
-        self.assertNotIn("segments", write["evidence"][0])
-        self.assertNotIn("support", write["plan"]["points"][0])
+        self.assertEqual("".join(x["text"] for x in write["evidence"][0]["segments"]), PACKET["evidence"][0]["text"])
+        self.assertNotIn("text", write["evidence"][0])
+        self.assertEqual(write["plan"]["points"][0]["support"], result["plan"]["points"][0]["support"])
 
     def test_rephrased_claim_becomes_incomplete_check_not_author_error(self):
         ans = response(verdict="contradicted")
@@ -237,6 +237,12 @@ class QualityTests(unittest.TestCase):
                         self.assertEqual(historical["units"][0]["claims"][0]["verdict"], "contradicted")
                         historical["units"][0].update(verdict="insufficient", citation_status="invalid")
                         historical["units"][0]["claims"][0].update(verdict="supported", citation_status="invalid")
+                    for field in ("evidence_catalog", "source_updates", "read_requests", "analysis_signature"):
+                        actual.pop(field, None)
+                    for unit in actual["units"]:
+                        unit.pop("read_requests", None)
+                        for claim in unit["claims"]:
+                            claim.pop("read_requests", None)
                     self.assertEqual(actual, historical)
 
     def test_ambiguous_or_repeated_position_never_triggers_automatic_revision(self):

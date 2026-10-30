@@ -49,7 +49,7 @@ class KddCoreTests(unittest.TestCase):
         self.assertEqual([c[0] for c in calls], ["plan_bound"])
         written = write(PACKET, call, plan=selected)
         self.assertEqual([c[0] for c in calls], ["plan_bound", "write_bound"])
-        self.assertNotIn("support", calls[-1][1]["plan"]["points"][0])
+        self.assertEqual(calls[-1][1]["plan"]["points"][0]["support"], planned["points"][0]["support"])
         self.assertEqual(written, generate(PACKET, call))
         self.assertIsNone(plan(PACKET, self.no_call, "direct"))
 

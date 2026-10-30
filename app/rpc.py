@@ -41,7 +41,7 @@ def digest(value):
 def method_version():
     # Hash executable methods and this transport, never environment files or model credentials.
     folder = Path(__file__).parent
-    names = ("core.py", "evidence.py", "prompts.py", "analysis.py", "rpc.py", "service.py")
+    names = ("core.py", "evidence.py", "prompts.py", "analysis.py", "source_context.py", "rpc.py", "service.py")
     code = [(name, (folder / name).read_text()) for name in names if (folder / name).is_file()]
     return digest(code)
 
@@ -59,6 +59,8 @@ def capabilities():
         },
         "max_model_calls_per_operation": MAX_MODEL_CALLS,
         "model_execution": "host_only",
+        "features": ["versioned_read_requests", "source_updates", "unconfirmed_source_scope",
+                     "full_draft_audit_binding", "revision_requires_verification"],
     }
 
 

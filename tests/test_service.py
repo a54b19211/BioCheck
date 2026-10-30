@@ -166,6 +166,40 @@ class HTTPTests(unittest.TestCase):
         self.assertNotIn("final_review", result["result"])
         self.assertNotIn("verification", result["result"])
 
+    def test_source_correction_read_recheck_revision_uses_separate_http_receipts(self):
+        from test_source_context import PACKET as corrected_packet, answer
+        packet = copy.deepcopy(corrected_packet)
+        old = "上半年订单8000万元，共40套[qOld]。"
+        fixed = "更正后上半年订单6400万元，共32套[qUpdate]。"
+        def finish(operation, arguments, output, suffix):
+            body = request(operation, arguments, operation_id="correction-" + suffix)
+            step = self.step(body)
+            self.assertEqual(step["status"], "model_required")
+            body.update(provider_version=step["provider_version"], model_receipts=[receipt(step, output)])
+            result = self.step(body)
+            self.assertEqual(result["status"], "completed")
+            return result["result"]
+        pending = finish("verify", {"packet": packet, "draft": old}, answer(old), "initial")
+        self.assertEqual(pending["status"], "REVIEW")
+        feedback = self.step(request("quality_feedback", {"review": pending}))["result"]
+        self.assertEqual(feedback["evidence_gaps"][0]["read_requests"][0]["version"], "v2")
+        refused = self.step(request("revise", {"packet": packet, "review": pending}))["result"]
+        self.assertFalse(refused["changed_units"])
+        # After the host has read the correction, a fresh model check can identify an actual contradiction.
+        raw = answer(old, [{"evidence_id": "qUpdate", "segment_id": "S1"}], verdict="contradicted")
+        checked = finish("verify", {"packet": packet, "draft": old}, raw, "after-read")
+        revised = finish("revise", {"packet": packet, "review": checked},
+                         {"replacements": [{"unit_id": "U1", "text": fixed}]}, "revision")
+        self.assertTrue(revised["requires_verification"])
+        self.assertNotIn("status", revised)
+        final = finish("verify", {"packet": packet, "draft": revised["draft"]},
+                       answer(fixed, [{"evidence_id": "qUpdate", "segment_id": "S1"}]), "final")
+        self.assertEqual(final["status"], "PASS")
+        self.assertEqual(pending["draft"], old)
+        self.assertEqual(checked["draft"], old)
+        features = self.http("/v1/capabilities")[1]["features"]
+        self.assertIn("source_updates", features)
+
     def test_analysis_only_json_result_matches_local_with_fixed_calculation_basis(self):
         basis = {"analysis_unit": "project", "unit": "项目", "period": "2026-10-30截点",
                  "population": "本窗口项目", "denominator": 4}

@@ -45,7 +45,7 @@ class FeedbackTests(unittest.TestCase):
         self.assertTrue(review["verification_errors"])
         result = revise(PACKET, review, self.no_call)
         self.assertEqual(result["draft"], draft)
-        self.assertEqual(result["feedback"]["evidence_gaps"], [])
+        self.assertTrue(result["feedback"]["evidence_gaps"][0]["read_requests"])
         self.assertTrue(result["feedback"]["review_required"])
 
     def test_anchored_false_absence_is_repairable(self):
