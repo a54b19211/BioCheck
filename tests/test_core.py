@@ -226,7 +226,18 @@ class QualityTests(unittest.TestCase):
                     for claim in unit["claims"]:
                         self.assertEqual(unit["text"][claim["span_start"]:claim["span_end"]], claim["span"])
                 if "verification_result" in case:
-                    self.assertEqual(result, case["verification_result"])
+                    # Preserve historical receipts: the new parser separates REF errors
+                    # from scientific contradiction and retains the original response.
+                    actual = copy.deepcopy(result)
+                    self.assertEqual(actual.pop("raw_response"), case["model_reply"])
+                    self.assertIn("复算及总体构建由Radar负责", actual.pop("scope"))
+                    historical = copy.deepcopy(case["verification_result"])
+                    historical.pop("scope")
+                    if case["name"] == "located_error_and_ambiguous_text":
+                        self.assertEqual(historical["units"][0]["claims"][0]["verdict"], "contradicted")
+                        historical["units"][0].update(verdict="insufficient", citation_status="invalid")
+                        historical["units"][0]["claims"][0].update(verdict="supported", citation_status="invalid")
+                    self.assertEqual(actual, historical)
 
     def test_ambiguous_or_repeated_position_never_triggers_automatic_revision(self):
         fixture = json.loads((Path(__file__).parents[1] / "evaluation/citation_location_cases.json").read_text())

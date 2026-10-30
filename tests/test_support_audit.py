@@ -141,6 +141,7 @@ class SupportAuditTests(unittest.TestCase):
                 before = copy.deepcopy(review)
                 audit = audit_support(self.packet, review, lambda *args: copy.deepcopy(row["raw_output"]),
                                       targets=[tuple(x) for x in row["targets"]])
+                self.assertEqual(audit.pop("raw_response"), row["raw_output"])
                 self.assertEqual(audit, row["audit"])
                 self.assertEqual(review, before)
 
