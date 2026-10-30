@@ -42,7 +42,7 @@ audit = audit_support(packet, review, call, targets=[("U1", 0), ("U1", 2)])
   "reason": "说明具体支持关系",
   "support": [{"evidence_id": "E1", "segment_id": "S2", "quote": "逐字原文"}]}]}</pre>
 <p>复核结果中的 <code>checks</code> 保存本次送审范围及所选原文，<code>original_status</code> 保留旧状态。新的 <code>status</code> 为 PASS、REVIEW 或 NOT_RUN，仅适用于这些送审条目。<code>not_supported</code> 表示所选片段不足以支持，不能转换成“正文事实错误”。原回执已有 verification_errors 时直接待核，不再请求模型。</p>
-<p><b>雷达适配：</b>本次没有改变 generate、verify、revise、run 的参数和默认调用次数，也没有修改雷达源码。当前雷达适配器尚无 support_audit 阶段；启用前须映射新阶段（建议名 <code>biocheck_support_audit</code>）、预留一次调用及 token、保存两份回执，并把 REVIEW 交给证据复核。人工重选后再次复核是另一次明确计费调用。原有 verification_errors 不自动修订的条件仍须保留。</p>
+<p><b>雷达适配：</b>雷达 R3 隔离实验已经通过专业 HTTP 接口执行 <code>biocheck_support_audit</code>，由宿主统一计费并保存原核验和片段复核回执；生产部署和持续运行尚未在本轮验收。人工重选后再次复核是另一次明确计费调用。REVIEW 交给证据复核，<code>verification_errors</code> 非空继续禁止自动改稿。本次反馈修复没有新增模型阶段或调用次数。</p>
 <h3 id="research-loop">取证循环怎样接 BioCheck</h3>
 <p>本轮候选在 <code>/home/zk_test/zk_projects/BioCheck-integration-20261030</code>，分支 <code>codex/radar-query-integration-20261030</code>。现役 main 保持稳定，跨项目验收后由协调侧统一合入。雷达负责任务执行、预算及报告版本；李明洋的查询规划器选择查询和停止策略；BioCheck负责最终生成质量及具体缺口，不自行检索。</p>
 <table><thead><tr><th>反馈字段</th><th>含义</th><th>怎么处理</th></tr></thead><tbody>
@@ -59,6 +59,7 @@ if feedback["repair_units"]:
 # 补查和停止交给查询规划器；报告保存交给Radar。</pre>
 <p>新增 quality_feedback 是纯函数，不调用模型。revise 新增可选关键词 audit/source_errors；旧调用方式仍可用，但纯证据不足或无效核验回执不再触发自动改稿，返回原 draft、空 changed_units 和 feedback。run 增加 initial_feedback 与 feedback；纯缺口只执行生成和核验。原机器状态和问题回执都保留。若需要先做片段复核，雷达须在 revise 前调用 audit_support，并把同份 audit 传给反馈与修订函数，不能先自动修稿再补审。source_errors放错误码、来源编号和简短说明，不放凭据。</p>
 <p>本轮不新增模型阶段。现有 support_audit 仍按需计一次调用，模型仍经统一 callback；新增反馈不占一次调用。请求失败不自动重试，核验过的文字后来再变更时必须重查。</p>
+<p>一条复核摘录定位失败时，保留这条错误和整份待核状态；其他陈述若仍与原稿位置、所选原文及来源版本逐项对应，其有效“不支持”结论继续进入补查清单，“不确定”继续进入待核清单。错误无法对应到具体陈述，或回执条目重复、格式不明时，先处理回执。这里的“不支持”只表示当前选段不够，不能据此断定正文事实错误，也不会自动改稿。该处理不改变原核验或复核结论，不增加一次模型调用。</p>
 <h3>已查范围、补证和版本比较</h3>
 <p>沿用 packet.assessment，可增加 research_scope 和 previous_report：</p>
 <pre>{"research_scope": [

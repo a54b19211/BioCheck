@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from app.core import quality_feedback, revise, run, verify
+from app.core import audit_support, quality_feedback, revise, run, verify
 from evaluation.replay_research_loop import examples
 
 PACKET = {"question": "说明药物机制", "evidence": [
@@ -159,6 +159,120 @@ class FeedbackTests(unittest.TestCase):
                     "coverage": {"verdict": "complete", "reason": "漏检示例"}}
         with self.assertRaises(ValueError):
             verify(new["packet"], new["result"]["final_text"], call)
+
+
+class PartialAuditFeedbackTests(unittest.TestCase):
+    """A broken audit quote must not hide a separate, correctly bound reading request."""
+
+    packet = {"question": "Compare the statements.", "evidence": [
+        {"id": "E1", "version": "v1", "text": "Source records A."},
+        {"id": "E2", "version": "v1", "text": "Source records B."}]}
+
+    def example(self, *, same_unit=False, reverse=False, bad_quote=True, verdict="not_supported"):
+        spans = ["A was recorded[E1].", "C was recorded[E2]."]
+        claims = [{"span": span, "kind": "fact", "verdict": "supported",
+                   "reason": "Synthetic verifier output, not a semantic evaluation.",
+                   "evidence": [{"evidence_id": key, "segment_id": "S1"}]}
+                  for span, key in zip(spans, ("E1", "E2"))]
+        groups = [claims] if same_unit else [[claim] for claim in claims]
+        draft = (" " if same_unit else "\n\n").join(spans)
+        raw = {"reviews": [
+            {"unit_id": f"U{i+1}", "verdict": "supported", "claims": group,
+             "reason": "Offline test.", "issues": [], "numeric_resolutions": []}
+            for i, group in enumerate(groups)],
+            "coverage": {"verdict": "complete", "reason": "Offline test."}}
+        review = verify(self.packet, draft, lambda *args: copy.deepcopy(raw))
+
+        def call(stage, instruction, payload):
+            a, b = payload["claims"]
+            checks = [
+                {"unit_id": a["unit_id"], "claim_index": a["claim_index"],
+                 "verdict": "supported", "reason": "Offline quote check.",
+                 "support": [{"evidence_id": "E1", "segment_id": "S1",
+                              "quote": "Invented quote." if bad_quote else "Source records A."}]},
+                {"unit_id": b["unit_id"], "claim_index": b["claim_index"],
+                 "verdict": verdict, "reason": "The selected B passage does not establish C.",
+                 "support": []}]
+            return {"checks": list(reversed(checks)) if reverse else checks}
+
+        audit = audit_support(self.packet, review, call)
+        if reverse:
+            audit["checks"].reverse()
+        return review, audit
+
+    def test_bad_quote_does_not_erase_another_negative_or_allow_revision(self):
+        for same_unit in (False, True):
+            for reverse in (False, True):
+                with self.subTest(same_unit=same_unit, reverse=reverse):
+                    review, valid_audit = self.example(same_unit=same_unit, reverse=reverse, bad_quote=False)
+                    _, broken_audit = self.example(same_unit=same_unit, reverse=reverse)
+                    before = copy.deepcopy((review, broken_audit))
+                    expected = ("U1", 1) if same_unit else ("U2", 0)
+                    for audit in (valid_audit, broken_audit):
+                        feedback = quality_feedback(review, audit)
+                        gaps = [g for g in feedback["evidence_gaps"] if g["kind"] == "evidence_selection"]
+                        self.assertEqual([(g["unit_id"], g["claim_index"]) for g in gaps], [expected])
+                        self.assertEqual(feedback["machine_status"], "PASS")
+                        self.assertEqual(feedback["audit_status"], "REVIEW")
+                        self.assertEqual(feedback["repair_units"], [])
+                    self.assertTrue(quality_feedback(review, broken_audit)["review_required"])
+                    revised = revise(self.packet, review, lambda *args: self.fail("No model call allowed."),
+                                     audit=broken_audit)
+                    self.assertEqual(revised["draft"], review["draft"])
+                    self.assertEqual(revised["changed_units"], [])
+                    self.assertEqual((review, broken_audit), before)
+
+    def test_independently_valid_uncertain_stays_visible(self):
+        review, audit = self.example(same_unit=True, verdict="uncertain")
+        feedback = quality_feedback(review, audit)
+        self.assertTrue(any(r.get("kind") == "audit_uncertain" and r.get("claim_index") == 1
+                            for r in feedback["review_required"]))
+        self.assertTrue(any(r["kind"] == "audit_error" for r in feedback["review_required"]))
+        self.assertEqual(feedback["evidence_gaps"], [])
+        self.assertEqual(feedback["repair_units"], [])
+
+    def test_invalid_local_check_never_becomes_a_reading_request(self):
+        changes = [
+            {"unit_id": "unknown"}, {"unit_id": []}, {"claim_index": 99}, {"claim_index": True},
+            {"verdict": "invented"}, {"reason": {}}, {"span_start": 1},
+            {"evidence": None}, {"evidence": [None]},
+            {"evidence": [{"evidence_id": "unknown", "segment_id": "S1"}]},
+            {"support": None}, {"support": [None]},
+            {"support": [{"evidence_id": "unknown", "segment_id": "S1", "quote": "Source records B."}]},
+            {"support": [{"evidence_id": "E2", "segment_id": "S1", "quote": "Invented quote."}]},
+        ]
+        for change in changes:
+            with self.subTest(change=change):
+                review, audit = self.example()
+                audit["checks"][1].update(change)
+                feedback = quality_feedback(review, audit)
+                self.assertEqual(feedback["evidence_gaps"], [])
+                self.assertTrue(feedback["review_required"])
+                self.assertEqual(feedback["repair_units"], [])
+
+    def test_bad_containers_or_unbound_errors_remain_waiting(self):
+        for field, value in [
+            ("checks", None), ("checks", {}), ("checks", [None]),
+            ("verification_errors", None), ("verification_errors", {}),
+            ("verification_errors", [None]),
+            ("verification_errors", [{"unit_id": "unknown", "claim_index": 0, "reason": "Unbound."}]),
+        ]:
+            with self.subTest(field=field, value=value):
+                review, audit = self.example()
+                audit[field] = value
+                feedback = quality_feedback(review, audit)
+                self.assertEqual(feedback["evidence_gaps"], [])
+                self.assertTrue(feedback["review_required"])
+                self.assertEqual(feedback["repair_units"], [])
+
+    def test_duplicate_checks_cannot_route_conflicting_findings(self):
+        review, audit = self.example()
+        audit["checks"].append(copy.deepcopy(audit["checks"][1]))
+        audit["checks"][-1]["verdict"] = "supported"
+        feedback = quality_feedback(review, audit)
+        self.assertEqual(feedback["evidence_gaps"], [])
+        self.assertTrue(feedback["review_required"])
+        self.assertEqual(feedback["repair_units"], [])
 
 
 if __name__ == "__main__":

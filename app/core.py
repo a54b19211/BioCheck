@@ -487,6 +487,25 @@ def review_locations_match(review):
         for u, v in zip(saved, actual))
 
 
+def _validate_audit_answer(answer, passages):
+    """Validate one answer against its selected passages, without judging semantics."""
+    verdict, reason = answer.get("verdict"), answer.get("reason")
+    supports = answer.get("support", [])
+    if (not isinstance(verdict, str) or verdict not in {"supported", "not_supported", "uncertain"}
+            or not isinstance(reason, str) or not reason.strip()):
+        raise ValueError("片段复核缺少有效结论或理由")
+    if not isinstance(supports, list) or (verdict == "supported" and not supports):
+        raise ValueError("支持结论须摘录所选片段中的原文")
+    selected = {(p["evidence_id"], p["segment_id"]): p for p in passages}
+    for support in supports:
+        if not isinstance(support, dict) or not all(isinstance(support.get(k), str) for k in ("evidence_id", "segment_id")):
+            raise ValueError("复核摘录格式无效")
+        passage = selected.get((support.get("evidence_id"), support.get("segment_id")))
+        quote = support.get("quote")
+        if passage is None or not isinstance(quote, str) or not quote.strip() or quote not in passage["quote"]:
+            raise ValueError("复核摘录不在本条所选片段中")
+
+
 def audit_support(packet, review, call, *, targets=None):
     """Check selected passages only. This opt-in call never edits a draft or its old review."""
     source = packet_input(packet)
@@ -563,19 +582,7 @@ def audit_support(packet, review, call, *, targets=None):
         verdict, reason = answer.get("verdict"), answer.get("reason")
         supports = answer.get("support", [])
         try:
-            if (not isinstance(verdict, str) or verdict not in {"supported", "not_supported", "uncertain"}
-                    or not isinstance(reason, str) or not reason.strip()):
-                raise ValueError("片段复核缺少有效结论或理由")
-            if not isinstance(supports, list) or (verdict == "supported" and not supports):
-                raise ValueError("支持结论须摘录所选片段中的原文")
-            selected = {(p["evidence_id"], p["segment_id"]): p for p in item["evidence"]}
-            for support in supports:
-                if not isinstance(support, dict) or not all(isinstance(support.get(k), str) for k in ("evidence_id", "segment_id")):
-                    raise ValueError("复核摘录格式无效")
-                passage = selected.get((support.get("evidence_id"), support.get("segment_id")))
-                quote = support.get("quote")
-                if passage is None or not isinstance(quote, str) or not quote.strip() or quote not in passage["quote"]:
-                    raise ValueError("复核摘录不在本条所选片段中")
+            _validate_audit_answer(answer, item["evidence"])
         except ValueError as error:
             errors.append({"unit_id": item["unit_id"], "claim_index": item["claim_index"], "reason": str(error)})
             verdict = "uncertain"
@@ -615,35 +622,71 @@ def quality_feedback(review, audit=None, *, source_errors=()):
             waiting.append({"kind": "audit_mismatch", "reason": "片段复核属于另一份完整稿件或来源状态"})
             audit = None
     if audit is not None:
-        waiting.extend({"kind": "audit_error", "detail": x} for x in audit.get("verification_errors", []))
+        audit_errors = audit.get("verification_errors", [])
+        if not isinstance(audit_errors, list):
+            audit_errors = [{"reason": "片段复核错误清单须为列表"}]
+        waiting.extend({"kind": "audit_error", "detail": x} for x in audit_errors)
         if audit.get("status") not in {"PASS", "REVIEW", "NOT_RUN"}:
             waiting.append({"kind": "audit_error", "reason": "片段复核没有有效状态"})
-        for check in audit.get("checks", []):
-            if (audit.get("verification_errors") or audit.get("status") not in {"PASS", "REVIEW"}
-                    or check.get("unit_id") in invalid_units or None in invalid_units):
+        checks = audit.get("checks", [])
+        valid_ids = isinstance(checks, list) and all(
+            isinstance(c, dict) and isinstance(c.get("unit_id"), str)
+            and type(c.get("claim_index")) is int for c in checks)
+        if not valid_ids or len({(c["unit_id"], c["claim_index"]) for c in checks}) != len(checks):
+            waiting.append({"kind": "audit_mismatch", "reason": "片段复核条目须有唯一的段落和陈述序号"})
+            checks = []
+        check_ids = {(c["unit_id"], c["claim_index"]) for c in checks}
+        invalid_checks, unbound_error = set(), False
+        for error in audit_errors:
+            if (isinstance(error, dict) and isinstance(error.get("unit_id"), str)
+                    and type(error.get("claim_index")) is int
+                    and (error["unit_id"], error["claim_index"]) in check_ids):
+                invalid_checks.add((error["unit_id"], error["claim_index"]))
+            else:
+                unbound_error = True
+        for check in checks:
+            # A local error blocks its own finding, not an independently bound finding.
+            if (unbound_error or audit.get("status") not in {"PASS", "REVIEW"}
+                    or (check["unit_id"], check["claim_index"]) in invalid_checks
+                    or check["unit_id"] in invalid_units or None in invalid_units):
                 continue
-            unit = units.get(check.get("unit_id"))
-            index = check.get("claim_index")
-            if unit is None or type(index) is not int or not 0 <= index < len(unit.get("claims", [])):
+            unit = units.get(check["unit_id"])
+            index = check["claim_index"]
+            if unit is None or not 0 <= index < len(unit.get("claims", [])):
                 waiting.append({"kind": "audit_mismatch", "reason": "片段复核不属于本稿陈述"})
                 continue
             claim = unit["claims"][index]
-            fields = ("evidence_id", "version", "segment_id", "start", "end", "quote")
-            same_support = ([{k: e.get(k) for k in fields} for e in claim.get("evidence", [])]
-                            == [{k: e.get(k) for k in fields} for e in check.get("evidence", [])])
-            if check.get("span") != claim["span"] or check.get("context") != unit["text"] or not same_support:
-                waiting.append({"kind": "audit_mismatch", "reason": "片段复核的正文或选段已经变化"})
-            elif audit.get("verification_errors"):
+            if (claim.get("kind", "fact") != "fact" or claim.get("verdict") != "supported"
+                    or claim.get("scope_evidence") or claim.get("support_scope")):
+                waiting.append({"kind": "audit_mismatch", "reason": "本条不属于已支持事实的选段复核"})
                 continue
-            elif check.get("verdict") == "not_supported":
-                gap("evidence_selection", unit["unit_id"], check.get("reason", ""),
-                    claim_index=index, span=claim["span"], evidence=check.get("evidence", []),
-                    read_requests=read_requests(check.get("evidence", []), catalog, claim["span"],
-                                                reason=check.get("reason", "")),
+            fields = ("evidence_id", "version", "segment_id", "start", "end", "quote")
+            selected, saved = claim.get("evidence"), check.get("evidence")
+            valid_passages = all(isinstance(refs, list) and refs and all(
+                isinstance(e, dict) and all(k in e for k in fields) for e in refs)
+                for refs in (selected, saved))
+            if (not valid_passages or check.get("span") != claim["span"] or check.get("context") != unit["text"]
+                    or [{k: e[k] for k in fields} for e in selected] != [{k: e[k] for k in fields} for e in saved]):
+                waiting.append({"kind": "audit_mismatch", "reason": "片段复核的正文或选段已经变化"})
+                continue
+            try:
+                start, end = locate_span(unit["text"], claim)
+                if (type(check.get("span_start")) is not int or type(check.get("span_end")) is not int
+                        or check["span_start"] != start or check["span_end"] != end):
+                    raise ValueError("片段复核的陈述位置已经变化")
+                _validate_audit_answer(check, selected)
+            except ValueError as error:
+                waiting.append({"kind": "audit_mismatch", "unit_id": unit["unit_id"],
+                                "claim_index": index, "reason": str(error)})
+                continue
+            if check["verdict"] == "not_supported":
+                gap("evidence_selection", unit["unit_id"], check["reason"],
+                    claim_index=index, span=claim["span"], evidence=check["evidence"],
+                    read_requests=read_requests(check["evidence"], catalog, claim["span"], reason=check["reason"]),
                     action="reselect_or_retrieve")
-            elif check.get("verdict") != "supported":
+            elif check["verdict"] == "uncertain":
                 waiting.append({"kind": "audit_uncertain", "unit_id": unit["unit_id"],
-                                "claim_index": index, "reason": check.get("reason", "")})
+                                "claim_index": index, "reason": check["reason"]})
 
     for unit_id, unit in units.items():
         if unit.get("read_requests"):
