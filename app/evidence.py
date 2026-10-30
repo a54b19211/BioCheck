@@ -132,6 +132,12 @@ def locate_analysis(items, results):
         if not isinstance(path, str) or (path and not path.startswith("/")):
             raise ValueError("分析引用须给出output_path JSON pointer")
         value = result["output"]
+        requested_path = path
+        # Models sometimes give a pointer rooted at the analysis record rather than its output.
+        # Only accept that spelling when it cannot denote an actual "output" field.
+        if (isinstance(value, dict) and "output" not in value
+                and (path == "/output" or path.startswith("/output/"))):
+            path = path[len("/output"):]
         try:
             for part in path.split("/")[1:] if path else []:
                 if re.search(r"~(?![01])", part):
@@ -148,6 +154,7 @@ def locate_analysis(items, results):
         except (KeyError, IndexError, ValueError) as error:
             raise ValueError("分析输出位置无效：" + key + path) from error
         located.append({"analysis_id": key, "output_path": path, "value": value,
+                        **({"requested_output_path": requested_path} if path != requested_path else {}),
                         **{k: result[k] for k in ("dataset_ref", "method_version", "parameters",
                                                   "input_refs", "limitations")},
                         "calculation_basis": result.get("calculation_basis", {})})

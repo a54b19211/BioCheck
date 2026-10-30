@@ -121,7 +121,7 @@ python3 -m unittest discover -s tests -v</pre>
     "period":"2026-10-30截点","population":"本窗口合格项目","denominator":4},
   "limitations":["离线接口例；局部窗口，不代表全行业"]
 }]}}</pre>
-<p>上例为接口用料，不是实际业务统计。成稿引用[A1]；核验声明kind为analysis_result，analysis_refs用analysis_id和output_path（如/count）定位给定计算输出，binding保留calculation_basis。只有分析结果的任务也可运行，不能为过接口找不相关原文凑数。</p>
+<p>上例为接口用料，不是实际业务统计。成稿引用[A1]；核验声明kind为analysis_result，analysis_refs用analysis_id和output_path（如/count）定位给定计算输出，binding保留calculation_basis。output_path以该分析结果的output为根。真实模型有时多写一层/output；仅当output对象没有同名真实字段时兼容去掉这一层，并在定位结果保留requested_output_path。真实字段优先，未知字段、双重前缀和歧义回退均不猜。只有分析结果的任务也可运行，不能为过接口找不相关原文凑数。</p>
 <p>数字必须对应所选输出。输出外换算还需calculation说明算式、结果单位和口径；已知期间、总体、分母及分析单位须一致，结果单位允许明确转换。保留support、counterevidence、competition、failure、patents等按问题要求的已查/未查/失败范围；仍由实际取证记录提供，不以文字PASS作为停止条件。</p>
 <p><b>职责限制：</b>BioCheck检查文字与给定输出、口径及引用的一致性；数据集构建、算法执行与复算、统计有效性和模式价值归雷达。这里没有重新执行挖掘算法，也没有因给定output有数字就承认其统计设计有效。</p>
 <h3>这次处理了哪些真实失败</h3>
