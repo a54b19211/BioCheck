@@ -281,7 +281,7 @@ class ClaimVerifyTests(unittest.TestCase):
         for key, expected in (("A1", "PASS"), ("A2", "REVIEW")):
             def converted(out, _):
                 row = out["checks"][0]
-                row["quotes"] = [{"reference": "A1", "quote": '{"count":2}'}]
+                row["quotes"] = [{"reference": "A1", "output_path": "", "quote": '{"count":2}'}]
                 row["verdict"].update(kind="analysis_result", binding=basis,
                     numeric_resolutions=[{"token": "2000", "reason": "2*1000",
                         "evidence": [], "analysis_refs": [{"analysis_id": key, "output_path": "/count"}],
@@ -291,7 +291,7 @@ class ClaimVerifyTests(unittest.TestCase):
         p["assessment"]["analysis_results"][0]["output"] = {"count": 1, "other": 10}
         def substring(out, payload):
             converted(out, payload)
-            out["checks"][0]["quotes"] = [{"reference": "A1", "quote": '"other":10'}]
+            out["checks"][0]["quotes"] = [{"reference": "A1", "output_path": "", "quote": '"other":10'}]
             out["checks"][0]["verdict"]["numeric_resolutions"][0]["analysis_refs"][0]["analysis_id"] = "A1"
         # The short quote contains 10, not the selected value 1.
         result = core.verify(p, "Count is 2000 milli-items[A1].", Calls(substring), mode="paragraph")

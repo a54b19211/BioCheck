@@ -6,7 +6,7 @@ from collections import Counter
 from copy import deepcopy
 
 from . import core
-from .contracts import VerificationCompletionError
+from .contracts import VerificationCompletionError, CLAIM_KINDS, SOURCE_USES, analysis_binding_matches
 from .evidence import segments, analysis_results, analysis_signature, locate_support, locate_analysis
 from .source_context import SOURCE_FIELDS, evidence_catalog, source_updates
 from .prompts import CLAIM_VERIFY, CLAIM_REVISE, VERIFY_COVERAGE
@@ -185,26 +185,27 @@ def completed(call, stage, instruction, payload, draft, recorded, *, retry=False
         raise error
 
 
-def quote_contains_value(text, value):
-    """Accept a complete JSON value or member, never a number inside a string."""
+def quote_contains_value(text, value, relative_path):
+    """Resolve the actual quoted field, not an equal number elsewhere in the quote."""
     for candidate in (text, "{" + text + "}"):
         try:
-            parsed = json.loads(candidate)
-        except ValueError:
-            continue
-        pending = [parsed]
-        while pending:
-            item = pending.pop()
-            if digest(item) == digest(value):
+            selected = json.loads(candidate)
+            for part in relative_path.split("/")[1:] if relative_path else []:
+                part = part.replace("~1", "/").replace("~0", "~")
+                if isinstance(selected, dict):
+                    selected = selected[part]
+                elif isinstance(selected, list) and re.fullmatch(r"0|[1-9][0-9]*", part):
+                    selected = selected[int(part)]
+                else:
+                    raise ValueError("Quoted field is not addressable.")
+            if digest(selected) == digest(value):
                 return True
-            if isinstance(item, dict):
-                pending.extend(item.values())
-            elif isinstance(item, list):
-                pending.extend(item)
+        except (ValueError, KeyError, IndexError):
+            continue
     return False
 
 
-def quote_error(code, message):
+def claim_error(code, message):
     error = ValueError(message)
     error.code = code
     return error
@@ -219,46 +220,90 @@ def parse_answer(claim, answer, source):
     if not isinstance(verdict, dict) or verdict.get("status") not in {"supported", "contradicted", "insufficient"}:
         raise ValueError("主张缺少有效判定")
     status = verdict["status"]
+    if verdict.get("kind") not in CLAIM_KINDS:
+        raise claim_error("claim_kind_invalid", "陈述kind无效，须使用明确的四种类型")
+    if verdict.get("source_use") not in SOURCE_USES:
+        raise claim_error("claim_source_use_invalid", "source_use无效，须使用明确的五种来源用途")
+    repair_kind, repair_span = verdict.get("repair_kind"), verdict.get("repair_span")
+    if repair_kind is not None or repair_span is not None:
+        if (repair_kind != "unreported_as_absent" or status != "insufficient" or verdict["kind"] != "fact"
+                or not isinstance(repair_span, str) or not repair_span.strip()
+                or core.CITATION.search(repair_span) or "\n" in repair_span):
+            raise claim_error("claim_scope_repair_invalid", "材料范围修订须明确对应一个不足事实的无引用原断言")
+        try:
+            core.locate_span(claim["text"], {"span": repair_span})
+        except ValueError as error:
+            raise claim_error("claim_scope_repair_invalid", "材料范围修订的原断言不能唯一定位") from error
     allowed = {r["reference"]: r for r in claim["references"]}
     quotes = answer["quotes"]
     if not isinstance(quotes, list) or status in {"supported", "contradicted"} and not quotes:
-        raise quote_error("quote_required", "支持或矛盾判定须有原文短引")
+        raise claim_error("quote_required", "支持或矛盾判定须有原文短引")
     located, evidence, derived, used = [], [], [], set()
     lookup = {e["id"]: e for e in source["evidence"]}
+    analyses = analysis_results(source)
     for quote in quotes:
         if not isinstance(quote, dict) or not isinstance(quote.get("reference"), str):
-            raise quote_error("quote_reference_invalid", "短引须明确对应本句实际引用")
+            raise claim_error("quote_reference_invalid", "短引须明确对应本句实际引用")
         ref = allowed.get(quote["reference"])
         text = quote.get("quote")
         if ref is None or not isinstance(text, str) or not text.strip():
-            raise quote_error("quote_outside_citation", "短引来源不在本句实际引用范围中")
+            raise claim_error("quote_outside_citation", "短引来源不在本句实际引用范围中")
         if "version" in quote and quote["version"] != ref["version"]:
-            raise quote_error("quote_version_mismatch", "短引与固定来源版本不一致")
-        offset = ref["text"].find(text)
-        if offset < 0 or ref["text"].find(text, offset + 1) >= 0:
-            raise quote_error("quote_not_found" if offset < 0 else "quote_ambiguous",
+            raise claim_error("quote_version_mismatch", "短引与固定来源版本不一致")
+        selected = None
+        if ref["kind"] == "analysis_result":
+            if "output_path" not in quote:
+                raise claim_error("quote_analysis_path_required", "分析短引须明确output_path，不能猜重复值的位置")
+            try:
+                selected = locate_analysis([{"analysis_id": ref["analysis_id"],
+                                             "output_path": quote["output_path"]}], analyses)[0]
+            except ValueError as error:
+                raise claim_error("quote_analysis_path_invalid", "分析短引output_path无效") from error
+            scope_text = json.dumps(selected["value"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        else:
+            if "output_path" in quote:
+                raise claim_error("quote_path_not_allowed", "原文短引不能使用分析输出路径")
+            scope_text = ref["text"]
+        offset = scope_text.find(text)
+        if offset < 0 or scope_text.find(text, offset + 1) >= 0:
+            raise claim_error("quote_not_found" if offset < 0 else "quote_ambiguous",
                               "短引不是被引原段中唯一的连续原文")
-        start, end = ref["start"] + offset, ref["start"] + offset + len(text)
-        located.append({"reference": ref["reference"], "version": ref["version"],
-                        "start": start, "end": end, "quote": text})
-        used.add(ref["reference"])
-        if ref["kind"] == "source":
+        located_quote = {"reference": ref["reference"], "version": ref["version"], "quote": text}
+        if selected is not None:
+            located_quote.update(output_path=selected["output_path"], offset_basis="selected_value_json",
+                                 value_start=offset, value_end=offset+len(text))
+            if "requested_output_path" in selected:
+                located_quote["requested_output_path"] = selected["requested_output_path"]
+            item = {"analysis_id": ref["analysis_id"], "output_path": selected["output_path"]}
+            if item not in derived:
+                derived.append(item)
+        else:
+            start, end = ref["start"] + offset, ref["start"] + offset + len(text)
+            located_quote.update(start=start, end=end)
             for part in segments(lookup[ref["evidence_id"]]["text"]):
                 if start < part["end"] and end > part["start"]:
                     item = {"evidence_id": ref["evidence_id"], "segment_id": part["id"]}
                     if item not in evidence:
                         evidence.append(item)
-        else:
-            item = {"analysis_id": ref["analysis_id"], "output_path": ""}
-            if item not in derived:
-                derived.append(item)
+        located.append(located_quote)
+        used.add(ref["reference"])
     if status == "supported" and used != set(allowed):
-        raise quote_error("quote_citation_missing", "支持判定未给出本句每个实际引用的有效短引")
+        raise claim_error("quote_citation_missing", "支持判定未给出本句每个实际引用的有效短引")
     metadata = {k: deepcopy(verdict[k]) for k in (
         "kind", "source_use", "attribution_span", "uncertainty_span", "history_context",
-        "binding", "missing_information") if k in verdict}
-    if not all(k in metadata for k in ("kind", "source_use")):
-        raise ValueError("判定须保留kind和source_use，不能绕过来源状态检查")
+        "binding", "missing_information", "repair_kind", "repair_span") if k in verdict}
+    if repair_kind:
+        if not located or used != set(allowed) or any(r["kind"] != "source" for r in claim["references"]):
+            raise claim_error("claim_scope_repair_invalid", "范围修订须保留本句全部实际原文引用的有效短引")
+        proposed = scope_revision(dict(metadata, span=claim["text"]))
+        if len(sentences(proposed)) != 1:
+            raise claim_error("claim_scope_repair_invalid", "范围修订必须保留为原句内的局部限定")
+    resolved = locate_analysis(derived, analyses)
+    if metadata["kind"] == "analysis_result" and not resolved:
+        raise claim_error("claim_analysis_reference_missing", "分析陈述缺少有效输出位置")
+    if resolved and (metadata["kind"] == "analysis_result" or core.numeric_tokens(claim["text"])):
+        if not analysis_binding_matches(metadata.get("binding"), resolved):
+            raise claim_error("claim_analysis_binding_invalid", "binding须直接或按analysis_id保留完整计算口径，不能另套calculation_basis")
     if metadata["kind"] == "source_absence":
         for ref in claim["references"]:
             if ref["kind"] == "source":
@@ -288,9 +333,12 @@ def parse_answer(claim, answer, source):
         for item in locate_support(resolution.get("evidence", []), lookup):
             if (item["evidence_id"], item["segment_id"]) not in quoted_parts:
                 raise ValueError("数值解释越过了本句实际引用及已验证短引范围")
-        for item in locate_analysis(resolution.get("analysis_refs", []), analysis_results(source)):
-            if not any(q["reference"] == item["analysis_id"]
-                       and quote_contains_value(q["quote"], item["value"]) for q in located):
+        for item in locate_analysis(resolution.get("analysis_refs", []), analyses):
+            if not any(q["reference"] == item["analysis_id"] and "output_path" in q
+                       and (not q["output_path"] or item["output_path"] == q["output_path"]
+                            or item["output_path"].startswith(q["output_path"] + "/"))
+                       and quote_contains_value(q["quote"], item["value"],
+                                                item["output_path"][len(q["output_path"]):]) for q in located):
                 raise ValueError("数值解释的分析输出不在本句实际引用及已验证短引内")
     return normalized, issues, resolutions
 
@@ -486,11 +534,32 @@ def verify(packet, draft, call, previous_review=None):
     return review
 
 
+def scope_revision(claim):
+    """Only wrap the explicitly identified unsupported assertion; keep other text intact."""
+    start, end = core.locate_span(claim["span"], {"span": claim["repair_span"]})
+    replacement = "本次引用材料不足以确认“" + claim["repair_span"] + "”这一说法"
+    return claim["span"][:start] + replacement + claim["span"][end:]
+
+
 def repair_candidates(review):
     if review.get("verification_errors") or not core.review_locations_match(review):
         return []
-    return [c["claim_id"] for u in review["units"] for c in u["claims"]
-            if c["verdict"] == "contradicted" and c.get("short_quotes") and not c.get("source_gaps")]
+    saved = {c.get("claim_id"): c for c in review.get("claim_checks", [])}
+    result = []
+    for unit in review["units"]:
+        for claim in unit["claims"]:
+            if not claim.get("short_quotes") or claim.get("source_gaps") or claim.get("citation_status") == "invalid":
+                continue
+            check = saved.get(claim.get("claim_id"), {})
+            original = (check.get("answer") or {}).get("verdict", {})
+            scope = (claim["verdict"] == "insufficient" and claim.get("repair_kind") == "unreported_as_absent"
+                     and original.get("status") == "insufficient" and original.get("kind") == "fact"
+                     and original.get("repair_kind") == claim["repair_kind"]
+                     and original.get("repair_span") == claim.get("repair_span")
+                     and check.get("finish_reason") == "stop" and not check.get("errors"))
+            if claim["verdict"] == "contradicted" or scope:
+                result.append(claim["claim_id"])
+    return result
 
 
 def revise(packet, review, call, *, audit=None, source_errors=()):
@@ -514,6 +583,10 @@ def revise(packet, review, call, *, audit=None, source_errors=()):
         finding = next(c for u in review["units"] for c in u["claims"] if c["claim_id"] == claim["claim_id"])
         claim["finding"] = {"verdict": finding["verdict"], "reason": finding["reason"],
                             "short_quotes": finding["short_quotes"]}
+        if finding["verdict"] == "insufficient" and finding.get("repair_kind") == "unreported_as_absent":
+            claim["scope_revision"] = scope_revision(finding)
+            claim["finding"]["repair_kind"] = finding["repair_kind"]
+            claim["finding"]["repair_span"] = finding["repair_span"]
     if request_bytes(CLAIM_REVISE, request_payload("revise_claims", payload, review["draft"])) > MAX_BATCH_BYTES:
         raise ValueError("失败句修订请求过大，未修改原稿")
     recorded = []
@@ -528,6 +601,9 @@ def revise(packet, review, call, *, audit=None, source_errors=()):
     analyses = analysis_results(source)
     for claim in targets:
         text = mapped[claim["claim_id"]]
+        submitted = next(c for c in payload["claims"] if c["claim_id"] == claim["claim_id"])
+        if "scope_revision" in submitted and text != submitted["scope_revision"]:
+            raise ValueError("材料范围修订只能采用明确的局部未知限定，不能新增、反转或删除事实")
         if not isinstance(text, str) or not text.strip() or len(sentences(text)) != 1 or "\n" in text:
             raise ValueError("每个替换须为一个非空句子，不能删除或扩成整段")
         refs = core.CITATION.findall(text)
@@ -546,7 +622,9 @@ def revise(packet, review, call, *, audit=None, source_errors=()):
         if text != claim["text"]:
             draft = draft[:claim["start"]] + text + draft[claim["end"]:]
             changed.append({"claim_id": claim["claim_id"], "unit_id": claim["unit_id"],
-                            "start": claim["start"], "end": claim["end"], "before": claim["text"], "after": text})
+                            "start": claim["start"], "end": claim["end"], "before": claim["text"], "after": text,
+                            "repair_kind": next((c["finding"].get("repair_kind") for c in payload["claims"]
+                                                 if c["claim_id"] == claim["claim_id"]), None)})
     before = {u["unit_id"]: u["text"] for u in review["units"]}
     return {"draft": draft, "changed_claims": list(reversed(changed)),
             "changed_units": [{"unit_id": u["id"], "before": before[u["id"]], "after": u["text"]}

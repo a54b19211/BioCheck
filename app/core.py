@@ -8,7 +8,7 @@ from decimal import Decimal
 from .prompts import WRITE, PLAN, BOUND_PLAN, VERIFY, REVISE, SUPPORT_AUDIT, REPLAN, VERIFY_REPAIR
 from .evidence import model_input, locate_support, reference_target, analysis_results, locate_analysis, analysis_signature
 from .source_context import evidence_catalog, source_updates, read_requests, check_source_use
-from .contracts import (check_plan, PlanReferenceError, PLAN_DIAGNOSTIC_LIMIT,
+from .contracts import (CLAIM_KINDS, analysis_binding_matches, check_plan, PlanReferenceError, PLAN_DIAGNOSTIC_LIMIT,
                         check_verification_contract, VerificationContractError,
                         same_outside_errors, VerificationCompletionError)
 
@@ -308,7 +308,7 @@ def verify(packet, draft, call, *, max_verify_retries=0, mode="whole", previous_
             claim_positions.add((start, end))
             previous_errors = len(unit_errors)
             kind = claim.get("kind", "fact")
-            if kind not in {"fact", "source_absence", "analysis_result", "hypothesis"}:
+            if kind not in CLAIM_KINDS:
                 unit_errors.append("陈述kind无效")
             absence = kind == "source_absence"
             if absence and not claim.get("missing_information"):
@@ -342,15 +342,8 @@ def verify(packet, draft, call, *, max_verify_retries=0, mode="whole", previous_
                 unit_errors.append("分析陈述缺少analysis_refs输出位置")
             if derived and numeric_tokens(span):
                 binding = claim.get("binding")
-                for result in derived:
-                    basis = result["calculation_basis"]
-                    required = {"analysis_unit", "unit", "period", "population", "denominator"}
-                    selected_binding = binding.get(result["analysis_id"], binding) if isinstance(binding, dict) else None
-                    if (required - basis.keys() or not isinstance(selected_binding, dict)
-                            or basis.keys() - selected_binding.keys()
-                            or any(selected_binding[k] != v for k, v in basis.items())):
-                        unit_errors.append("分析数字缺少一致的单位、期间、总体、分母和分析单位绑定")
-                        break
+                if not analysis_binding_matches(binding, derived):
+                    unit_errors.append("分析数字缺少一致的单位、期间、总体、分母和分析单位绑定")
                 selected_values = json.dumps([{ "value": r["value"], "basis": r["calculation_basis"]}
                                               for r in derived], ensure_ascii=False)
                 available = {number_value(t) for t in numeric_tokens(selected_values)}

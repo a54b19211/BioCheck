@@ -1,10 +1,30 @@
 """Validate model output structure; do not infer or replace factual conclusions."""
 import re
+import json
 
 from .evidence import locate_support, locate_analysis, analysis_results, ReferenceLocationError
 
 
 PLAN_DIAGNOSTIC_LIMIT = 8
+CLAIM_KINDS = ("fact", "source_absence", "analysis_result", "hypothesis")
+SOURCE_USES = ("current_fact", "attributed_report", "hypothesis", "historical", "information_environment")
+
+
+def analysis_binding_matches(binding, results):
+    """Accept explicit original calculation context, never guess a nested alias."""
+    required = {"analysis_unit", "unit", "period", "population", "denominator"}
+    for result in results:
+        basis = result.get("calculation_basis", {})
+        selected = binding.get(result["analysis_id"], binding) if isinstance(binding, dict) else None
+        if required - basis.keys() or not isinstance(selected, dict) or basis.keys() - selected.keys():
+            return False
+        try:
+            if any(json.dumps(selected[k], sort_keys=True, allow_nan=False)
+                   != json.dumps(v, sort_keys=True, allow_nan=False) for k, v in basis.items()):
+                return False
+        except (ValueError, TypeError):
+            return False
+    return True
 
 
 class PlanReferenceError(ValueError):

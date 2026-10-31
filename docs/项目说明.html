@@ -162,14 +162,22 @@ python3 -m unittest discover -s tests -v</pre>
 <tr><td>verify_coverage</td><td>当前整稿、任务范围及精简发现，检查遗漏和跨段矛盾</td><td>8,192 token</td></tr>
 <tr><td>revise_claims</td><td>只给允许修订的失败句、依据和问题；不重写整段</td><td>16,384 token</td></tr>
 </tbody></table>
-<p>核验每条只返回编号、判定、短引和理由。判定仍需明确kind和source_use；涉及更正、待核消息或计算结果时，保留既有的来源用途及口径字段。短引不存在、重复无法定位、引用越界或回执缺项，就保留原输出并返回待核，<code>verification_errors</code> 阻止自动改稿。实际引用所允许的范围会同时约束数值解释和“材料未提供”的判断。</p>
+<p>核验每条只返回编号、判定、短引和理由。<code>kind</code> 只能是 fact、source_absence、analysis_result 或 hypothesis；<code>source_use</code> 只能是 current_fact、attributed_report、hypothesis、historical 或 information_environment。两者分开填写，analysis 不能代替 kind，analysis_result 也不能代替来源用途。涉及更正、待核消息或计算结果时，还要保留相应限定及计算口径。</p>
+<p>短引不存在、重复无法定位、引用越界或回执缺项，就保留原输出并返回待核。<code>verification_errors</code> 阻止整稿覆盖检查和自动改稿；不得把核验者填错字段当成作者写错事实。非法类型及来源用途分别返回 claim_kind_invalid、claim_source_use_invalid，并对应具体 claim_id。</p>
 <pre>{"checks":[{"claim_id":"输入原值",
   "verdict":{"status":"supported","kind":"fact","source_use":"current_fact","labels":[]},
   "quotes":[{"reference":"E1:S2","quote":"该段里的连续原文"}],
   "reason":"这段文字怎样支持这句话"}]}</pre>
 <p>短引来自原文，不代表语义必然正确。模型仍可能把研究对象、组别、时间或医学术语理解错；同一句内的复合事实是否全部得到支持，仍需独立评价。旧的机器PASS、错选片段和研究漏检记录全部保留。本版没有靠修改历史回执提高成绩。</p>
+<h4>计算结果重复出现时，指明哪一项</h4>
+<p>假设分析输出有两个候选对象，它们都带 <code>count:2</code>。只摘“count:2”无法知道引用哪一个。分析短引必须显式给 <code>output_path</code>，例如 <code>/patterns/0/count</code>；空字符串表示整个 output。程序先取这个位置的值，再核对短引是否是它规范 JSON 中连续、唯一的文字。位置无效或仍然重复就待核，不取第一次，也不在其它候选对象里补找。</p>
+<pre>{"reference":"A1","output_path":"/patterns/0/count","quote":"2"}</pre>
+<p>计算结果短引返回规范化的 output_path，以及 <code>offset_basis="selected_value_json"</code>、<code>value_start</code>、<code>value_end</code>；这些下标相对于被选值的规范 JSON，不是源文档位置。因此它不返回原文 start/end。普通文档短引仍返回原文 start/end，不能带 output_path。数值换算也不能借同值的兄弟字段，必须在实际摘录的路径内部找到依据。</p>
+<p><code>binding</code> 直接保留 calculation_basis 的全部字段，或者按实际 analysis_id 分别保存完整口径；不要再套一层 calculation_basis 或 references。非法位置、缺少路径和口径错误分别有 quote_analysis_path_invalid、quote_analysis_path_required、claim_analysis_binding_invalid 等代码。字段合法、摘录存在仍只是程序检查，语义支持由核验者判断。</p>
 <h4>改一句以后，要重查哪些句子</h4>
-<p>修订只替换有有效原文依据、判定为矛盾的失败句，句外逐字保留。返回 <code>changed_claims</code>，原有 <code>changed_units</code> 仍是含unit_id、before、after的对象列表。新稿必须再核验；把完整旧Review放到 <code>previous_review</code>，程序会决定哪些检查能复用。</p>
+<p>一般修订只替换有有效原文依据、判定为矛盾的失败句，句外逐字保留。本版增加一个很窄的处理：原稿把“材料没有报告”写成“实验没做／某事不存在”，当前核验回执明确标出 <code>repair_kind="unreported_as_absent"</code> 和逐字唯一的 <code>repair_span</code>，才允许收回这一断言。原判定必须仍是 insufficient，原引用和短引必须有效；不能事后给旧回执补资格，也不能根据理由里的词猜资格。</p>
+<p>例如原句“观察到细胞损伤；实验未做对照[E1]”，只允许改成“观察到细胞损伤；本次引用材料不足以确认‘实验未做对照’这一说法[E1]”。程序将完整允许文本放入 <code>claims[].scope_revision</code>，模型必须原样返回；其他字符、事实及引用不变。不能改成“实验已做对照”，不能删掉整句。一般证据不足、真实负向结果以及明确相反证据，不走这条路径。</p>
+<p>仍使用同一个 <code>revise_claims</code> 阶段，不增加隐藏调用。返回 <code>changed_claims</code>，其中此类修改带 repair_kind；原有 <code>changed_units</code> 仍是含unit_id、before、after的对象列表。<code>requires_verification=true</code> 表示新稿必须再核验：把完整旧Review放到 <code>previous_review</code>，程序决定哪些检查能复用。收回过强断言不是证明其反面成立。</p>
 <p>只有上次确实完成、结果为支持，且任务、原句、前后句及段落关系、实际引用的版本和文字、方法版本全部相同，才复用。五句中的第三句改动，通常重查第二、三、四句，第一和第五句可复用；来源或任务改变时重新计算，不能只按句号或旧段号套用。整体覆盖还要核对当前全文；输入和发现全部相同时才复用它。旧whole回执不能充当新方法缓存。</p>
 <pre>new_review = verify(packet, revised_draft, call,
                     mode="paragraph", previous_review=old_review)</pre>
@@ -181,7 +189,8 @@ python3 -m unittest discover -s tests -v</pre>
 {"call_id":"原值","request_hash":"原值","finish_reason":"length","output":"保留公开截断内容，也可为null"}</pre>
 <p>stop须有已解析JSON对象。length只允许当前verify_claim批补发一次；第二次仍截断则停止。coverage或修订截断、未知完成状态、缺失回执和解析失败都不自动重发。宿主先恢复已收到的回执；相同call_id不是再次付费的许可。改变输入、方法或已完成回执后，旧的后续回执不再适用。</p>
 <p>按待查批数K计算，首次核验通常K+1次；全部批都截断一次时最多2K+1次。规划、写作、补查、修订及独立复核另计。每次请求含metadata的instruction+payload最多120000字节，单句引用超过限制就返回待核，不裁掉证据来换通过。雷达按实际下一次调用检查总预算，不能把最坏情况全部预留，也不能承诺32次一定够所有长稿。</p>
-<p><b>当前交付范围：</b>已有雷达隔离流程接入的是此前方法。本版主张批核验、逐句修订和复用已完成离线与HTTP协议检查；新一轮真实验收由协调侧固定源码及输入后执行。本页不将尚未运行的新版本写成生产已上线。旧support_audit仍是另外一次独立语义复核，若启用应明确计费；短引检查不能冒称已经做了第二个独立模型评价。</p>
+<p><b>当前接入范围（2026年10月31日）：</b>雷达隔离验收已实际调用主张批核验版本 9f15f08；B5 返回 needs_review，报告为 FAIL。原记录保留了非法 kind、计算结果重复短引及“材料未报告被写成实验未做”的失败。本轮候选补齐核验合同、计算输出路径和窄范围修订，仅完成离线对照，尚未切换该隔离服务，也未验证新模型效果。原 B5 不会改为通过，生产接入仍由协调侧验收决定。旧 support_audit 是另外一次独立语义复核，若启用须单独计费；程序短引检查不等于第二次模型评价。</p>
+<p>上游机制评价、局限和建议帮助组织问题，不能代替原文事实。雷达负责把专业结果投影成供模型使用的上下文，并保存原始回执供审计；同一份旧审查文字不应反复混入规划和写作。BioCheck仍要回到实际引用核对，不能因为上游写过就沿用确定性断言。</p>
 <h3>分析结果怎样进入报告</h3>
 <p>原文放evidence；雷达已经计算的结果放assessment.analysis_results；待验证推断在核验中标为hypothesis。analysis_results保留可重建的数据、方法和口径信息，不能把文档命中数写成项目总体，把局部观察写成行业统计。</p>
 <pre>{"question":"本窗口有多少项目？","evidence":[],"assessment":{"analysis_results":[{
@@ -195,7 +204,7 @@ python3 -m unittest discover -s tests -v</pre>
   "limitations":["离线接口例；局部窗口，不代表全行业"]
 }]}}</pre>
 <p>多条分析结果的参数、口径或局限确实完全相同时，雷达可只传一份 <code>assessment.analysis_result_context</code>，用 <code>projection_version="shared-calculation-context-v1"</code>、applies_to_result_ids、fields和source_paths明确哪些原字段由它补全。BioCheck只在验证副本中恢复，原包不改；已有值冲突、类型不同、未知编号或路径不对应都会拒绝，不猜默认值。恢复前后的分析签名须一致。这是去掉重复传输，不是删去实验条件。</p>
-<p>上例为接口用料，不是实际业务统计。成稿引用[A1]；核验声明kind为analysis_result，analysis_refs用analysis_id和output_path（如/count）定位给定计算输出，binding保留calculation_basis。output_path以该分析结果的output为根。真实模型有时多写一层/output；仅当output对象没有同名真实字段时兼容去掉这一层，并在定位结果保留requested_output_path。真实字段优先，未知字段、双重前缀和歧义回退均不猜。只有分析结果的任务也可运行，不能为过接口找不相关原文凑数。</p>
+<p>上例为接口用料，不是实际业务统计。成稿引用[A1]；核验声明kind为analysis_result，analysis_refs用analysis_id和output_path（如/count）定位给定计算输出，binding保留calculation_basis。output_path以该分析结果的output为根。真实模型有时多写一层/output；仅当output对象没有同名真实字段时兼容去掉这一层，并在定位结果保留requested_output_path。真实字段优先，未知字段、双重前缀和歧义回退均不猜。只有分析结果的任务也可运行，不能为过接口找不相关原文凑数。受控本地加载器须先加载 contracts 再加载 prompts，顺序为 source_context、evidence、contracts、prompts、core、claims、rpc；普通 Python 包导入不需要手工安排。</p>
 <p>数字必须对应所选输出。输出外换算还需calculation说明算式、结果单位和口径；已知期间、总体、分母及分析单位须一致，结果单位允许明确转换。保留support、counterevidence、competition、failure、patents等按问题要求的已查/未查/失败范围；仍由实际取证记录提供，不以文字PASS作为停止条件。</p>
 <p><b>职责限制：</b>BioCheck检查文字与给定输出、口径及引用的一致性；数据集构建、算法执行与复算、统计有效性和模式价值归雷达。这里没有重新执行挖掘算法，也没有因给定output有数字就承认其统计设计有效。</p>
 <h3>这次处理了哪些真实失败</h3>
