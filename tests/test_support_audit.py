@@ -142,7 +142,16 @@ class SupportAuditTests(unittest.TestCase):
                 audit = audit_support(self.packet, review, lambda *args: copy.deepcopy(row["raw_output"]),
                                       targets=[tuple(x) for x in row["targets"]])
                 self.assertEqual(audit.pop("raw_response"), row["raw_output"])
-                self.assertEqual({k: v for k, v in audit.items()
+                # New context is derived from the same fixed source. Historical verdicts and raw receipts stay intact.
+                comparable = copy.deepcopy(audit)
+                for check in comparable["checks"]:
+                    contexts = check.pop("source_context")
+                    for context in contexts:
+                        source = next(e for e in self.packet["evidence"] if e["id"] == context["evidence_id"])
+                        self.assertEqual(context["version"], source["version"])
+                        for paragraph in context["paragraphs"]:
+                            self.assertEqual(source["text"][paragraph["start"]:paragraph["end"]], paragraph["text"])
+                self.assertEqual({k: v for k, v in comparable.items()
                                   if k not in {"draft", "evidence_catalog", "source_updates", "analysis_signature"}}, row["audit"])
                 self.assertEqual(audit["draft"], self.review["draft"])
                 self.assertEqual(review, before)

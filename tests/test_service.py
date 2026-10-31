@@ -109,6 +109,27 @@ class HTTPTests(unittest.TestCase):
             self.assertEqual({k: observed["model_call"][k] for k in expected}, expected)
         self.assertEqual(self.step(body), completed)
 
+    def test_paragraph_receipts_cross_http_restart_and_only_retry_length(self):
+        from test_paragraph_verify import request as paragraph_request, accept, answer, coverage
+        body = paragraph_request()
+        first = self.step(body)
+        accept(body, first, answer(first["model_call"]["payload"]))
+        second = self.step(body)
+        accept(body, second, "truncated public JSON", "length")
+        self.stop_server()
+        self.start_server()
+        retry = self.step(body)
+        self.assertEqual(retry["model_call"]["stage"], "verify_paragraph_retry")
+        self.assertEqual(self.step(body), retry)
+        accept(body, retry, answer(retry["model_call"]["payload"]))
+        final_check = self.step(body)
+        self.assertEqual(final_check["model_call"]["max_output_tokens"], 8192)
+        accept(body, final_check, coverage(final_check["model_call"]["payload"]))
+        done = self.step(body)
+        self.assertEqual(done["status"], "completed")
+        self.assertEqual(done["result"]["status"], "PASS")
+        self.assertEqual(self.step(body), done)
+
     def test_plan_and_write_can_be_checkpointed_independently(self):
         body = request("plan", {"packet": PACKET})
         planned = self.step(body)

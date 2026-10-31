@@ -124,6 +124,8 @@ source_identity仅识别固定来源，不是额外事实依据。text_basis为p
 检查每个实质要点及其对象、条件、时间和强度。多段可以共同支持；不要求每段单独支持整个陈述。
 结论supported：所选片段共同足够支持；not_supported：所选片段缺少所需事实或与之冲突；
 uncertain：现有片段下无法可靠判断。not_supported不等于正文事实错误，也不要求改写正文。
+source_context提供所引原文所在整段、相邻段和材料标题，均来自同一固定版本，仅帮助辨认实验室、研究、日期、人群及代词归属。
+这些额外上下文没有自动成为已引用证据。不能拿其中独有的事实、结果或数字填补evidence缺口；需要它们作为事实依据时明确指出应补选原文。
 材料标题仅说明谈论对象，不能代替对象属性、关系或结果的证据。
 supported必须在support摘录真正支持事实的逐字原文；不得选输入以外的片段，不得改写引文。
 逐条返回，unit_id和claim_index原样保留，不遗漏、不重复。
@@ -145,4 +147,19 @@ VERIFY_REPAIR = """
 基于同一完整draft、units、固定packet与来源版本，返回完整核验JSON。只补齐或纠正报错的结构字段；原来有效的声明文本、verdict、理由、来源引用、来源用途和范围限定全部保持，不重排段落或声明。
 不能用段落supported代填子声明；缺失的子声明结论仍须逐条核对原正文和原证据。不得把insufficient/contradicted改成supported，不补写原稿没有的限定，不更换证据来制造通过。
 JSON字段排序不影响结果，但改动未报错的已有内容将被拒绝。纠错后仍执行完整原验证器；正确结构不等于事实或语义正确。
+"""
+
+
+VERIFY_PARAGRAPH = VERIFY + """
+本次执行采用分段核验。units只含当前要核验的一个段落，draft仍是同一份完整原稿，供解释代词和检查遗漏。
+只返回指定unit_id的一条review，不能再次输出其他段落的reviews。原有六类问题、子事实覆盖、来源状态和引用规则全部保持。
+coverage针对完整任务与完整draft：指出重要材料、反证或条件是否在稿中遗漏；不要要求单个段落独自回答全部问题。
+输出简洁的结构化结论，理由写到足以定位问题，不重复抄写原文或展开长篇分析。句子编号已在units.sentences中提供，位置仍相对unit.text。
+"""
+
+VERIFY_COVERAGE = """检查同一份最终稿是否回答任务、遗漏重要限定或反证、段落之间是否矛盾。只返回JSON。
+你收到question、draft、checked_unit_ids和paragraph_findings；后者是各段已完成核验的精简发现，不是新的原始证据。
+本步骤不重新评价逐条事实、不推翻已发现的问题，不虚构未读材料。不确定或无法完成的检查明确为uncertain。
+把所有checked_unit_ids原样逐一列回，不遗漏、不重复。coverage.reason简短指出缺口及相关段号，避免重复整稿。
+只返回：{"checked_unit_ids":["U1","U2"],"coverage":{"verdict":"complete|incomplete|uncertain","reason":"整体回答、遗漏和跨段一致性的检查结果"}}
 """

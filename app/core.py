@@ -1,15 +1,16 @@
 """Evidence-bound writing and verification. No network or database calls here."""
 import re
 import json
+import hashlib
 from copy import deepcopy
 from decimal import Decimal
 
-from .prompts import WRITE, PLAN, BOUND_PLAN, VERIFY, REVISE, SUPPORT_AUDIT, REPLAN, VERIFY_REPAIR
+from .prompts import WRITE, PLAN, BOUND_PLAN, VERIFY, REVISE, SUPPORT_AUDIT, REPLAN, VERIFY_REPAIR, VERIFY_PARAGRAPH, VERIFY_COVERAGE
 from .evidence import model_input, locate_support, reference_target, analysis_results, locate_analysis, analysis_signature
 from .source_context import evidence_catalog, source_updates, read_requests, check_source_use
 from .contracts import (check_plan, PlanReferenceError, PLAN_DIAGNOSTIC_LIMIT,
                         check_verification_contract, VerificationContractError,
-                        same_outside_errors)
+                        same_outside_errors, VerificationCompletionError)
 
 CITATION = re.compile(r"\[([A-Za-z][A-Za-z0-9_.:-]*)\]")
 NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")
@@ -158,9 +159,104 @@ def claim_citations(text, start, end):
     return set(sentence_refs or CITATION.findall(text))
 
 
-def verify(packet, draft, call, *, max_verify_retries=0):
+def _draft_sentences(text):
+    """Number draft sentences for diagnostics; never change source segment IDs."""
+    sentences, start = [], 0
+    for match in re.finditer(r"[。！？]+[”’」』]?|[.!?]+(?=\s|$)|\n+|\Z", text):
+        end = match.end()
+        if text[start:end].strip():
+            sentences.append({"number": len(sentences) + 1, "start": start, "end": end})
+        start = end
+    return sentences
+
+
+def _verify_paragraphs(source, draft, units, call):
+    """Collect one completed verdict per paragraph, then check whole-draft coverage."""
+    reviews, local_coverage, recorded = [], [], []
+    draft_sha256 = hashlib.sha256(draft.encode()).hexdigest()
+    numbered = model_input(source)
+
+    def completed(stage, instruction, payload, unit_id=None):
+        for attempt in range(2 if unit_id else 1):
+            limit = 16384 if attempt else (12288 if unit_id else 8192)
+            actual_stage = "verify_paragraph_retry" if attempt else stage
+            payload = dict(payload, verification_request={
+                "unit_id": unit_id, "attempt": attempt, "draft_sha256": draft_sha256,
+                "max_output_tokens": limit})
+            receipt = call(actual_stage, instruction, payload)
+            finish = receipt.get("finish_reason") if isinstance(receipt, dict) else None
+            output = receipt.get("output") if isinstance(receipt, dict) else None
+            recorded.append({"stage": actual_stage, "unit_id": unit_id, "attempt": attempt,
+                             "finish_reason": finish, "max_output_tokens": limit,
+                             "output": deepcopy(output)})
+            if finish == "stop" and isinstance(output, dict):
+                return output
+            if finish == "length" and unit_id and attempt == 0:
+                continue
+            code = "model_output_truncated" if finish == "length" else "model_completion_unconfirmed"
+            raise VerificationCompletionError(code, unit_id, finish, attempt)
+
+    for unit in units:
+        sentences = _draft_sentences(unit["text"])
+        one = dict(unit, sentences=sentences)
+        output = completed("verify_paragraph", VERIFY_PARAGRAPH,
+                           dict(numbered, draft=draft, units=[one]), unit["id"])
+        try:
+            check_verification_contract(output, [unit])
+        except VerificationContractError as error:
+            error.retry_eligible = False
+            for diagnostic in error.diagnostics:
+                diagnostic["unit_id"] = unit["id"]
+            raise
+        reviews.extend(output["reviews"])
+        local_coverage.append({"unit_id": unit["id"], **output["coverage"]})
+
+    # No evidence bodies, model receipts or full assessment are copied into this request.
+    findings = [{"unit_id": row["unit_id"], "verdict": row["verdict"],
+                 "reason": str(row.get("reason", ""))[:1024], "coverage": {
+                     "verdict": cov["verdict"], "reason": str(cov.get("reason", ""))[:1024]},
+                 "issues": [{"labels": issue.get("labels", []),
+                             "reason": str(issue.get("reason", ""))[:512]}
+                            for issue in row.get("issues", [])]}
+                for row, cov in zip(reviews, local_coverage)]
+    global_output = completed("verify_coverage", VERIFY_COVERAGE, {
+        "question": source["question"], "draft": draft,
+        "checked_unit_ids": [u["id"] for u in units], "paragraph_findings": findings})
+    ids = global_output.get("checked_unit_ids")
+    if not isinstance(ids, list) or ids != [u["id"] for u in units]:
+        raise ValueError("全稿覆盖检查遗漏、重复或改动了原稿段落编号")
+    response = {"reviews": reviews, "coverage": global_output.get("coverage")}
+    check_verification_contract(response, units)
+    coverage = response["coverage"]
+    rank = {"complete": 0, "uncertain": 1, "incomplete": 2}
+    worst = max([coverage] + local_coverage, key=lambda x: rank[x["verdict"]])
+    if worst["verdict"] != "complete":
+        response["coverage"] = dict(coverage, verdict=worst["verdict"],
+            reason=worst.get("reason", ""), paragraph_findings=local_coverage,
+            global_finding=deepcopy(coverage))
+    response["paragraph_outputs"] = recorded
+    return response
+
+
+def _add_sentence_diagnostics(review):
+    for unit in review["units"]:
+        sentences = _draft_sentences(unit["text"])
+        unit["sentences"] = sentences
+        for field, index_field in (("claims", "claim_index"), ("issues", "issue_index")):
+            for index, finding in enumerate(unit[field]):
+                start, end = locate_span(unit["text"], finding)
+                finding[index_field] = index
+                finding["sentence_numbers"] = [s["number"] for s in sentences
+                                               if start < s["end"] and end > s["start"]]
+
+
+def verify(packet, draft, call, *, max_verify_retries=0, mode="whole"):
     if type(max_verify_retries) is not int or max_verify_retries not in (0, 1):
         raise ValueError("max_verify_retries只允许0或1")
+    if mode not in ("whole", "paragraph"):
+        raise ValueError("mode只允许whole或paragraph")
+    if mode == "paragraph" and max_verify_retries:
+        raise ValueError("分段核验只重发明确截断的段，不启用整稿结构纠错")
     source = packet_input(packet)
     if not isinstance(draft, str) or not draft.strip():
         raise ValueError("待核稿不能为空")
@@ -171,8 +267,9 @@ def verify(packet, draft, call, *, max_verify_retries=0):
     model_units = [dict(u, numeric_hints=numeric_hints(u, lookup, analyses),
                         citations=[{"reference": m.group(1), "start": m.start(), "end": m.end()}
                                    for m in CITATION.finditer(u["text"])]) for u in units]
-    payload = model_input(dict(source, draft=draft, units=model_units))
-    response = call("verify", VERIFY, payload)
+    payload = model_input(dict(source, draft=draft, units=model_units)) if mode == "whole" else None
+    response = (call("verify", VERIFY, payload) if mode == "whole"
+                else _verify_paragraphs(source, draft, model_units, call))
     try:
         check_verification_contract(response, model_units)
     except VerificationContractError as error:
@@ -469,12 +566,17 @@ def verify(packet, draft, call, *, max_verify_retries=0):
         for request in candidates:
             if request not in all_requests:
                 all_requests.append(request)
-    return {"status": status, "draft": draft, "units": results, "problem_units": problems,
+    result = {"status": status, "draft": draft, "units": results, "problem_units": problems,
             "coverage": coverage, "verification_errors": verification_errors,
             "raw_response": deepcopy(response), "evidence_catalog": catalog,
             "source_updates": source_updates(source), "analysis_signature": analysis_signature(source),
             "read_requests": all_requests,
             "scope": "固定材料内的机器核验；段落覆盖由程序检查，子声明语义由模型判断；分析仅核对给定输出，复算及总体构建由Radar负责"}
+    if mode == "paragraph":
+        result["verification_execution"] = [
+            {k: v for k, v in item.items() if k != "output"} for item in response["paragraph_outputs"]]
+        _add_sentence_diagnostics(result)
+    return result
 
 
 def review_locations_match(review):
@@ -504,6 +606,26 @@ def _validate_audit_answer(answer, passages):
         quote = support.get("quote")
         if passage is None or not isinstance(quote, str) or not quote.strip() or quote not in passage["quote"]:
             raise ValueError("复核摘录不在本条所选片段中")
+
+
+def _audit_source_context(passages, lookup):
+    contexts = {}
+    for passage in passages:
+        key = passage["evidence_id"]
+        source = lookup[key]
+        context = contexts.setdefault(key, {"evidence_id": key, "version": source["version"],
+            "title": source.get("title", ""), "role": "identity_only", "paragraphs": []})
+        paragraphs = split_units(source["text"])
+        indices = {i for i, p in enumerate(paragraphs)
+                   if passage["start"] < p["end"] and passage["end"] > p["start"]}
+        nearby = {j for i in indices for j in (i - 1, i, i + 1) if 0 <= j < len(paragraphs)}
+        for index in sorted(nearby):
+            paragraph = {k: paragraphs[index][k] for k in ("start", "end", "text")}
+            if paragraph not in context["paragraphs"]:
+                context["paragraphs"].append(paragraph)
+    for context in contexts.values():
+        context["paragraphs"].sort(key=lambda p: p["start"])
+    return list(contexts.values())
 
 
 def audit_support(packet, review, call, *, targets=None):
@@ -554,7 +676,8 @@ def audit_support(packet, review, call, *, targets=None):
                     if source.get("text_basis") in {"prior_report", "retrieval_log"}:
                         passage["source_identity"]["text_basis"] = source["text_basis"]
                 items.append(dict(identity, span=claim["span"], span_start=start, span_end=end,
-                                  context=unit["text"], evidence=passages))
+                                  context=unit["text"], evidence=passages,
+                                  source_context=_audit_source_context(passages, lookup)))
             except ValueError as error:
                 errors.append(dict(identity, reason=str(error)))
     if requested is not None and requested - found:

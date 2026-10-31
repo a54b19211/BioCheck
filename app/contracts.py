@@ -202,3 +202,11 @@ def same_outside_errors(before, after, allowed, path=""):
             same_outside_errors(a, b, allowed, path + "/" + str(i))
             for i, (a, b) in enumerate(zip(before, after)))
     return before == after
+
+
+class VerificationCompletionError(ValueError):
+    """A known truncation or an unconfirmed completion is not a semantic verdict."""
+    def __init__(self, code, unit_id, finish_reason, attempt):
+        super().__init__("核验输出未完整结束；保留回执，不采用部分结论")
+        self.code, self.unit_id = code, unit_id
+        self.finish_reason, self.attempt = finish_reason, attempt

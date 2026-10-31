@@ -35,7 +35,7 @@ audit = audit_support(packet, review, call, targets=[("U1", 0), ("U1", 2)])
 # 原 review、原 PASS、原稿均保留；audit 单独存储。
 # audit 为 REVIEW：人工检查所选原文，必要时重选，再单独复核。
 # 不把 audit 传给 revise，不因核验器选错段自动改稿。</pre></div>
-<p>每次有效复核只调用一次 <code>call("support_audit", instruction, {"claims": [...]})</code>。每条输入只含该陈述、待核段落上下文、固定来源身份和该条所选原文；不含旧结论及其理由，不送未选的原文。上下文用于理解代词，不能作为事实证据。多段合起来足够支持即可。</p>
+<p>每次有效复核只调用一次 <code>call("support_audit", instruction, {"claims": [...]})</code>。每条输入包含该陈述、待核正文段落、固定来源身份和已选原文；另在 <code>source_context</code> 提供所引原文所在整段、相邻段及标题，帮助辨认研究、实验室、日期和人群。额外上下文标为 <code>identity_only</code>，不能冒充已选证据；需要其中独有事实时，应补选相应片段。旧结论和理由不送入模型。摘录仍必须逐字位于本条所选的 <code>evidence.quote</code> 内。</p>
 <p>模型回执格式如下；<code>supported</code> 必须摘录本条所选片段内的逐字文字。缺项、重复、未知目标、无效摘录进入 <code>verification_errors</code>，返回 REVIEW。请求失败直接报错，不自动重试。</p>
 <pre>{"checks": [{"unit_id": "U1", "claim_index": 0,
   "verdict": "supported",
@@ -130,7 +130,7 @@ python3 -m unittest discover -s tests -v</pre>
 <tr><td>plan</td><td>packet，method可选</td><td>计划对象；direct为null</td></tr>
 <tr><td>write</td><td>packet，method，已有plan；plain/bound要求有效计划</td><td>method、plan、draft</td></tr>
 <tr><td>generate</td><td>packet，method可选</td><td>组合规划及写作，返回method、plan、draft；不强制核验或修订</td></tr>
-<tr><td>verify</td><td>packet、draft</td><td>完整Review：status、draft、units、coverage、problem_units、verification_errors、raw_response等</td></tr>
+<tr><td>verify</td><td>packet、draft；mode可选（whole或paragraph）</td><td>完整Review：status、draft、units、coverage、problem_units、verification_errors、raw_response等</td></tr>
 <tr><td>audit_support</td><td>packet、完整review，targets可选</td><td>片段复核对象，含status、checks、skipped、verification_errors、raw_response</td></tr>
 <tr><td>quality_feedback</td><td>完整review；audit、source_errors可选</td><td>evidence_gaps、repair_units、review_required及原机器状态；零模型请求</td></tr>
 <tr><td>revise</td><td>packet、完整review；audit、source_errors可选</td><td>draft、changed_units；可能没有实际修改，新文字须另行verify</td></tr>
@@ -147,7 +147,25 @@ python3 -m unittest discover -s tests -v</pre>
 <p>上例只说明外层格式，packet须有有效原文或下文的分析结果。缺模型输出时服务返回model_required及model_call，其中包含call_id、request_hash、stage、instruction、payload和schema。schema为null表示原方法未指定，宿主继续其默认object约束。雷达保存真实请求并执行模型，再把已完成公开输出作为下列回执传回，同时固定首轮provider_version和原arguments：</p>
 <pre>{"call_id": "服务给出的值", "request_hash": "服务给出的值", "output": {"模型公开JSON结果": "..."} }</pre>
 <p>服务生成请求标识，宿主原样回传。标识绑定方法版本、operation_id、操作、完整输入、序号及具体模型请求；混入、乱序、重复或多余回执均拒绝。服务没有操作数据库或队列，HTTP丢响应或重启后可用固定请求及前序回执重放。重复返回model_required并不授权再次付费：雷达先查自己的账本，unknown/failed不能当成已完成回执。已完成模型回执的一致性、权限、期限和恢复仍归宿主。</p>
-<p>输入上限16MiB，每个操作最多8个模型步骤。合法JSON请求的操作结果通过HTTP200内的completed/model_required/failed区分；传输错误另返回400、401、404、413或415。无效输入、版本不符和坏回执有明确error_code，不能转换成科学结论。</p>
+<p>输入上限16MiB；旧模式每个操作最多8个模型步骤，分段核验按下文的段数计算。合法JSON请求的操作结果通过HTTP200内的completed/model_required/failed区分；传输错误另返回400、401、404、413或415。无效输入、版本不符和坏回执有明确error_code，不能转换成科学结论。</p>
+<h3 id="paragraph-verification">长稿怎么分段核验</h3>
+<p>请求仍用 <code>verify</code>，增加 <code>mode="paragraph"</code>，<code>max_verify_retries</code> 保持0。没有传mode时继续使用原whole模式及原回执格式。一篇5段报告，正常是5次段落检查加1次整稿检查；某一段明确截断，只补发那一段一次，已经完成的段落不重做。</p>
+<pre>{"operation":"verify","arguments":{
+  "packet":{"question":"...","evidence":["这里放实际固定证据"]},
+  "draft":"同一份完整最终稿","mode":"paragraph","max_verify_retries":0
+}}</pre>
+<table><thead><tr><th>模型阶段</th><th>实际检查范围</th><th>输出上限</th></tr></thead><tbody>
+<tr><td>verify_paragraph</td><td>一个固定段号；完整原稿用于理解指代，固定材料用于核验</td><td>12,288 token</td></tr>
+<tr><td>verify_paragraph_retry</td><td>只有明确以length结束的该段，最多一次</td><td>16,384 token</td></tr>
+<tr><td>verify_coverage</td><td>当前稿、任务和各段精简发现；检查整体回答及跨段一致性，不复制原件全文或全部回执</td><td>8,192 token</td></tr>
+</tbody></table>
+<p>新阶段的 <code>model_call.max_output_tokens</code> 是本次输出上限，雷达据此设置模型请求并只预留下一个请求。正常调用数是N+1；每段都截断一次时最多2N+1，这是次数边界，不要求一次性预留全部额度。实际用量和费用由雷达记录。</p>
+<pre>{"call_id":"原值","request_hash":"原值","finish_reason":"stop","output":{"模型公开JSON":"..."}}
+{"call_id":"原值","request_hash":"原值","finish_reason":"length","output":"保留的公开截断输出，也可为null"}</pre>
+<p>分段模式要求真实结束原因。stop必须附已解析JSON对象；length只允许该段重新请求一次，第二次仍截断便停止。未知结束状态、没有回执、解析失败都不能冒充length。宿主先恢复已收到的回执；相同待执行请求返回同一个call_id，不表示可以重复付费。输入、稿件或已完成回执变化后，后续旧回执不能继续使用。整稿检查截断也停止，不再整篇重发。</p>
+<p>程序逐一检查所有段号，并在最后检查整稿覆盖；少段、重复段或别的稿件回执都不能通过。任一已发现的事实、引用或覆盖问题继续保留，整稿检查不能把它抹掉。输出仍是完整Review；分段模式增加 <code>verification_execution</code> 记录各次结束原因和上限，<code>raw_response.paragraph_outputs</code> 保留公开输出（含截断那次）。</p>
+<p>诊断导出读取 <code>units[].unit_id</code>、<code>claims[].claim_index</code>、<code>issues[].issue_index</code>、<code>sentence_numbers</code>、原有labels及evidence/analysis_refs。句子序号从每段的1开始；位置仍用该段内Unicode码点，左闭右开。中文连续句和无标点尾句也保留。原文证据的S编号不变。</p>
+<p>本次只做代码、保存回执比较和合成HTTP检查，没有自行重跑B或完整矩阵。能否让实际稿件通过，仍由协调侧封存材料后运行并独立核实。分段执行和增加上下文不能保证模型不误判。</p>
 <h3>分析结果怎样进入报告</h3>
 <p>原文放evidence；雷达已经计算的结果放assessment.analysis_results；待验证推断在核验中标为hypothesis。analysis_results保留可重建的数据、方法和口径信息，不能把文档命中数写成项目总体，把局部观察写成行业统计。</p>
 <pre>{"question":"本窗口有多少项目？","evidence":[],"assessment":{"analysis_results":[{
