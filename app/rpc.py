@@ -13,7 +13,7 @@ OPERATIONS = {
     "plan": ({"packet"}, {"method", "max_plan_retries"}),
     "write": ({"packet"}, {"method", "plan"}),
     "generate": ({"packet"}, {"method", "max_plan_retries"}),
-    "verify": ({"packet", "draft"}, {"max_verify_retries", "mode"}),
+    "verify": ({"packet", "draft"}, {"max_verify_retries", "mode", "previous_review"}),
     "audit_support": ({"packet", "review"}, {"targets"}),
     "quality_feedback": ({"review"}, {"audit", "source_errors"}),
     "revise": ({"packet", "review"}, {"audit", "source_errors"}),
@@ -41,7 +41,7 @@ def digest(value):
 def method_version():
     # Hash executable methods and this transport, never environment files or model credentials.
     folder = Path(__file__).parent
-    names = ("core.py", "contracts.py", "evidence.py", "prompts.py", "analysis.py", "source_context.py", "rpc.py", "service.py")
+    names = ("core.py", "claims.py", "contracts.py", "evidence.py", "prompts.py", "analysis.py", "source_context.py", "rpc.py", "service.py")
     code = [(name, (folder / name).read_text()) for name in names if (folder / name).is_file()]
     return digest(code)
 
@@ -68,10 +68,13 @@ def capabilities():
                                 "stages": ["verify_repair"], "diagnostic_limit": 8},
         "paragraph_verification": {
             "argument": "mode", "default": "whole", "value": "paragraph",
-            "stages": {"verify_paragraph": 12288, "verify_paragraph_retry": 16384, "verify_coverage": 8192},
-            "max_model_calls": "2 * paragraph_count + 1",
+            "grain": "cited_claims", "maximum_claims_per_batch": 3, "maximum_batch_bytes": 120000,
+            "stages": {"verify_claim": 12288, "verify_claim_retry": 16384, "verify_coverage": 8192,
+                       "revise_claims": 16384},
+            "max_model_calls": "2 * claim_count + 1 (upper bound; actual requests batch up to 3 claims)",
+            "previous_review": "optional full same-method review; exact claim/context/source binding required",
             "receipt_fields": ["call_id", "request_hash", "finish_reason", "output"],
-            "retry_on": "length", "max_retries_per_paragraph": 1,
+            "retry_on": "length", "max_retries_per_batch": 1,
             "format_retry": False, "unknown_result": "recover_same_call_before_dispatch"},
     }
 
@@ -79,7 +82,10 @@ def capabilities():
 def _model_call_limit(operation, arguments):
     if operation == "verify" and arguments.get("mode") == "paragraph":
         draft = arguments.get("draft")
-        return 2 * len(core.split_units(draft)) + 1 if isinstance(draft, str) else 0
+        from .claims import sentences
+        return 2 * len(sentences(draft)) + 1 if isinstance(draft, str) else 0
+    if operation == "revise" and arguments.get("review", {}).get("verification_method") == "cited_claims":
+        return 1
     return MAX_MODEL_CALLS
 
 
@@ -98,7 +104,7 @@ def _validate(request):
     required, optional = OPERATIONS[operation]
     if not isinstance(arguments, dict) or required - arguments.keys() or arguments.keys() - required - optional:
         raise ProtocolError("invalid_arguments", "操作参数缺失或包含未知字段")
-    for field in ("packet", "review"):
+    for field in ("packet", "review", "previous_review"):
         if field in arguments and not isinstance(arguments[field], dict):
             raise ProtocolError("invalid_arguments", "packet/review必须为JSON对象")
     if "audit" in arguments and arguments["audit"] is not None and not isinstance(arguments["audit"], dict):
@@ -116,7 +122,8 @@ def _validate(request):
         raise ProtocolError("provider_version_required", "续轮必须固定provider_version")
     if version is not None and version != PROVIDER_VERSION:
         raise ProtocolError("provider_version_mismatch", "方法版本已变化，不能混用先前回执")
-    paragraph_mode = operation == "verify" and arguments.get("mode") == "paragraph"
+    paragraph_mode = (operation == "verify" and arguments.get("mode") == "paragraph"
+                      or operation == "revise" and arguments.get("review", {}).get("verification_method") == "cited_claims")
     fields = {"call_id", "request_hash", "output"} | ({"finish_reason"} if paragraph_mode else set())
     seen = set()
     for receipt in receipts:
@@ -153,7 +160,8 @@ def execute(request):
                                  "operation_id": request["operation_id"], "operation": operation,
                                  "arguments": arguments})
         used = 0
-        paragraph_mode = operation == "verify" and arguments.get("mode") == "paragraph"
+        paragraph_mode = (operation == "verify" and arguments.get("mode") == "paragraph"
+                      or operation == "revise" and arguments.get("review", {}).get("verification_method") == "cited_claims")
         call_limit = _model_call_limit(operation, arguments)
 
         def call(stage, instruction, payload):
@@ -201,7 +209,8 @@ def execute(request):
         return dict(reply, status="model_required", model_call=needed.model_call)
     except core.VerificationCompletionError as error:
         return dict(reply, status="failed", error_code=error.code, message=str(error),
-                    unit_id=error.unit_id, finish_reason=error.finish_reason, attempt=error.attempt)
+                    unit_id=error.unit_id, claim_ids=getattr(error, "claim_ids", []),
+                    finish_reason=error.finish_reason, attempt=error.attempt)
     except core.VerificationContractError as error:
         attempted = error.repair_attempted
         return dict(reply, status="failed",

@@ -5,7 +5,7 @@ BASE = """你处理研究与业务分析文字，包括药物研发、管线竞�
 assessment.research_scope由调度方提供检索范围和已查/未查/失败记录，不把未查或检索失败解释为不存在。
 涉及上一版报告时，text_basis为prior_report的证据只证明该版曾怎样表述，不能作为临床或商业事实依据。
 text_basis为retrieval_log的证据只证明实际检索过程，查无结果不证明没有反证、竞争或专利限制。
-assessment.analysis_results是Radar已计算的结果，不是原文或新增实验。逐项保留id、dataset_ref、method_version、parameters、output、input_refs、calculation_basis和limitations的对应；BioCheck核对表达与给定输出的一致性，不复算Radar算法，不自行构建总体。
+assessment.analysis_result_context仅按applies_to_result_ids和fields为指定分析结果声明共同参数/口径/局限；其它行不继承，原output路径不变。\nassessment.analysis_results是Radar已计算的结果，不是原文或新增实验。逐项保留id、dataset_ref、method_version、parameters、output、input_refs、calculation_basis和limitations的对应；BioCheck核对表达与给定输出的一致性，不复算Radar算法，不自行构建总体。
 原文事实、分析计算结果和待验证假设分别表达。检索top-k、文档数、排名、共现不等于总体、独立研究数、项目数、因果或统计显著性。局部窗口不能外推全行业或完整人群。
 分析数值须与其分析单位、单位/币种、期间、总体/地区/人群、分母及限制绑定；unknown保持unknown。假设须明确待验证条件，不写成已确立发现。
 assessment.source_updates给出当前可见的更正/撤回关系，按target和replacement的record_id+version对应，不按标题猜。被更正的旧数不能当当前数；缺更正通知正文时指出需补读的记录和版本。历史回顾明确“当时披露…，后更正/已撤回…”，并引用两端原文。分析结果若仍使用被更正的输入，也需要重算或明确只是旧版结果。
@@ -150,16 +150,44 @@ JSON字段排序不影响结果，但改动未报错的已有内容将被拒绝�
 """
 
 
-VERIFY_PARAGRAPH = VERIFY + """
-本次执行采用分段核验。units只含当前要核验的一个段落，draft仍是同一份完整原稿，供解释代词和检查遗漏。
-只返回指定unit_id的一条review，不能再次输出其他段落的reviews。原有六类问题、子事实覆盖、来源状态和引用规则全部保持。
-coverage针对完整任务与完整draft：指出重要材料、反证或条件是否在稿中遗漏；不要要求单个段落独自回答全部问题。
-输出简洁的结构化结论，理由写到足以定位问题，不重复抄写原文或展开长篇分析。句子编号已在units.sentences中提供，位置仍相对unit.text。
-"""
-
 VERIFY_COVERAGE = """检查同一份最终稿是否回答任务、遗漏重要限定或反证、段落之间是否矛盾。只返回JSON。
 你收到question、draft、checked_unit_ids和paragraph_findings；后者是各段已完成核验的精简发现，不是新的原始证据。
 本步骤不重新评价逐条事实、不推翻已发现的问题，不虚构未读材料。不确定或无法完成的检查明确为uncertain。
 把所有checked_unit_ids原样逐一列回，不遗漏、不重复。coverage.reason简短指出缺口及相关段号，避免重复整稿。
 只返回：{"checked_unit_ids":["U1","U2"],"coverage":{"verdict":"complete|incomplete|uncertain","reason":"整体回答、遗漏和跨段一致性的检查结果"}}
+"""
+
+
+CLAIM_VERIFY = BASE + """
+逐条核对claims中的完整原句，只对照该句references明确允许的引用范围，不替作者改句。
+references表按原文保存了固定窗口或明确S段；一个claim不能借用别的claim的引用。
+identity_context、标题及相邻稿句仅辨认研究/实验室/日期/人群/代词，不是新增的事实依据。
+supported表示所有实质要点与限定都受实际引用支持；contradicted表示实际引用明确相反；
+insufficient表示缺依据或无法确定。引用不支持不等于这个事实在现实世界中必然错误。
+每条输出原claim_id、verdict、quotes、reason四个字段。quotes必须逐字截取对应reference.text，
+非空、连续且能唯一定位；需要多个来源或多处时给多条短引。不要抄背景段，不改写，不猜引用。
+supported须为本句每个实际引用提供短引；只找到同一个数字或关键词不等于全部关系成立。
+verdict是小对象：status、kind、source_use、labels必填。kind和source_use使用原规则，
+保留更正/未证实/信息环境/分析结果约束；需要时再给attribution_span、uncertainty_span、
+history_context、missing_information、binding或numeric_resolutions，不为省字段绕过这些检查。
+analysis_result引用的是给定计算输出及口径，quotes从对应reference.text摘录，
+binding逐项保留给定calculation_basis；不把计算输出当作实验原件。输出外换算仍解释实际计算。
+数值解释只能用本句实际引用且已给短引的依据；分析换算短引保留完整JSON值或成员，不能只截数字字符。
+source_absence仅在实际引用覆盖完整已声明采用窗口时成立；局部S段不代表整份材料都未提供。
+labels只用OBJ/NUM/TIME/COND/STR/REF，正确句为空。判断对象/设计/组别、单位分母、时间、人群、
+因果或显著性、引用是否一致；材料沉默只能说明本次材料没说，不能断言现实中不存在。
+每条都给简短具体理由；原句中的同文重复、复合事实都按当前claim_id核对，不能漏项。
+只返回：
+{"checks":[{"claim_id":"输入原值",
+ "verdict":{"status":"supported|contradicted|insufficient","kind":"fact","source_use":"current_fact","labels":[]},
+ "quotes":[{"reference":"输入实际引用原值","quote":"该引用text内的连续短引"}],
+ "reason":"具体支持关系或缺口"}]}
+"""
+
+CLAIM_REVISE = BASE + """
+只修claims中已由有效原文判定失败的句子。按claim_id返回一个完整非空替换句，不重写整段，
+不改相邻句，不删掉难处理的句子。references给出这些句子实际引用的固定范围；额外标题或邻段
+仍只用于定位，不能成为新事实依据。只保留或收窄这些实际引用，不引用未给出的来源或邻段。
+保留所有正确事实和限制，只纠正finding指出的错误。不能因证据不足制造肯定答案。
+返回{"replacements":[{"claim_id":"原值","text":"一个修订后的句子，保留准确引用"}]}。
 """

@@ -119,7 +119,7 @@ class HTTPTests(unittest.TestCase):
         self.stop_server()
         self.start_server()
         retry = self.step(body)
-        self.assertEqual(retry["model_call"]["stage"], "verify_paragraph_retry")
+        self.assertEqual(retry["model_call"]["stage"], "verify_claim_retry")
         self.assertEqual(self.step(body), retry)
         accept(body, retry, answer(retry["model_call"]["payload"]))
         final_check = self.step(body)

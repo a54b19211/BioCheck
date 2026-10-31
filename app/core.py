@@ -5,7 +5,7 @@ import hashlib
 from copy import deepcopy
 from decimal import Decimal
 
-from .prompts import WRITE, PLAN, BOUND_PLAN, VERIFY, REVISE, SUPPORT_AUDIT, REPLAN, VERIFY_REPAIR, VERIFY_PARAGRAPH, VERIFY_COVERAGE
+from .prompts import WRITE, PLAN, BOUND_PLAN, VERIFY, REVISE, SUPPORT_AUDIT, REPLAN, VERIFY_REPAIR
 from .evidence import model_input, locate_support, reference_target, analysis_results, locate_analysis, analysis_signature
 from .source_context import evidence_catalog, source_updates, read_requests, check_source_use
 from .contracts import (check_plan, PlanReferenceError, PLAN_DIAGNOSTIC_LIMIT,
@@ -162,80 +162,12 @@ def claim_citations(text, start, end):
 def _draft_sentences(text):
     """Number draft sentences for diagnostics; never change source segment IDs."""
     sentences, start = [], 0
-    for match in re.finditer(r"[。！？]+[”’」』]?|[.!?]+(?=\s|$)|\n+|\Z", text):
+    for match in re.finditer(r"[。！？]+[”’」』]?|[.!?]+(?=\s|\[|$)|\n+|\Z", text):
         end = match.end()
         if text[start:end].strip():
             sentences.append({"number": len(sentences) + 1, "start": start, "end": end})
         start = end
     return sentences
-
-
-def _verify_paragraphs(source, draft, units, call):
-    """Collect one completed verdict per paragraph, then check whole-draft coverage."""
-    reviews, local_coverage, recorded = [], [], []
-    draft_sha256 = hashlib.sha256(draft.encode()).hexdigest()
-    numbered = model_input(source)
-
-    def completed(stage, instruction, payload, unit_id=None):
-        for attempt in range(2 if unit_id else 1):
-            limit = 16384 if attempt else (12288 if unit_id else 8192)
-            actual_stage = "verify_paragraph_retry" if attempt else stage
-            payload = dict(payload, verification_request={
-                "unit_id": unit_id, "attempt": attempt, "draft_sha256": draft_sha256,
-                "max_output_tokens": limit})
-            receipt = call(actual_stage, instruction, payload)
-            finish = receipt.get("finish_reason") if isinstance(receipt, dict) else None
-            output = receipt.get("output") if isinstance(receipt, dict) else None
-            recorded.append({"stage": actual_stage, "unit_id": unit_id, "attempt": attempt,
-                             "finish_reason": finish, "max_output_tokens": limit,
-                             "output": deepcopy(output)})
-            if finish == "stop" and isinstance(output, dict):
-                return output
-            if finish == "length" and unit_id and attempt == 0:
-                continue
-            code = "model_output_truncated" if finish == "length" else "model_completion_unconfirmed"
-            raise VerificationCompletionError(code, unit_id, finish, attempt)
-
-    for unit in units:
-        sentences = _draft_sentences(unit["text"])
-        one = dict(unit, sentences=sentences)
-        output = completed("verify_paragraph", VERIFY_PARAGRAPH,
-                           dict(numbered, draft=draft, units=[one]), unit["id"])
-        try:
-            check_verification_contract(output, [unit])
-        except VerificationContractError as error:
-            error.retry_eligible = False
-            for diagnostic in error.diagnostics:
-                diagnostic["unit_id"] = unit["id"]
-            raise
-        reviews.extend(output["reviews"])
-        local_coverage.append({"unit_id": unit["id"], **output["coverage"]})
-
-    # No evidence bodies, model receipts or full assessment are copied into this request.
-    findings = [{"unit_id": row["unit_id"], "verdict": row["verdict"],
-                 "reason": str(row.get("reason", ""))[:1024], "coverage": {
-                     "verdict": cov["verdict"], "reason": str(cov.get("reason", ""))[:1024]},
-                 "issues": [{"labels": issue.get("labels", []),
-                             "reason": str(issue.get("reason", ""))[:512]}
-                            for issue in row.get("issues", [])]}
-                for row, cov in zip(reviews, local_coverage)]
-    global_output = completed("verify_coverage", VERIFY_COVERAGE, {
-        "question": source["question"], "draft": draft,
-        "checked_unit_ids": [u["id"] for u in units], "paragraph_findings": findings})
-    ids = global_output.get("checked_unit_ids")
-    if not isinstance(ids, list) or ids != [u["id"] for u in units]:
-        raise ValueError("全稿覆盖检查遗漏、重复或改动了原稿段落编号")
-    response = {"reviews": reviews, "coverage": global_output.get("coverage")}
-    check_verification_contract(response, units)
-    coverage = response["coverage"]
-    rank = {"complete": 0, "uncertain": 1, "incomplete": 2}
-    worst = max([coverage] + local_coverage, key=lambda x: rank[x["verdict"]])
-    if worst["verdict"] != "complete":
-        response["coverage"] = dict(coverage, verdict=worst["verdict"],
-            reason=worst.get("reason", ""), paragraph_findings=local_coverage,
-            global_finding=deepcopy(coverage))
-    response["paragraph_outputs"] = recorded
-    return response
 
 
 def _add_sentence_diagnostics(review):
@@ -250,7 +182,7 @@ def _add_sentence_diagnostics(review):
                                                if start < s["end"] and end > s["start"]]
 
 
-def verify(packet, draft, call, *, max_verify_retries=0, mode="whole"):
+def verify(packet, draft, call, *, max_verify_retries=0, mode="whole", previous_review=None):
     if type(max_verify_retries) is not int or max_verify_retries not in (0, 1):
         raise ValueError("max_verify_retries只允许0或1")
     if mode not in ("whole", "paragraph"):
@@ -260,6 +192,11 @@ def verify(packet, draft, call, *, max_verify_retries=0, mode="whole"):
     source = packet_input(packet)
     if not isinstance(draft, str) or not draft.strip():
         raise ValueError("待核稿不能为空")
+    if mode == "paragraph":
+        from . import claims
+        return claims.verify(source, draft, call, previous_review)
+    if previous_review is not None:
+        raise ValueError("previous_review只用于主张级核验，旧whole模式不复用")
     units = split_units(draft)
     lookup = {e["id"]: e for e in source["evidence"]}
     analyses = analysis_results(source)
@@ -267,9 +204,8 @@ def verify(packet, draft, call, *, max_verify_retries=0, mode="whole"):
     model_units = [dict(u, numeric_hints=numeric_hints(u, lookup, analyses),
                         citations=[{"reference": m.group(1), "start": m.start(), "end": m.end()}
                                    for m in CITATION.finditer(u["text"])]) for u in units]
-    payload = model_input(dict(source, draft=draft, units=model_units)) if mode == "whole" else None
-    response = (call("verify", VERIFY, payload) if mode == "whole"
-                else _verify_paragraphs(source, draft, model_units, call))
+    payload = model_input(dict(source, draft=draft, units=model_units))
+    response = call("verify", VERIFY, payload)
     try:
         check_verification_contract(response, model_units)
     except VerificationContractError as error:
@@ -572,10 +508,6 @@ def verify(packet, draft, call, *, max_verify_retries=0, mode="whole"):
             "source_updates": source_updates(source), "analysis_signature": analysis_signature(source),
             "read_requests": all_requests,
             "scope": "固定材料内的机器核验；段落覆盖由程序检查，子声明语义由模型判断；分析仅核对给定输出，复算及总体构建由Radar负责"}
-    if mode == "paragraph":
-        result["verification_execution"] = [
-            {k: v for k, v in item.items() if k != "output"} for item in response["paragraph_outputs"]]
-        _add_sentence_diagnostics(result)
     return result
 
 
@@ -853,10 +785,19 @@ def quality_feedback(review, audit=None, *, source_errors=()):
     # A whole paragraph edit can alter a correct-but-unproven statement in that paragraph.
     if not waiting:
         result["repair_units"] = list(dict.fromkeys(u for u in candidates if u not in blocked))
+    if review.get("verification_method") == "cited_claims":
+        from .claims import repair_candidates
+        result["repair_claims"] = repair_candidates(review) if not waiting else []
+        result["repair_units"] = list(dict.fromkeys(
+            u["unit_id"] for u in review.get("units", []) for c in u.get("claims", [])
+            if c.get("claim_id") in result["repair_claims"]))
     return result
 
 
 def revise(packet, review, call, *, audit=None, source_errors=()):
+    if review.get("verification_method") == "cited_claims":
+        from . import claims
+        return claims.revise(packet, review, call, audit=audit, source_errors=source_errors)
     source = packet_input(packet)
     units = review["units"]
     feedback = quality_feedback(review, audit, source_errors=source_errors)

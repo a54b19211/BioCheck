@@ -1,5 +1,6 @@
 """Locate fixed source passages and supplied calculation outputs; perform no mining."""
 import re
+from copy import deepcopy
 import hashlib
 import json
 from .source_context import SOURCE_FIELDS
@@ -84,11 +85,47 @@ def reference_target(reference, evidence):
     return reference, None
 
 
+def _restore_analysis_context(results, context):
+    if context is None:
+        return results
+    if (not isinstance(context, dict)
+            or context.get("projection_version") != "shared-calculation-context-v1"):
+        raise ValueError("共享分析口径版本无效")
+    targets, fields, paths = (context.get(k) for k in ("applies_to_result_ids", "fields", "source_paths"))
+    if (not isinstance(targets, list) or not targets or any(not isinstance(k, str) for k in targets)
+            or len(set(targets)) != len(targets) or not isinstance(fields, dict) or not fields
+            or set(fields) - {"parameters", "calculation_basis", "limitations"}
+            or not isinstance(paths, dict) or set(paths) != set(fields)):
+        raise ValueError("共享分析口径须声明明确的行、字段和原路径")
+    if any(not isinstance(row, dict) or not isinstance(row.get("id"), str) for row in results):
+        raise ValueError("分析结果须有明确id")
+    indices = {row["id"]: i for i, row in enumerate(results)}
+    if len(indices) != len(results) or set(targets) - indices.keys():
+        raise ValueError("共享分析口径包含重复或未知结果编号")
+    for field, source_paths in paths.items():
+        expected = [f"$.analysis_results[{indices[key]}].{field}" for key in targets]
+        if source_paths != expected:
+            raise ValueError("共享分析口径的原字段路径与结果编号不对应")
+    restored = deepcopy(results)
+    for key in targets:
+        row = restored[indices[key]]
+        for field, value in fields.items():
+            if field in row:
+                existing = json.dumps(row[field], ensure_ascii=False, sort_keys=True, allow_nan=False)
+                shared = json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
+                if existing != shared:
+                    raise ValueError("共享分析口径与该行已有值冲突")
+            else:
+                row[field] = deepcopy(value)
+    return restored
+
+
 def analysis_results(packet):
     """Keep Radar's supplied results separate from original source text."""
     results = packet.get("assessment", {}).get("analysis_results", [])
     if not isinstance(results, list):
         raise ValueError("assessment.analysis_results须为列表")
+    results = _restore_analysis_context(results, packet.get("assessment", {}).get("analysis_result_context"))
     lookup = {}
     evidence = {e["id"]: e for e in packet.get("evidence", [])}
     for item in results:

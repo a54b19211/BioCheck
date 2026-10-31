@@ -51,5 +51,67 @@ class AnalysisPathTests(unittest.TestCase):
         self.assertEqual(output, original)
 
 
+
+class SharedAnalysisContextTests(unittest.TestCase):
+    def packet(self):
+        from copy import deepcopy
+        item = {"id": "A1", "dataset_ref": "fixed", "method_version": "test",
+                "parameters": {"mode": "fixed"}, "calculation_basis": {"unit": "items"},
+                "limitations": ["synthetic"], "output": {"count": 2},
+                "input_refs": [{"source_record_id": "record", "version": "v1"}]}
+        return {"question": "count", "evidence": [], "assessment": {
+            "analysis_results": [item, dict(deepcopy(item), id="A2")]}}
+
+    def compact(self, packet, fields):
+        from copy import deepcopy
+        value = deepcopy(packet)
+        rows = value["assessment"]["analysis_results"]
+        value["assessment"]["analysis_result_context"] = {
+            "projection_version": "shared-calculation-context-v1",
+            "applies_to_result_ids": [r["id"] for r in rows],
+            "fields": {k: deepcopy(rows[0][k]) for k in fields},
+            "source_paths": {k: [f"$.analysis_results[{i}].{k}" for i in range(len(rows))] for k in fields}}
+        for row in rows:
+            for key in fields:
+                row.pop(key)
+        return value
+
+    def test_shared_subset_restores_exact_values_without_mutating_packet(self):
+        from copy import deepcopy
+        from app.evidence import analysis_results, analysis_signature
+        original = self.packet()
+        for fields in (["parameters"], ["parameters", "calculation_basis", "limitations"]):
+            compact = self.compact(original, fields)
+            before = deepcopy(compact)
+            self.assertEqual(analysis_results(compact), analysis_results(original))
+            self.assertEqual(analysis_signature(compact), analysis_signature(original))
+            self.assertEqual(compact, before)
+
+    def test_conflict_unknown_target_and_wrong_origin_path_are_rejected(self):
+        from copy import deepcopy
+        from app.evidence import analysis_results
+        original = self.compact(self.packet(), ["parameters"])
+        for change in ("conflict", "unknown", "wrong_path"):
+            value = deepcopy(original)
+            if change == "conflict":
+                value["assessment"]["analysis_results"][0]["parameters"] = {"mode": "different"}
+            elif change == "unknown":
+                value["assessment"]["analysis_result_context"]["applies_to_result_ids"][0] = "UNKNOWN"
+            else:
+                value["assessment"]["analysis_result_context"]["source_paths"]["parameters"][0] = "$.analysis_results[1].parameters"
+            with self.assertRaises(ValueError):
+                analysis_results(value)
+
+    def test_shared_context_rejects_bool_integer_and_float_type_conflicts(self):
+        from app.evidence import analysis_results
+        for left, right in ((True, 1), (1, 1.0), ({"nested": [False]}, {"nested": [0]})):
+            value = self.compact(self.packet(), ["parameters"])
+            value["assessment"]["analysis_results"][0]["parameters"] = {"flag": left}
+            value["assessment"]["analysis_result_context"]["fields"]["parameters"] = {"flag": right}
+            before = copy.deepcopy(value)
+            with self.assertRaises(ValueError):
+                analysis_results(value)
+            self.assertEqual(value, before)
+
 if __name__ == "__main__":
     unittest.main()
