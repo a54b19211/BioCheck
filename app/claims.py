@@ -21,10 +21,8 @@ UNCERTAIN = re.compile(r"未证实|未经证实|未获证实|未核实|未经核
                        r"unconfirmed|unverified|alleged|hypothes", re.I)
 HYPOTHESIS = re.compile(r"假设|待验证|hypothes", re.I)
 EVENT = re.compile(r"删帖|删除|辟谣|处罚|澄清|delet|denial|penalt|censor", re.I)
-# Wording of an explicit historical account of a corrected / retracted source.
-THEN = re.compile(r"当时|此前|原先|早先|曾披露|曾报告|最初|初报|初稿|原报|initial|previous|original|at the time", re.I)
-UPDATED = re.compile(r"已更正|后更正|更正为|已修订|后修订|已撤回|后撤回|被撤回|已撤稿|[被经][^。；]{0,12}(?:更正|修订|撤回)|"
-                     r"was corrected|was retracted|was withdrawn", re.I)
+SOURCE_NUMBER = re.compile(r"[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")  # sources glue numbers: CI0.4%
+TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:?\d{2}|Z)?")
 
 
 def citations(text):
@@ -79,7 +77,7 @@ def batches(claims, size=MAX_BATCH):
 
 
 def numeric_tokens(text):
-    text = re.sub(r"\b(?:NCT\d+|PMID\s*:?\s*\d+)\b", "", CITE.sub("", text))
+    text = re.sub(r"\b(?:NCT\d+|PMID\s*:?\s*\d+)\b", "", TIMESTAMP.sub("", CITE.sub("", text)))
     text = re.sub(r"[（(]\s*\d{1,2}\s*[)）]", "", text)  # list markers such as （1） are not data
     return list(dict.fromkeys(m.group() for m in NUMBER.finditer(text)))
 
@@ -93,7 +91,7 @@ def _value(token):
 
 def numeric_hints(sentence, cited_texts):
     """Numbers in the sentence that do not literally occur in the cited texts."""
-    available = {_value(t) for text in cited_texts for t in numeric_tokens(text)}
+    available = {_value(m.group()) for text in cited_texts for m in SOURCE_NUMBER.finditer(text)}
     return [t for t in numeric_tokens(sentence) if _value(t) not in available]
 
 
@@ -114,12 +112,12 @@ def source_use_problems(text, cited, evidence, updates):
         if target not in cited:
             continue
         kind = "撤回" if update["kind"] == "retraction" else "更正"
-        # Naming the correction is enough when the sentence only says the old value was later corrected.
+        # The sentence must cite or name the correction; whether the old value is still presented as
+        # current is the model's call (it sees source_updates and both texts).
         named = replacement in cited or re.search(rf"(?<![A-Za-z0-9]){re.escape(replacement)}(?![0-9])", body)
-        historical = THEN.search(body) and UPDATED.search(body) and named and replacement in evidence
-        if not historical:
+        if not (named and replacement in evidence):
             reasons.append(f"source_updated: {target}已被{replacement}{kind}，旧内容不能当作当前事实；"
-                           f"历史回顾须写明“当时…，后{kind}…”并同时引用两端")
+                           f"同句须引用{replacement}，写明“当时…，后{kind}…”")
             if replacement not in evidence:
                 reads.append({"ref": replacement, "reason": f"读取{target}的{kind}通知{replacement}，再核对旧数的适用范围"})
     unverified = [r for r in cited if r in evidence
