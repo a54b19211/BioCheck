@@ -102,8 +102,15 @@ def hints(claim, refs):
     return C.numeric_hints(claim["text"], cited)
 
 
+def mark_superseded(evidence, updates):
+    """The writer sees on each old source which newer one corrects or withdraws it."""
+    later = {u["target"]: u for u in updates}
+    return [dict(e, superseded_by=later[e["id"]]["replacement"]) if e["id"] in later else e for e in evidence]
+
+
 def generate(req, llm=chat_json):
     payload = materials(req)
+    payload["evidence"] = mark_superseded(payload.get("evidence", []), payload.get("source_updates", []))
     budget = Budget(llm, req.get("max_llm_calls", 20))
     thinking = os.environ.get("LLM_WRITE_THINKING", "false").lower() in ("1", "true", "yes")
     out, error = budget.ask("generate", WRITE, payload, DraftOut, max_tokens=8192, thinking=thinking)
@@ -215,9 +222,8 @@ def verify(req, llm=chat_json):
             if claim["verdict"] != "contradicted":
                 claim["verdict"] = "insufficient"
 
-    findings = [{"index": c["index"], "text": c["text"], "verdict": c["verdict"],
-                 **({"reason": c["reason"][:200]} if c["verdict"] != "supported" else {})} for c in sentences]
-    payload = {"question": req["question"], "sentences": findings,
+    # Only the text: given the sentence verdicts, the model just repeats them as coverage gaps.
+    payload = {"question": req["question"], "sentences": [{"index": c["index"], "text": c["text"]} for c in sentences],
                "materials": [{"id": e["id"], "title": e.get("title", ""), "source_kind": e["source_kind"]}
                              for e in req.get("evidence", [])]
                             + [{"id": a["id"], "method": a.get("method", "")} for a in req.get("analysis_results", [])],

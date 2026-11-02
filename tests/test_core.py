@@ -216,3 +216,17 @@ def test_generate_uses_8192_tokens_and_no_thinking_by_default(monkeypatch):
     assert core.generate(request(), llm)["draft"] == "ORR为32%[E1]。"
     assert llm.payloads[0][2] == {"max_tokens": 8192, "thinking": False}
     assert "text" in llm.payloads[0][1]["evidence"][0]
+
+
+def test_generate_marks_the_source_a_newer_one_corrects():
+    llm = FakeLLM(generate=lambda p: {"draft": "ORR为32%[E1]。"})
+    core.generate(request(source_updates=[{"target": "E2", "replacement": "E1", "kind": "correction"}]), llm)
+    e1, e2 = llm.payloads[0][1]["evidence"]
+    assert "superseded_by" not in e1 and e2["superseded_by"] == "E1"
+
+
+def test_coverage_sees_only_the_sentence_text():
+    llm = FakeLLM(verify_claims=supported())
+    verify("2.5 mg/kg组ORR为32%[E1]。", llm)
+    coverage = next(p for stage, p, _ in llm.payloads if stage == "verify_coverage")
+    assert coverage["sentences"] == [{"index": 1, "text": "2.5 mg/kg组ORR为32%[E1]。"}]
