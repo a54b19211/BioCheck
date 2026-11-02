@@ -16,22 +16,40 @@ def test_supported_sentence_passes():
     assert [c["stage"] for c in result["llm_calls"]] == ["verify_claims", "verify_coverage"]
 
 
-@pytest.mark.parametrize("quote,code", [("ORR was 30%", "quote_not_found"), ("ORR was", "quote_ambiguous")])
-def test_bad_quote_makes_only_that_claim_insufficient_and_asks_to_read(quote, code):
-    result = verify("2.5 mg/kg组ORR为32%[E1]。", FakeLLM(verify_claims=supported(quote)))
+def test_bad_quote_makes_only_that_claim_insufficient_and_asks_to_read():
+    result = verify("2.5 mg/kg组ORR为32%[E1]。", FakeLLM(verify_claims=supported("ORR was 30%")))
     claim = result["claims"][0]
-    assert claim["verdict"] == "insufficient" and claim["reason"].startswith(code)
+    assert claim["verdict"] == "insufficient" and claim["reason"].startswith("quote_not_found")
     assert result["status"] == "REVIEW"
     assert [r["ref"] for r in result["read_requests"]] == ["E1"]
 
 
-def test_uncited_sentence_is_insufficient_without_a_model_call():
-    llm = FakeLLM(verify_claims=supported())
-    result = verify("ORR为32%[E1]。PFS为2.8个月。", llm)
+def test_a_quote_that_occurs_twice_is_still_real_support():
+    result = verify("2.5 mg/kg组ORR为32%[E1]。", FakeLLM(verify_claims=supported("ORR was 3")))
+    assert result["claims"][0]["verdict"] == "supported"
+
+
+def answer_each(verdicts, quote="ORR was 32%"):
+    def answer(payload):
+        return {"claims": [{"index": c["index"], "verdict": verdicts[c["index"]], "labels": [],
+                            "quotes": [{"ref": "E1", "quote": quote}] if c["citations"] else [],
+                            "reason": "ok"} for c in payload["claims"]]}
+    return answer
+
+
+def test_uncited_factual_sentence_is_insufficient():
+    result = verify("ORR为32%[E1]。PFS为2.8个月。", FakeLLM(verify_claims=answer_each({1: "supported", 2: "supported"})))
     assert result["claims"][1]["verdict"] == "insufficient"
     assert result["claims"][1]["reason"].startswith("no_citation")
-    assert [c["index"] for c in llm.payloads[0][1]["claims"]] == [1]
     assert result["status"] == "REVIEW"
+
+
+def test_uncited_scope_note_can_be_no_claim_but_not_when_it_has_numbers():
+    llm = FakeLLM(verify_claims=answer_each({1: "supported", 2: "no_claim"}))
+    assert verify("ORR为32%[E1]。以下只讨论本次读取的材料。", llm)["status"] == "PASS"
+    llm = FakeLLM(verify_claims=answer_each({1: "supported", 2: "no_claim"}))
+    result = verify("ORR为32%[E1]。PFS为2.8个月。", llm)
+    assert result["claims"][1]["verdict"] == "insufficient" and result["status"] == "REVIEW"
 
 
 def test_unknown_ref_fails_the_report_even_when_everything_else_is_supported():

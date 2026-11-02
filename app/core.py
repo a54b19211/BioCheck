@@ -22,7 +22,7 @@ class QuoteOut(BaseModel):
 
 class ClaimCheck(BaseModel):
     index: int
-    verdict: Literal["supported", "contradicted", "insufficient"]
+    verdict: Literal["supported", "contradicted", "insufficient", "no_claim"]
     labels: list[str] = []
     quotes: list[QuoteOut] = []
     reason: str = ""
@@ -120,12 +120,12 @@ def judge(claim, answer, refs, evidence):
     for q in answer.quotes:
         where = C.locate_quote(refs[q.ref]["text"], q.quote) if q.ref in claim["citations"] else "outside"
         claim["quotes"].append({"ref": q.ref, "quote": q.quote, "found": where in ("found", "ambiguous")})
-        if where == "found":
+        if where in ("found", "ambiguous"):  # the text is really there; a repeated quote is still support
             good.add(q.ref)
         else:
             problems.append({"outside": f"quote_outside_citation: {q.ref}不是本句的引用",
                              "not_found": f"quote_not_found: 短引不在{q.ref}原文中",
-                             "ambiguous": f"quote_ambiguous: 短引在{q.ref}中出现多次，不能唯一定位"}[where])
+                             }[where])
     if answer.verdict == "supported":
         missing = [r for r in claim["citations"] if r not in good]
         if missing:
@@ -135,6 +135,11 @@ def judge(claim, answer, refs, evidence):
         if unexplained:
             problems.append("numeric_unexplained: 数字" + "、".join(unexplained) + "不在所引原文中，也未说明换算")
             labels = list(dict.fromkeys(labels + ["NUM"]))
+    if answer.verdict == "no_claim" and C.numeric_tokens(claim["text"]):
+        problems.append("no_claim_with_numbers: 含具体数字的句子是可核查陈述")
+    if not claim["citations"] and answer.verdict != "no_claim":
+        problems.insert(0, "no_citation: 本句陈述可核查事实却没有引用，不能借用相邻句的引用")
+        labels = list(dict.fromkeys(labels + ["REF"]))
     if answer.verdict == "contradicted" and not good:
         problems.append("missing_quote: 矛盾判定缺少有效短引")
     claim["verdict"] = "insufficient" if problems else answer.verdict
@@ -159,7 +164,9 @@ def verify(req, llm=chat_json):
         claim.update(verdict="insufficient", labels=[], quotes=[], reason="")
         unknown = [r for r in claim["citations"] if r not in refs]
         if not claim["citations"]:
-            claim.update(labels=["REF"], reason="no_citation: 本句没有引用，不能借用相邻句的引用")
+            # The model decides whether an uncited sentence states a checkable fact (see judge).
+            source_problems[claim["index"]] = []
+            pending.append(claim)
         elif unknown:
             unknown_ref = True
             claim.update(labels=["REF"], reason="unknown_ref: 引用了不存在的编号" + "、".join(unknown))
@@ -219,7 +226,7 @@ def verify(req, llm=chat_json):
 
     if unknown_ref or any(c["verdict"] == "contradicted" for c in sentences):
         status = "FAIL"
-    elif any(c["verdict"] != "supported" for c in sentences) or coverage["verdict"] != "complete":
+    elif any(c["verdict"] not in ("supported", "no_claim") for c in sentences) or coverage["verdict"] != "complete":
         status = "REVIEW"
     else:
         status = "PASS"
@@ -242,7 +249,10 @@ def revise(req, llm=chat_json):
         now = current.get(old["index"])
         if now is None or (now["text"], now["start"]) != (old["text"], old["start"]):
             raise InputError("review_mismatch", "review与draft的句子不对应，请先对这份draft重新核验", 409)
-        if old["verdict"] == "contradicted" and any(q["found"] for q in old["quotes"]):
+        overreach = (old["verdict"] == "insufficient" and now["citations"] and old["labels"]
+                     and not old["reason"].startswith(("no_citation", "unknown_ref", "unchecked", "batch_failed")))
+        if (old["verdict"] == "contradicted" and any(q["found"] for q in old["quotes"])) or (
+                overreach and not old.get("scope_span")):
             to_model.append(dict(now, verdict=old["verdict"], labels=old["labels"],
                                  reason=old["reason"], quotes=old["quotes"]))
         elif old["verdict"] == "insufficient" and C.scope_span_ok(now["text"], old.get("scope_span")):

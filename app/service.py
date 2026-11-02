@@ -74,7 +74,7 @@ class ReviewClaim(BaseModel):
     start: int
     end: int
     citations: list[str]
-    verdict: Literal["supported", "contradicted", "insufficient"]
+    verdict: Literal["supported", "contradicted", "insufficient", "no_claim"]
     labels: list[str] = []
     quotes: list[ReviewQuote] = []
     reason: str = ""
