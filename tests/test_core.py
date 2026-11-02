@@ -57,6 +57,15 @@ def test_a_recommendation_may_repeat_numbers_already_cited_elsewhere():
     assert verify("ORR为32%[E1]。建议补查原始记录，核实32%的口径。", llm)["status"] == "PASS"
     llm = FakeLLM(verify_claims=answer_each({1: "supported", 2: "no_claim"}))
     assert verify("ORR为32%[E1]。建议补查原始记录，核实40%的口径。", llm)["status"] == "REVIEW"
+    llm = FakeLLM(verify_claims=answer_each({1: "supported", 2: "no_claim"}))
+    note = "只使用2016-05-03T12:20:01+08:00前可见的材料。"
+    assert verify("ORR为32%[E1]。" + note, llm, question=note)["status"] == "PASS"
+
+
+def test_a_bracketed_word_is_not_a_citation():
+    llm = FakeLLM(verify_claims=answer_each({1: "supported", 2: "no_claim"}))
+    result = verify("ORR为32%[E1]。材料中没有分析结果，故不引用[A]类编号。", llm)
+    assert result["claims"][1]["citations"] == [] and result["status"] == "PASS"
 
 
 def test_unknown_ref_fails_the_report_even_when_everything_else_is_supported():

@@ -186,6 +186,7 @@ def verify(req, llm=chat_json):
             reads += found
             pending.append(claim)
 
+    asked = set(C.numeric_tokens(req["question"]))  # e.g. a replay cutoff restated in a scope note
     for batch in C.batches(pending):
         cited = list(dict.fromkeys(r for c in batch for r in c["citations"]))
         payload = {"question": req["question"],
@@ -205,7 +206,7 @@ def verify(req, llm=chat_json):
             answers.setdefault(answer.index, answer)  # indexes outside this batch are ignored
         for c in batch:
             if c["index"] in answers:
-                known = {t for o in sentences if o["citations"] and o is not c for t in C.numeric_tokens(o["text"])}
+                known = asked | {t for o in sentences if o["citations"] and o is not c for t in C.numeric_tokens(o["text"])}
                 judge(c, answers[c["index"]], refs, evidence, known)
                 if c["verdict"] == "insufficient" and c.get("scope_span") is None:
                     reads += [{"ref": r, "reason": f"第{c['index']}句缺少支持，补读{r}全文或相关段落后重核"}

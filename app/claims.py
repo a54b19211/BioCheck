@@ -3,7 +3,7 @@ import re
 from decimal import Decimal, InvalidOperation
 
 LABELS = ("OBJ", "NUM", "TIME", "COND", "STR", "REF")
-ID = r"[A-Za-z][A-Za-z0-9_.:-]*"
+ID = r"[A-Za-z][A-Za-z_]*\d[A-Za-z0-9_.:-]*"  # a ref has a digit: [E1], [A2]; [A] or [scope] is prose
 CITE = re.compile(r"\[(" + ID + r"(?:\s*[,，;；]\s*" + ID + r")*)\]")
 TRAILING = re.compile(r"[ \t]*(?:" + CITE.pattern + r"[ \t]*)+")
 SENTENCE_END = re.compile(r"[。！？]+[”’」』]?|[.!?]+(?=\s|\[|$)|\n+|\Z")
