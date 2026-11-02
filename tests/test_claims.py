@@ -50,7 +50,10 @@ def test_unverified_source_needs_attribution_and_uncertainty_in_the_same_sentenc
     bad, _ = C.source_use_problems("某市医院出现多例不明肺炎[E2]。", ["E2"], evidence, [])
     assert bad and bad[0].startswith("unconfirmed_source")
     for ok in ("网帖称某市医院出现多例不明肺炎，尚未证实[E2]。", "待验证的假设是该市出现聚集性肺炎[E2]。",
-               "相关帖子随后被删除[E2]。"):
+               "相关帖子随后被删除[E2]。",
+               # wordings seen in real drafts: the hedge is there, only phrased differently
+               "该帖所述内容尚未证实[E2]。", "社媒“怪病”标题及转发内容未核实，置信低[E2]。",
+               "有账号转发同一段消息，发布者身份无法核实[E2]。"):
         assert C.source_use_problems(ok, ["E2"], evidence, [])[0] == []
     only_attributed, _ = C.source_use_problems("网帖称某市医院出现多例不明肺炎[E2]。", ["E2"], evidence, [])
     assert only_attributed
