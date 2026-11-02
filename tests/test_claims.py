@@ -54,3 +54,8 @@ def test_unverified_source_needs_attribution_and_uncertainty_in_the_same_sentenc
         assert C.source_use_problems(ok, ["E2"], evidence, [])[0] == []
     only_attributed, _ = C.source_use_problems("网帖称某市医院出现多例不明肺炎[E2]。", ["E2"], evidence, [])
     assert only_attributed
+
+
+def test_list_markers_are_not_numbers_to_check():
+    from app.claims import numeric_tokens
+    assert numeric_tokens("就（1）病原而言，(2) 另有12例[E1]") == ["12"]
