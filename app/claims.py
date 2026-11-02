@@ -76,6 +76,7 @@ def batches(claims, size=MAX_BATCH):
 
 def numeric_tokens(text):
     text = re.sub(r"\b(?:NCT\d+|PMID\s*:?\s*\d+)\b", "", CITE.sub("", text))
+    text = re.sub(r"[（(]\s*\d{1,2}\s*[)）]", "", text)  # list markers such as （1） are not data
     return list(dict.fromkeys(m.group() for m in NUMBER.finditer(text)))
 
 
