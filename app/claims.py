@@ -7,7 +7,7 @@ ID = r"[A-Za-z][A-Za-z0-9_.:-]*"
 CITE = re.compile(r"\[(" + ID + r"(?:\s*[,，;；]\s*" + ID + r")*)\]")
 TRAILING = re.compile(r"[ \t]*(?:" + CITE.pattern + r"[ \t]*)+")
 SENTENCE_END = re.compile(r"[。！？]+[”’」』]?|[.!?]+(?=\s|\[|$)|\n+|\Z")
-NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")
+NUMBER = re.compile(r"(?<![A-Za-z0-9_.])(?<![A-Za-z]-)[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")
 MAX_BATCH = 4
 
 # Wording a sentence needs when it cites an unverified or social-media source.

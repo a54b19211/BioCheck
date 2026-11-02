@@ -113,8 +113,11 @@ def generate(req, llm=chat_json):
     return {"draft": out.draft.strip(), "llm_calls": budget.calls}
 
 
-def judge(claim, answer, refs, evidence):
-    """Apply one model answer to one sentence; bad quotes downgrade only this sentence."""
+def judge(claim, answer, refs, evidence, known=frozenset()):
+    """Apply one model answer to one sentence; bad quotes downgrade only this sentence.
+
+    known: numbers written in cited sentences elsewhere in the draft; repeating them in a
+    recommendation or summary is not a new claim (the cited sentence is checked on its own)."""
     labels = [x for x in dict.fromkeys(answer.labels) if x in C.LABELS]
     problems, good = [], set()
     for q in answer.quotes:
@@ -135,7 +138,7 @@ def judge(claim, answer, refs, evidence):
         if unexplained:
             problems.append("numeric_unexplained: 数字" + "、".join(unexplained) + "不在所引原文中，也未说明换算")
             labels = list(dict.fromkeys(labels + ["NUM"]))
-    if answer.verdict == "no_claim" and C.numeric_tokens(claim["text"]):
+    if answer.verdict == "no_claim" and set(C.numeric_tokens(claim["text"])) - known:
         problems.append("no_claim_with_numbers: 含具体数字的句子是可核查陈述")
     if not claim["citations"] and answer.verdict != "no_claim":
         problems.insert(0, "no_citation: 本句陈述可核查事实却没有引用，不能借用相邻句的引用")
@@ -195,7 +198,8 @@ def verify(req, llm=chat_json):
             answers.setdefault(answer.index, answer)  # indexes outside this batch are ignored
         for c in batch:
             if c["index"] in answers:
-                judge(c, answers[c["index"]], refs, evidence)
+                known = {t for o in sentences if o["citations"] and o is not c for t in C.numeric_tokens(o["text"])}
+                judge(c, answers[c["index"]], refs, evidence, known)
                 if c["verdict"] == "insufficient" and c.get("scope_span") is None:
                     reads += [{"ref": r, "reason": f"第{c['index']}句缺少支持，补读{r}全文或相关段落后重核"}
                               for r in c["citations"] if r in evidence]

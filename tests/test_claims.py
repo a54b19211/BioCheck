@@ -62,3 +62,8 @@ def test_unverified_source_needs_attribution_and_uncertainty_in_the_same_sentenc
 def test_list_markers_are_not_numbers_to_check():
     from app.claims import numeric_tokens
     assert numeric_tokens("就（1）病原而言，(2) 另有12例[E1]") == ["12"]
+
+
+def test_product_codes_are_not_numbers_to_check():
+    from app.claims import numeric_tokens
+    assert numeric_tokens("XQ-17与LVR7、COVID-19及XQ301有关，ORR为-0.5") == ["-0.5"]

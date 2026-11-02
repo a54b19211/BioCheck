@@ -52,6 +52,13 @@ def test_uncited_scope_note_can_be_no_claim_but_not_when_it_has_numbers():
     assert result["claims"][1]["verdict"] == "insufficient" and result["status"] == "REVIEW"
 
 
+def test_a_recommendation_may_repeat_numbers_already_cited_elsewhere():
+    llm = FakeLLM(verify_claims=answer_each({1: "supported", 2: "no_claim"}))
+    assert verify("ORR为32%[E1]。建议补查原始记录，核实32%的口径。", llm)["status"] == "PASS"
+    llm = FakeLLM(verify_claims=answer_each({1: "supported", 2: "no_claim"}))
+    assert verify("ORR为32%[E1]。建议补查原始记录，核实40%的口径。", llm)["status"] == "REVIEW"
+
+
 def test_unknown_ref_fails_the_report_even_when_everything_else_is_supported():
     llm = FakeLLM(verify_claims=supported())
     result = verify("ORR为32%[E1]。PFS为2.8个月[S3]。", llm)
