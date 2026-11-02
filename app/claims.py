@@ -1,633 +1,139 @@
-"""Cited-claim checks and sentence edits. Model execution stays with the host."""
-import hashlib
-import json
+"""Deterministic sentence work: split, cite, locate quotes, check source use. No model calls."""
 import re
-from collections import Counter
-from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 
-from . import core
-from .contracts import VerificationCompletionError, CLAIM_KINDS, SOURCE_USES, analysis_binding_matches
-from .evidence import segments, analysis_results, analysis_signature, locate_support, locate_analysis
-from .source_context import SOURCE_FIELDS, evidence_catalog, source_updates
-from .prompts import CLAIM_VERIFY, CLAIM_REVISE, VERIFY_COVERAGE
+LABELS = ("OBJ", "NUM", "TIME", "COND", "STR", "REF")
+ID = r"[A-Za-z][A-Za-z0-9_.:-]*"
+CITE = re.compile(r"\[(" + ID + r"(?:\s*[,，;；]\s*" + ID + r")*)\]")
+TRAILING = re.compile(r"[ \t]*(?:" + CITE.pattern + r"[ \t]*)+")
+SENTENCE_END = re.compile(r"[。！？]+[”’」』]?|[.!?]+(?=\s|\[|$)|\n+|\Z")
+NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")
+MAX_BATCH = 4
 
-MAX_CLAIMS_PER_BATCH = 3
-MAX_BATCH_BYTES = 120000
+# Wording a sentence needs when it cites an unverified or social-media source.
+ATTRIBUTION = re.compile(r"网传|网帖|据称|传言|帖文|帖子|贴文|发帖|声称|自称|报道称|报告称|通报|声明|"
+                         r"reported|post|alleged|claim|rumou?r", re.I)
+UNCERTAIN = re.compile(r"未证实|未经证实|未核实|未经核实|待核|待验证|尚待|尚未确认|无法证实|疑似|假设|"
+                       r"unconfirmed|unverified|alleged|hypothes", re.I)
+HYPOTHESIS = re.compile(r"假设|待验证|hypothes", re.I)
+EVENT = re.compile(r"删帖|删除|辟谣|处罚|澄清|delet|denial|penalt|censor", re.I)
+# Wording of an explicit historical account of a corrected / retracted source.
+THEN = re.compile(r"当时|此前|原先|早先|曾披露|曾报告|最初|initial|previous|original|at the time", re.I)
+UPDATED = re.compile(r"已更正|后更正|更正为|已修订|后修订|已撤回|后撤回|被撤回|已撤稿|"
+                     r"was corrected|was retracted|was withdrawn", re.I)
 
 
-def digest(value):
-    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
-                                    separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+def citations(text):
+    found = [part.strip() for m in CITE.finditer(text) for part in re.split(r"[,，;；]", m.group(1))]
+    return list(dict.fromkeys(found))
 
 
-def provider():
-    from .rpc import PROVIDER_VERSION
-    return PROVIDER_VERSION
+def paragraphs(draft):
+    """(start, end) of each paragraph; paragraphs are separated by blank lines."""
+    spans = []
+    for m in re.finditer(r".+?(?=\n[ \t]*\n|\Z)", draft, re.S):
+        text = m.group()
+        start, end = m.start() + len(text) - len(text.lstrip()), m.end() - (len(text) - len(text.rstrip()))
+        if start < end:
+            spans.append((start, end))
+    return spans
 
 
 def sentences(draft):
-    result, occurrences = [], Counter()
-    for unit in core.split_units(draft):
-        cursor, index = 0, 0
-        for span in core._draft_sentences(unit["text"]):
-            start, end = max(cursor, span["start"]), span["end"]
-            if start >= end:
-                continue
-            # Consume a trailing citation run before starting the next sentence.
-            following = re.match(r"\s*(?:\[[A-Za-z][A-Za-z0-9_.:-]*\]\s*)+", unit["text"][end:])
-            if following:
-                end += following.end()
-            cursor = end
-            text = unit["text"][start:end]
-            start += len(text) - len(text.lstrip())
-            end -= len(text) - len(text.rstrip())
-            text = unit["text"][start:end]
-            if not text:
-                continue
-            identity = digest(text)[:20]
-            occurrences[identity] += 1
-            result.append({"claim_id": f"C{identity}-{occurrences[identity]}",
-                "unit_id": unit["id"], "claim_index": index, "text": text,
-                "span_start": start, "span_end": end, "start": unit["start"] + start,
-                "end": unit["start"] + end})
-            index += 1
-    for i, claim in enumerate(result):
-        claim["context"] = {
-            "previous": result[i - 1]["text"] if i else None,
-            "next": result[i + 1]["text"] if i + 1 < len(result) else None,
-            "previous_same_paragraph": bool(i and result[i - 1]["unit_id"] == claim["unit_id"]),
-            "next_same_paragraph": bool(i + 1 < len(result) and result[i + 1]["unit_id"] == claim["unit_id"])}
-    return result
-
-
-def _reference(reference, source, lookup, analyses):
-    key, part = core.reference_target(reference, lookup)
-    if key in lookup:
-        item = lookup[key]
-        if part:
-            selected = next(p for p in segments(item["text"]) if p["id"] == part)
-            start, end = selected["start"], selected["end"]
-        else:
-            context = item.get("source_context", {})
-            window = context.get("source_window", {})
-            text = item["text"]
-            if (context.get("adopted_text_level") != "selected_passages"
-                    or window.get("hash_scope") != "adopted_packet_text"
-                    or window.get("adopted_text_length") != len(text)
-                    or window.get("text_sha256") != hashlib.sha256(text.encode()).hexdigest()):
-                raise ValueError("记录级引用缺少与原文相符的固定采用窗口")
-            a, b, total = window.get("start"), window.get("end"), window.get("source_length")
-            if a is not None or b is not None:
-                if type(a) is not int or type(b) is not int or a < 0 or b - a != len(text):
-                    raise ValueError("采用窗口位置与实际文本不一致")
-            if total is not None and (type(total) is not int or total < len(text) or b is not None and b > total):
-                raise ValueError("采用窗口越过原文长度")
-            start, end = 0, len(text)
-        backgrounds = core._audit_source_context(
-            [{"evidence_id": key, "start": start, "end": end}], lookup)[0]["paragraphs"]
-        return {"reference": reference, "kind": "source", "evidence_id": key,
-                "version": item["version"], "start": start, "end": end,
-                "text": item["text"][start:end],
-                "identity": {k: deepcopy(item[k]) for k in SOURCE_FIELDS if k in item},
-                "identity_context": [p for p in backgrounds if not start <= p["start"] <= p["end"] <= end]}
-    if reference in analyses:
-        value = analyses[reference]
-        body = {k: value[k] for k in ("output", "calculation_basis", "limitations") if k in value}
-        text = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        return {"reference": reference, "kind": "analysis_result", "analysis_id": reference,
-                "version": digest(value), "start": 0, "end": len(text), "text": text,
-                "identity": {k: deepcopy(value[k]) for k in
-                             ("dataset_ref", "method_version", "input_refs", "parameters") if k in value},
-                "identity_context": []}
-    raise ValueError("本句引用了未知来源或无效段号：" + reference)
-
-
-def prepare(packet, draft):
-    source = core.packet_input(packet)
-    lookup = {e["id"]: e for e in source["evidence"]}
-    analyses = analysis_results(source)
-    task = digest({"question": source["question"], "assessment": source.get("assessment", {})})
-    claims = sentences(draft)
-    for claim in claims:
-        claim["references"], claim["input_errors"] = [], []
-        for reference in dict.fromkeys(core.CITATION.findall(claim["text"])):
-            try:
-                claim["references"].append(_reference(reference, source, lookup, analyses))
-            except ValueError as error:
-                claim["input_errors"].append(str(error))
-        if not core.CITATION.findall(claim["text"]):
-            claim["input_errors"].append("本句没有实际引用，不能借用相邻句或整段的引用")
-        claim["binding"] = {"task": task, "statement": digest(claim["text"]),
-                            "context": digest(claim["context"]), "references": digest(claim["references"]),
-                            "method": provider()}
-        claim["fingerprint"] = digest(claim["binding"])
-    return source, claims
-
-
-def batch_payload(source, claims):
-    refs = {}
-    for claim in claims:
-        for ref in claim["references"]:
-            refs[ref["reference"]] = ref
-    return {"question": source["question"],
-            "claims": [{"claim_id": c["claim_id"], "text": c["text"], "context": c["context"],
-                        "references": [r["reference"] for r in c["references"]]} for c in claims],
-            "references": list(refs.values()),
-            "source_updates": source_updates(source)}
-
-
-def request_payload(stage, payload, draft, attempt=0):
-    limit = 16384 if attempt or stage == "revise_claims" else (8192 if stage == "verify_coverage" else 12288)
-    return dict(payload, verification_request={
-        "claim_ids": [c["claim_id"] for c in payload.get("claims", [])], "attempt": attempt,
-        "draft_sha256": hashlib.sha256(draft.encode()).hexdigest(), "max_output_tokens": limit})
-
-
-def request_bytes(instruction, payload):
-    return len(json.dumps({"instruction": instruction, "payload": payload}, ensure_ascii=False).encode())
-
-
-def batches(source, claims, draft):
-    current = []
-    for claim in claims:
-        proposed = current + [claim]
-        size = request_bytes(CLAIM_VERIFY, request_payload("verify_claim", batch_payload(source, proposed), draft))
-        if current and (len(proposed) > MAX_CLAIMS_PER_BATCH or claim["unit_id"] != current[0]["unit_id"]
-                        or size > MAX_BATCH_BYTES):
-            yield current
-            current = []
-        current.append(claim)
-    if current:
-        yield current
-
-
-def completed(call, stage, instruction, payload, draft, recorded, *, retry=False):
-    ids = [c["claim_id"] for c in payload.get("claims", [])]
-    for attempt in range(2 if retry else 1):
-        actual_stage = stage + "_retry" if attempt else stage
-        request = request_payload(stage, payload, draft, attempt)
-        limit = request["verification_request"]["max_output_tokens"]
-        if request_bytes(instruction, request) > MAX_BATCH_BYTES:
-            raise ValueError("实际模型请求超过本地大小限制，未发起调用")
-        receipt = call(actual_stage, instruction, request)
-        finish = receipt.get("finish_reason") if isinstance(receipt, dict) else None
-        output = receipt.get("output") if isinstance(receipt, dict) else None
-        recorded.append({"stage": actual_stage, "claim_ids": ids, "attempt": attempt,
-                         "finish_reason": finish, "max_output_tokens": limit, "output": deepcopy(output)})
-        if finish == "stop" and isinstance(output, dict):
-            return output
-        if finish == "length" and retry and attempt == 0:
-            continue
-        error = VerificationCompletionError(
-            "model_output_truncated" if finish == "length" else "model_completion_unconfirmed",
-            None, finish, attempt)
-        error.claim_ids = ids
-        raise error
-
-
-def quote_contains_value(text, value, relative_path):
-    """Resolve the actual quoted field, not an equal number elsewhere in the quote."""
-    for candidate in (text, "{" + text + "}"):
-        try:
-            selected = json.loads(candidate)
-            for part in relative_path.split("/")[1:] if relative_path else []:
-                part = part.replace("~1", "/").replace("~0", "~")
-                if isinstance(selected, dict):
-                    selected = selected[part]
-                elif isinstance(selected, list) and re.fullmatch(r"0|[1-9][0-9]*", part):
-                    selected = selected[int(part)]
-                else:
-                    raise ValueError("Quoted field is not addressable.")
-            if digest(selected) == digest(value):
-                return True
-        except (ValueError, KeyError, IndexError):
-            continue
-    return False
-
-
-def claim_error(code, message):
-    error = ValueError(message)
-    error.code = code
-    return error
-
-
-def parse_answer(claim, answer, source):
-    if not isinstance(answer, dict) or set(answer) != {"claim_id", "verdict", "quotes", "reason"}:
-        raise ValueError("主张回执须为claim_id/verdict/quotes/reason四个字段")
-    if answer["claim_id"] != claim["claim_id"] or not isinstance(answer["reason"], str) or not answer["reason"].strip():
-        raise ValueError("主张编号或理由无效")
-    verdict = answer["verdict"]
-    if not isinstance(verdict, dict) or verdict.get("status") not in {"supported", "contradicted", "insufficient"}:
-        raise ValueError("主张缺少有效判定")
-    status = verdict["status"]
-    if verdict.get("kind") not in CLAIM_KINDS:
-        raise claim_error("claim_kind_invalid", "陈述kind无效，须使用明确的四种类型")
-    if verdict.get("source_use") not in SOURCE_USES:
-        raise claim_error("claim_source_use_invalid", "source_use无效，须使用明确的五种来源用途")
-    repair_kind, repair_span = verdict.get("repair_kind"), verdict.get("repair_span")
-    if repair_kind is not None or repair_span is not None:
-        if (repair_kind != "unreported_as_absent" or status != "insufficient" or verdict["kind"] != "fact"
-                or not isinstance(repair_span, str) or not repair_span.strip()
-                or core.CITATION.search(repair_span) or "\n" in repair_span):
-            raise claim_error("claim_scope_repair_invalid", "材料范围修订须明确对应一个不足事实的无引用原断言")
-        try:
-            core.locate_span(claim["text"], {"span": repair_span})
-        except ValueError as error:
-            raise claim_error("claim_scope_repair_invalid", "材料范围修订的原断言不能唯一定位") from error
-    allowed = {r["reference"]: r for r in claim["references"]}
-    quotes = answer["quotes"]
-    if not isinstance(quotes, list) or status in {"supported", "contradicted"} and not quotes:
-        raise claim_error("quote_required", "支持或矛盾判定须有原文短引")
-    located, evidence, derived, used = [], [], [], set()
-    lookup = {e["id"]: e for e in source["evidence"]}
-    analyses = analysis_results(source)
-    for quote in quotes:
-        if not isinstance(quote, dict) or not isinstance(quote.get("reference"), str):
-            raise claim_error("quote_reference_invalid", "短引须明确对应本句实际引用")
-        ref = allowed.get(quote["reference"])
-        text = quote.get("quote")
-        if ref is None or not isinstance(text, str) or not text.strip():
-            raise claim_error("quote_outside_citation", "短引来源不在本句实际引用范围中")
-        if "version" in quote and quote["version"] != ref["version"]:
-            raise claim_error("quote_version_mismatch", "短引与固定来源版本不一致")
-        selected = None
-        if ref["kind"] == "analysis_result":
-            if "output_path" not in quote:
-                raise claim_error("quote_analysis_path_required", "分析短引须明确output_path，不能猜重复值的位置")
-            try:
-                selected = locate_analysis([{"analysis_id": ref["analysis_id"],
-                                             "output_path": quote["output_path"]}], analyses)[0]
-            except ValueError as error:
-                raise claim_error("quote_analysis_path_invalid", "分析短引output_path无效") from error
-            scope_text = json.dumps(selected["value"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        else:
-            if "output_path" in quote:
-                raise claim_error("quote_path_not_allowed", "原文短引不能使用分析输出路径")
-            scope_text = ref["text"]
-        offset = scope_text.find(text)
-        if offset < 0 or scope_text.find(text, offset + 1) >= 0:
-            raise claim_error("quote_not_found" if offset < 0 else "quote_ambiguous",
-                              "短引不是被引原段中唯一的连续原文")
-        located_quote = {"reference": ref["reference"], "version": ref["version"], "quote": text}
-        if selected is not None:
-            located_quote.update(output_path=selected["output_path"], offset_basis="selected_value_json",
-                                 value_start=offset, value_end=offset+len(text))
-            if "requested_output_path" in selected:
-                located_quote["requested_output_path"] = selected["requested_output_path"]
-            item = {"analysis_id": ref["analysis_id"], "output_path": selected["output_path"]}
-            if item not in derived:
-                derived.append(item)
-        else:
-            start, end = ref["start"] + offset, ref["start"] + offset + len(text)
-            located_quote.update(start=start, end=end)
-            for part in segments(lookup[ref["evidence_id"]]["text"]):
-                if start < part["end"] and end > part["start"]:
-                    item = {"evidence_id": ref["evidence_id"], "segment_id": part["id"]}
-                    if item not in evidence:
-                        evidence.append(item)
-        located.append(located_quote)
-        used.add(ref["reference"])
-    if status == "supported" and used != set(allowed):
-        raise claim_error("quote_citation_missing", "支持判定未给出本句每个实际引用的有效短引")
-    metadata = {k: deepcopy(verdict[k]) for k in (
-        "kind", "source_use", "attribution_span", "uncertainty_span", "history_context",
-        "binding", "missing_information", "repair_kind", "repair_span") if k in verdict}
-    if repair_kind:
-        if not located or used != set(allowed) or any(r["kind"] != "source" for r in claim["references"]):
-            raise claim_error("claim_scope_repair_invalid", "范围修订须保留本句全部实际原文引用的有效短引")
-        proposed = scope_revision(dict(metadata, span=claim["text"]))
-        if len(sentences(proposed)) != 1:
-            raise claim_error("claim_scope_repair_invalid", "范围修订必须保留为原句内的局部限定")
-    resolved = locate_analysis(derived, analyses)
-    if metadata["kind"] == "analysis_result" and not resolved:
-        raise claim_error("claim_analysis_reference_missing", "分析陈述缺少有效输出位置")
-    if resolved and (metadata["kind"] == "analysis_result" or core.numeric_tokens(claim["text"])):
-        if not analysis_binding_matches(metadata.get("binding"), resolved):
-            raise claim_error("claim_analysis_binding_invalid", "binding须直接或按analysis_id保留完整计算口径，不能另套calculation_basis")
-    if metadata["kind"] == "source_absence":
-        for ref in claim["references"]:
-            if ref["kind"] == "source":
-                whole = _reference(ref["evidence_id"], source, lookup, {})
-                if (ref["start"], ref["end"]) != (whole["start"], whole["end"]):
-                    raise ValueError("部分引文不能扩展为整份采用材料的缺省判断")
-                evidence.append({"evidence_id": ref["evidence_id"], "scope": "whole_source"})
-    labels = verdict.get("labels", [])
-    if not isinstance(labels, list) or any(not isinstance(x, str) or x not in core.LABELS for x in labels):
-        raise ValueError("问题标签无效")
-    normalized = dict(metadata, claim_id=claim["claim_id"], span=claim["text"],
-        span_start=claim["span_start"], span_end=claim["span_end"],
-        verdict=status, reason=answer["reason"], evidence=evidence, analysis_refs=derived,
-        short_quotes=located)
-    issues = []
-    if status != "supported" or labels:
-        issues = [{"span": claim["text"], "span_start": claim["span_start"], "span_end": claim["span_end"],
-                   "claim_id": claim["claim_id"], "labels": labels or ["REF"],
-                   "reason": answer["reason"], "evidence": evidence, "analysis_refs": derived}]
-    resolutions = verdict.get("numeric_resolutions", [])
-    if not isinstance(resolutions, list):
-        raise ValueError("数值解释须为列表")
-    quoted_parts = {(e["evidence_id"], e.get("segment_id")) for e in evidence if e.get("segment_id")}
-    for resolution in resolutions:
-        if not isinstance(resolution, dict) or resolution.get("token") not in core.numeric_tokens(claim["text"]):
-            raise ValueError("数值解释须对应本句实际数字")
-        for item in locate_support(resolution.get("evidence", []), lookup):
-            if (item["evidence_id"], item["segment_id"]) not in quoted_parts:
-                raise ValueError("数值解释越过了本句实际引用及已验证短引范围")
-        for item in locate_analysis(resolution.get("analysis_refs", []), analyses):
-            if not any(q["reference"] == item["analysis_id"] and "output_path" in q
-                       and (not q["output_path"] or item["output_path"] == q["output_path"]
-                            or item["output_path"].startswith(q["output_path"] + "/"))
-                       and quote_contains_value(q["quote"], item["value"],
-                                                item["output_path"][len(q["output_path"]):]) for q in located):
-                raise ValueError("数值解释的分析输出不在本句实际引用及已验证短引内")
-    return normalized, issues, resolutions
-
-
-def _previous(previous_review, source):
-    if previous_review is None:
-        return {}
-    if (previous_review.get("verification_method") != "cited_claims"
-            or previous_review.get("method_provider_version") != provider()
-            or not core.review_locations_match(previous_review)
-            or previous_review.get("draft_sha256") != hashlib.sha256(previous_review["draft"].encode()).hexdigest()
-            or previous_review.get("status") not in {"PASS", "REVIEW", "FAIL"}
-            or not isinstance(previous_review.get("claim_checks"), list)):
-        raise ValueError("previous_review须为本方法同版本的完整已完成回执，不能采用未知或旧方法结果")
-    old_claims = {c.get("claim_id"): c for u in previous_review["units"] for c in u.get("claims", [])}
-    blocked = set()
-    for error in previous_review.get("verification_errors", []):
-        if error.get("claim_id"):
-            blocked.add(error["claim_id"])
-        elif error.get("unit_id"):
-            blocked.update(c.get("claim_id") for u in previous_review["units"]
-                           if u["unit_id"] == error["unit_id"] for c in u["claims"])
-        else:
-            return {}
-    for unit in previous_review["units"]:
-        for issue in unit.get("issues", []):
-            try:
-                start, end = core.locate_span(unit["text"], issue)
-            except ValueError:
-                blocked.update(c.get("claim_id") for c in unit["claims"])
-            else:
-                blocked.update(c.get("claim_id") for c in unit["claims"]
-                               if start < c["span_end"] and end > c["span_start"])
-        blocked.update(c.get("claim_id") for c in unit["claims"] if c.get("citation_status") == "invalid")
-    counts = Counter(c.get("fingerprint") for c in previous_review["claim_checks"])
-    return {c["fingerprint"]: c for c in previous_review["claim_checks"]
-            if c.get("claim_id") not in blocked and counts[c.get("fingerprint")] == 1
-            and c.get("finish_reason") == "stop"
-            and c.get("effective_verdict") == "supported" and not c.get("errors")
-            and old_claims.get(c.get("claim_id"), {}).get("verdict") == "supported"}
-
-
-def reuse_diagnostics(claim, previous_review, reused, invalid_reply):
-    old = [c for c in (previous_review or {}).get("claim_checks", []) if c.get("claim_id") == claim["claim_id"]]
-    changed = sorted(k for k, v in claim["binding"].items()
-                     if len(old) == 1 and old[0].get("binding", {}).get(k) != v)
-    if reused:
-        reason = "unchanged"
-    elif invalid_reply:
-        reason = "previous_reply_invalid"
-    elif not old:
-        reason = "no_prior_check"
-    elif len(old) != 1:
-        reason = "ambiguous_prior_check"
-    elif changed:
-        reason = {("context",): "context_changed", ("references",): "source_changed",
-                  ("task",): "task_changed", ("statement",): "claim_changed"}.get(tuple(changed), "inputs_changed")
-    elif old[0].get("effective_verdict") != "supported":
-        reason = "previous_check_not_supported"
-    else:
-        reason = "previous_check_failed"
-    return {"reason_code": reason, "changed_binding_fields": changed}
-
-
-def verify(packet, draft, call, previous_review=None):
-    source, claims = prepare(packet, draft)
-    previous = _previous(previous_review, source)
-    counts = Counter(c["fingerprint"] for c in claims)
-    answers, errors, error_codes, recorded, reused, decisions = {}, {}, {}, [], [], []
-    pending = []
-    for claim in claims:
-        key = claim["claim_id"]
-        if claim["input_errors"]:
-            errors[key] = list(claim["input_errors"])
-            error_codes[key] = ["citation_binding_invalid"] * len(errors[key])
-            decisions.append({"claim_id": key, "action": "review", "reason": "citation_binding_invalid",
-                              "reason_code": "citation_binding_invalid", "changed_binding_fields": []})
-            continue
-        cached = previous.get(claim["fingerprint"]) if counts[claim["fingerprint"]] == 1 else None
-        invalid_reply = False
-        if cached:
-            answer = deepcopy(cached["answer"])
-            answer["claim_id"] = key
-            try:
-                parse_answer(claim, answer, source)
-            except ValueError:
-                cached = None
-                invalid_reply = True
-            else:
-                answers[key] = answer
-                reused.append(key)
-        if not cached:
-            pending.append(claim)
-        decisions.append({"claim_id": key, "action": "reused" if cached else "check",
-                          "binding": claim["binding"],
-                          **reuse_diagnostics(claim, previous_review, bool(cached), invalid_reply)})
-    for batch in batches(source, pending, draft):
-        payload = batch_payload(source, batch)
-        size = request_bytes(CLAIM_VERIFY, request_payload("verify_claim", payload, draft))
-        if size > MAX_BATCH_BYTES:
-            for claim in batch:
-                errors[claim["claim_id"]] = ["单条主张的实际引用超过请求限制，需缩小已采用窗口后再核验"]
-                error_codes[claim["claim_id"]] = ["claim_request_too_large"]
-            continue
-        output = completed(call, "verify_claim", CLAIM_VERIFY, payload, draft, recorded, retry=True)
-        checks = output.get("checks")
-        expected = {c["claim_id"] for c in batch}
-        if (not isinstance(checks, list) or len(checks) != len(batch)
-                or any(not isinstance(c, dict) or not isinstance(c.get("claim_id"), str) for c in checks)
-                or {c["claim_id"] for c in checks} != expected):
-            for claim in batch:
-                errors[claim["claim_id"]] = ["本批回执遗漏、重复或包含未知主张编号"]
-                error_codes[claim["claim_id"]] = ["claim_batch_identity_invalid"]
-            continue
-        answers.update({c["claim_id"]: deepcopy(c) for c in checks})
-    normalized, issues, resolutions = {}, {}, {}
-    for claim in claims:
-        key = claim["claim_id"]
-        if key not in errors:
-            try:
-                normalized[key], issues[key], resolutions[key] = parse_answer(claim, answers[key], source)
-            except (ValueError, KeyError, TypeError) as error:
-                errors[key] = [str(error)]
-                error_codes[key] = [getattr(error, "code", "claim_reply_invalid")]
-        if key in errors:
-            normalized[key] = {"claim_id": key, "span": claim["text"], "span_start": claim["span_start"],
-                "span_end": claim["span_end"], "kind": "fact", "source_use": "current_fact",
-                "verdict": "insufficient", "reason": "；".join(errors[key]), "evidence": [], "short_quotes": []}
-            issues[key], resolutions[key] = [], []
-    reviews = []
-    for unit in core.split_units(draft):
-        ids = [c["claim_id"] for c in claims if c["unit_id"] == unit["id"]]
-        members = [normalized[key] for key in ids]
-        verdict = "contradicted" if any(c["verdict"] == "contradicted" for c in members) else (
-            "insufficient" if any(c["verdict"] == "insufficient" for c in members) else "supported")
-        reviews.append({"unit_id": unit["id"], "verdict": verdict, "reason": "逐条主张及实际引用核验",
-                        "claims": members, "issues": [i for key in ids for i in issues[key]],
-                        "numeric_resolutions": [i for key in ids for i in resolutions[key]]})
-    combined = {"reviews": reviews, "coverage": {"verdict": "uncertain", "reason": "整体覆盖尚未检查"}}
-    # Reuse the existing scientific/source-policy checks, without another model request.
-    review = core.verify(source, draft, lambda *args: deepcopy(combined), mode="whole")
-    for claim in claims:
-        if claim["claim_id"] in errors:
-            review["verification_errors"].append({"unit_id": claim["unit_id"], "claim_id": claim["claim_id"],
-                                                   "errors": errors[claim["claim_id"]],
-                                                   "error_codes": error_codes[claim["claim_id"]]})
-    scope = source.get("assessment", {}).get("research_scope", {})
-    if isinstance(scope, dict):
-        scope = {k: v for k, v in scope.items()
-                 if k in {"qualification", "stop_status", "coverage_checks", "coverage_issues"}}
-    coverage_payload = {"question": source["question"], "draft": draft,
-        "checked_unit_ids": [u["unit_id"] for u in review["units"]],
-        "paragraph_findings": [{"unit_id": u["unit_id"], "verdict": u["verdict"],
-             "issues": [{"labels": i["labels"], "reason": i["reason"]} for i in u["issues"]]}
-            for u in review["units"]],
-        "task_scope": scope}
-    coverage_key = digest({"request": coverage_payload, "method": provider(),
-                          "task": source.get("assessment", {}), "answers": answers,
-                          "bindings": [c["binding"] for c in claims], "errors": review["verification_errors"]})
-    old_coverage = (previous_review or {}).get("coverage_receipt", {})
-    coverage_output = None
-    if review["verification_errors"]:
-        coverage_output = {"checked_unit_ids": coverage_payload["checked_unit_ids"],
-                           "coverage": {"verdict": "uncertain", "reason": "存在未完成的主张核验，保留待核"}}
-    elif old_coverage.get("request_hash") == coverage_key and old_coverage.get("finish_reason") == "stop":
-        coverage_output = deepcopy(old_coverage["output"])
-    else:
-        coverage_output = completed(call, "verify_coverage", VERIFY_COVERAGE, coverage_payload, draft, recorded)
-    coverage = coverage_output.get("coverage", {})
-    if (coverage_output.get("checked_unit_ids") != coverage_payload["checked_unit_ids"]
-            or not isinstance(coverage, dict) or coverage.get("verdict") not in {"complete", "incomplete", "uncertain"}):
-        raise ValueError("整稿覆盖回执遗漏段落或缺少有效结论")
-    review["coverage"] = deepcopy(coverage)
-    review["raw_response"]["coverage"] = deepcopy(coverage)
-    review["raw_response"]["claim_outputs"] = deepcopy(recorded)
-    review["status"] = "FAIL" if any(u["verdict"] == "contradicted" or u.get("citation_status") == "invalid"
-                                      for u in review["units"]) else (
-        "REVIEW" if review["verification_errors"] or review["problem_units"] or coverage["verdict"] != "complete" else "PASS")
-    effective = {c["claim_id"]: c for u in review["units"] for c in u["claims"]}
-    review.update(verification_method="cited_claims", method_provider_version=provider(),
-        draft_sha256=hashlib.sha256(draft.encode()).hexdigest(), reused_claims=reused, reuse_decisions=decisions,
-        verification_execution=[{k: v for k, v in c.items() if k != "output"} for c in recorded],
-        coverage_receipt={"request_hash": coverage_key, "finish_reason": "stop" if not review["verification_errors"] else None,
-                          "output": deepcopy(coverage_output)},
-        claim_checks=[{"claim_id": c["claim_id"], "fingerprint": c["fingerprint"], "binding": c["binding"],
-                      "finish_reason": "stop" if c["claim_id"] in answers else None,
-                      "answer": deepcopy(answers.get(c["claim_id"])), "errors": errors.get(c["claim_id"], []),
-                      "error_codes": error_codes.get(c["claim_id"], []),
-                      "effective_verdict": effective.get(c["claim_id"], {}).get("verdict")}
-                     for c in claims])
-    core._add_sentence_diagnostics(review)
-    review["repair_claims"] = repair_candidates(review)
-    return review
-
-
-def scope_revision(claim):
-    """Only wrap the explicitly identified unsupported assertion; keep other text intact."""
-    start, end = core.locate_span(claim["span"], {"span": claim["repair_span"]})
-    replacement = "本次引用材料不足以确认“" + claim["repair_span"] + "”这一说法"
-    return claim["span"][:start] + replacement + claim["span"][end:]
-
-
-def repair_candidates(review):
-    if review.get("verification_errors") or not core.review_locations_match(review):
-        return []
-    saved = {c.get("claim_id"): c for c in review.get("claim_checks", [])}
+    """Numbered sentences with draft offsets. Citations right after the full stop belong to it."""
     result = []
-    for unit in review["units"]:
-        for claim in unit["claims"]:
-            if not claim.get("short_quotes") or claim.get("source_gaps") or claim.get("citation_status") == "invalid":
+    for number, (p_start, p_end) in enumerate(paragraphs(draft), 1):
+        text, cursor = draft[p_start:p_end], 0
+        for m in SENTENCE_END.finditer(text):
+            end = m.end()
+            if end <= cursor:
                 continue
-            check = saved.get(claim.get("claim_id"), {})
-            original = (check.get("answer") or {}).get("verdict", {})
-            scope = (claim["verdict"] == "insufficient" and claim.get("repair_kind") == "unreported_as_absent"
-                     and original.get("status") == "insufficient" and original.get("kind") == "fact"
-                     and original.get("repair_kind") == claim["repair_kind"]
-                     and original.get("repair_span") == claim.get("repair_span")
-                     and check.get("finish_reason") == "stop" and not check.get("errors"))
-            if claim["verdict"] == "contradicted" or scope:
-                result.append(claim["claim_id"])
+            tail = TRAILING.match(text, end)
+            if tail:
+                end = tail.end()
+            piece, start = text[cursor:end], cursor
+            cursor = end
+            start += len(piece) - len(piece.lstrip())
+            stop = end - (len(piece) - len(piece.rstrip()))
+            if not CITE.sub("", text[start:stop]).strip(" \t\n。！？.!?"):
+                continue
+            result.append({"index": len(result) + 1, "paragraph": number, "text": text[start:stop],
+                           "start": p_start + start, "end": p_start + stop,
+                           "citations": citations(text[start:stop])})
     return result
 
 
-def revise(packet, review, call, *, audit=None, source_errors=()):
-    source, current = prepare(packet, review["draft"])
-    feedback = core.quality_feedback(review, audit, source_errors=source_errors)
-    allowed = set(repair_candidates(review)) if not feedback["review_required"] else set()
-    saved = {c["claim_id"]: c for c in review.get("claim_checks", [])}
-    targets = [c for c in current if c["claim_id"] in allowed]
-    if (review.get("method_provider_version") != provider()
-            or review.get("evidence_catalog") != evidence_catalog(source)
-            or review.get("source_updates") != source_updates(source)
-            or review.get("analysis_signature") != analysis_signature(source)
-            or any(saved.get(c["claim_id"], {}).get("fingerprint") != c["fingerprint"] for c in targets)):
-        feedback["review_required"].append({"kind": "source_changed", "reason": "任务、来源或语境已变，先重新核验"})
-        targets = []
-    if not targets:
-        return {"draft": review["draft"], "changed_units": [], "changed_claims": [], "feedback": feedback,
-                "requires_verification": False, "reason": "没有可按已核原文修订的失败句"}
-    payload = batch_payload(source, targets)
-    for claim in payload["claims"]:
-        finding = next(c for u in review["units"] for c in u["claims"] if c["claim_id"] == claim["claim_id"])
-        claim["finding"] = {"verdict": finding["verdict"], "reason": finding["reason"],
-                            "short_quotes": finding["short_quotes"]}
-        if finding["verdict"] == "insufficient" and finding.get("repair_kind") == "unreported_as_absent":
-            claim["scope_revision"] = scope_revision(finding)
-            claim["finding"]["repair_kind"] = finding["repair_kind"]
-            claim["finding"]["repair_span"] = finding["repair_span"]
-    if request_bytes(CLAIM_REVISE, request_payload("revise_claims", payload, review["draft"])) > MAX_BATCH_BYTES:
-        raise ValueError("失败句修订请求过大，未修改原稿")
-    recorded = []
-    result = completed(call, "revise_claims", CLAIM_REVISE, payload, review["draft"], recorded)
-    replacements = result.get("replacements")
-    if (not isinstance(replacements, list) or len(replacements) != len(targets)
-            or any(not isinstance(p, dict) or not isinstance(p.get("claim_id"), str) for p in replacements)
-            or {p["claim_id"] for p in replacements} != {c["claim_id"] for c in targets}):
-        raise ValueError("修订须逐一对应允许修改的失败句")
-    mapped = {p["claim_id"]: p.get("text") for p in replacements}
-    lookup = {e["id"]: e for e in source["evidence"]}
-    analyses = analysis_results(source)
-    for claim in targets:
-        text = mapped[claim["claim_id"]]
-        submitted = next(c for c in payload["claims"] if c["claim_id"] == claim["claim_id"])
-        if "scope_revision" in submitted and text != submitted["scope_revision"]:
-            raise ValueError("材料范围修订只能采用明确的局部未知限定，不能新增、反转或删除事实")
-        if not isinstance(text, str) or not text.strip() or len(sentences(text)) != 1 or "\n" in text:
-            raise ValueError("每个替换须为一个非空句子，不能删除或扩成整段")
-        refs = core.CITATION.findall(text)
-        if not refs:
-            raise ValueError("修订句不能删除全部引用")
-        for ref in refs:
-            actual = _reference(ref, source, lookup, analyses)
-            if not any(actual["kind"] == old["kind"] and actual.get("evidence_id", actual.get("analysis_id"))
-                       == old.get("evidence_id", old.get("analysis_id")) and actual["version"] == old["version"]
-                       and old["start"] <= actual["start"] <= actual["end"] <= old["end"]
-                       for old in claim["references"]):
-                raise ValueError("修订不能把未引用的邻段或新来源冒作依据")
-    draft, changed = review["draft"], []
-    for claim in sorted(targets, key=lambda c: c["start"], reverse=True):
-        text = mapped[claim["claim_id"]]
-        if text != claim["text"]:
-            draft = draft[:claim["start"]] + text + draft[claim["end"]:]
-            changed.append({"claim_id": claim["claim_id"], "unit_id": claim["unit_id"],
-                            "start": claim["start"], "end": claim["end"], "before": claim["text"], "after": text,
-                            "repair_kind": next((c["finding"].get("repair_kind") for c in payload["claims"]
-                                                 if c["claim_id"] == claim["claim_id"]), None)})
-    before = {u["unit_id"]: u["text"] for u in review["units"]}
-    return {"draft": draft, "changed_claims": list(reversed(changed)),
-            "changed_units": [{"unit_id": u["id"], "before": before[u["id"]], "after": u["text"]}
-                              for u in core.split_units(draft) if u["text"] != before[u["id"]]],
-            "requires_verification": bool(changed),
-            "verification_execution": [{k: v for k, v in c.items() if k != "output"} for c in recorded]}
+def batches(claims, size=MAX_BATCH):
+    """At most `size` claims per batch, never mixing paragraphs."""
+    groups = []
+    for claim in claims:
+        if groups and len(groups[-1]) < size and groups[-1][0]["paragraph"] == claim["paragraph"]:
+            groups[-1].append(claim)
+        else:
+            groups.append([claim])
+    return groups
+
+
+def numeric_tokens(text):
+    text = re.sub(r"\b(?:NCT\d+|PMID\s*:?\s*\d+)\b", "", CITE.sub("", text))
+    return list(dict.fromkeys(m.group() for m in NUMBER.finditer(text)))
+
+
+def _value(token):
+    try:
+        return Decimal(token.replace(",", "").replace("−", "-").rstrip("%"))
+    except InvalidOperation:
+        return None
+
+
+def numeric_hints(sentence, cited_texts):
+    """Numbers in the sentence that do not literally occur in the cited texts."""
+    available = {_value(t) for text in cited_texts for t in numeric_tokens(text)}
+    return [t for t in numeric_tokens(sentence) if _value(t) not in available]
+
+
+def locate_quote(text, quote):
+    """'found' (exactly once), 'ambiguous' (several times) or 'not_found'. Whitespace runs count as one."""
+    text, quote = " ".join(text.split()), " ".join((quote or "").split())
+    first = text.find(quote) if quote else -1
+    if first < 0:
+        return "not_found"
+    return "ambiguous" if text.find(quote, first + 1) >= 0 else "found"
+
+
+def source_use_problems(text, cited, evidence, updates):
+    """Rules on corrected/retracted and unverified sources. Returns (reasons, read_requests)."""
+    body, reasons, reads = CITE.sub("", text), [], []
+    for update in updates:
+        target, replacement = update["target"], update["replacement"]
+        if target not in cited:
+            continue
+        kind = "撤回" if update["kind"] == "retraction" else "更正"
+        historical = (THEN.search(body) and UPDATED.search(body)
+                      and replacement in cited and replacement in evidence)
+        if not historical:
+            reasons.append(f"source_updated: {target}已被{replacement}{kind}，旧内容不能当作当前事实；"
+                           f"历史回顾须写明“当时…，后{kind}…”并同时引用两端")
+            if replacement not in evidence:
+                reads.append({"ref": replacement, "reason": f"读取{target}的{kind}通知{replacement}，再核对旧数的适用范围"})
+    unverified = [r for r in cited if r in evidence
+                  and (evidence[r]["source_kind"] == "social" or not evidence[r]["verified"])]
+    if unverified:
+        attributed = UNCERTAIN.search(body) and (ATTRIBUTION.search(body) or HYPOTHESIS.search(body))
+        if not (attributed or EVENT.search(body)):
+            reasons.append(f"unconfirmed_source: {'、'.join(unverified)}未核实，本句须保留转述者和未证实限定，"
+                           "或写成待验证的假设，不能写成已确认事实")
+    return reasons, reads
+
+
+def scope_span_ok(text, span):
+    """The span the model says turns 'not reported' into 'not done' must be exact, unique and local."""
+    return (isinstance(span, str) and span.strip() == span and span and text.count(span) == 1
+            and not CITE.search(span) and not re.search(r"[。！？!?\n]", span)
+            and re.search(r"未|没|无|不|非|not|no\b|never", span, re.I) is not None)
+
+
+def scope_revision(text, span):
+    """未报告≠未实施: wrap only the over-reaching assertion, keep every other character."""
+    start = text.index(span)
+    return text[:start] + "本次引用材料不足以确认“" + span + "”这一说法" + text[start + len(span):]

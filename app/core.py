@@ -1,838 +1,272 @@
-"""Evidence-bound writing and verification. No network or database calls here."""
-import re
+"""generate / verify / revise. Requests are plain dicts (see service.py); the model caller is injected."""
 import json
-import hashlib
-from copy import deepcopy
-from decimal import Decimal
+import os
+from typing import Literal
 
-from .prompts import WRITE, PLAN, BOUND_PLAN, VERIFY, REVISE, SUPPORT_AUDIT, REPLAN, VERIFY_REPAIR
-from .evidence import model_input, locate_support, reference_target, analysis_results, locate_analysis, analysis_signature
-from .source_context import evidence_catalog, source_updates, read_requests, check_source_use
-from .contracts import (CLAIM_KINDS, analysis_binding_matches, check_plan, PlanReferenceError, PLAN_DIAGNOSTIC_LIMIT,
-                        check_verification_contract, VerificationContractError,
-                        same_outside_errors, VerificationCompletionError)
+from pydantic import BaseModel
 
-CITATION = re.compile(r"\[([A-Za-z][A-Za-z0-9_.:-]*)\]")
-NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")
-LABELS = {"OBJ", "NUM", "TIME", "COND", "STR", "REF"}
+from . import claims as C
+from .llm import chat_json
+from .prompts import CLAIM_REVISE, CLAIM_VERIFY, VERIFY_COVERAGE, WRITE
 
 
-def packet_input(packet):
-    if not isinstance(packet, dict) or not isinstance(packet.get("question"), str) or not packet["question"].strip():
-        raise ValueError("question不能为空")
-    evidence = packet.get("evidence", [])
-    if not isinstance(evidence, list):
-        raise ValueError("evidence须为列表")
-    ids = set()
-    for item in evidence:
-        if not isinstance(item, dict):
-            raise ValueError("证据须为对象")
-        key = item.get("id")
-        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]*", key) or key in ids:
-            raise ValueError("证据id须唯一，并能直接作为引用")
-        ids.add(key)
-        if not isinstance(item.get("text"), str) or not item["text"].strip() or not item.get("version"):
-            raise ValueError("每份证据须有text和version")
-    if not isinstance(packet.get("assessment", {}), dict):
-        raise ValueError("assessment须为对象")
-    analyses = analysis_results(packet)
-    source_updates(packet)
-    if not evidence and not analyses:
-        raise ValueError("需要原文证据或带溯源的分析结果")
-    # Explicitly select model input; evaluation labels never enter model requests.
-    return dict({k: packet[k] for k in ("question", "assessment") if k in packet}, evidence=evidence)
+# Small model output schemas. The model only answers by the program's sentence index.
+class DraftOut(BaseModel):
+    draft: str
 
 
-def plan(packet, call, method="bound", *, max_plan_retries=0):
-    """Optionally request one new plan; the host owns sending, payment and replay."""
-    if type(max_plan_retries) is not int or max_plan_retries not in (0, 1):
-        raise ValueError("max_plan_retries只允许0或1")
-    source = packet_input(packet)
-    if method not in {"direct", "plain", "bound"}:
-        raise ValueError("method须为direct/plain/bound")
-    if method == "direct":
-        return None
-    instruction = BOUND_PLAN if method == "bound" else PLAN
-    planned = call("plan_" + method, instruction, model_input(source))
-    try:
-        check_plan(source, planned, method)
-    except PlanReferenceError as error:
-        if not max_plan_retries:
-            raise
-        repair = {"attempt": 1, "max_attempts": 1, "failed_plan": deepcopy(planned),
-                  "diagnostics": error.diagnostics, "diagnostics_omitted": error.omitted}
-        planned = call("replan_" + method, instruction + REPLAN,
-                       model_input(dict(source, plan_repair=repair)))
-        try:
-            check_plan(source, planned, method)
-        except PlanReferenceError as second:
-            second.repair_attempted = 1
-            raise
-    return planned
+class QuoteOut(BaseModel):
+    ref: str
+    quote: str
 
 
-def write(packet, call, method="bound", *, plan=None):
-    """Write from an explicit validated plan; persist that plan in Radar between steps."""
-    source = packet_input(packet)
-    check_plan(source, plan, method)
-    request = dict(source)
-    if plan is not None:
-        request["plan"] = deepcopy(plan)
-    output = call("write_" + method, WRITE, model_input(request))
-    draft = output.get("draft")
-    if not isinstance(draft, str) or not draft.strip():
-        raise ValueError("生成结果缺少非空draft")
-    return {"method": method, "plan": plan, "draft": draft}
+class ClaimCheck(BaseModel):
+    index: int
+    verdict: Literal["supported", "contradicted", "insufficient"]
+    labels: list[str] = []
+    quotes: list[QuoteOut] = []
+    reason: str = ""
+    scope_span: str | None = None
 
 
-def generate(packet, call, method="bound", *, max_plan_retries=0):
-    planned = plan(packet, call, method, max_plan_retries=max_plan_retries)
-    return write(packet, call, method, plan=planned)
+class CheckBatch(BaseModel):
+    claims: list[ClaimCheck]
 
 
-def split_units(draft):
-    """Keep original paragraph spans; do not silently fix the author's statements."""
-    units = []
-    for match in re.finditer(r".+?(?=\n[ \t]*\n|\Z)", draft, re.S):
-        text = match.group()
-        start = match.start() + len(text) - len(text.lstrip())
-        end = match.end() - (len(text) - len(text.rstrip()))
-        if start < end:
-            units.append({"id": f"U{len(units)+1}", "text": draft[start:end], "start": start, "end": end})
-    return units
+class CoverageOut(BaseModel):
+    verdict: Literal["complete", "incomplete", "uncertain"]
+    reason: str
 
 
-def numeric_tokens(text):
-    text = CITATION.sub("", text)
-    text = re.sub(r"\b(?:NCT\d+|PMID\s*:?\s*\d+)\b", "", text)
-    return list(dict.fromkeys(m.group() for m in NUMBER.finditer(text)))
+class Replacement(BaseModel):
+    index: int
+    text: str
 
 
-def number_value(token):
-    return Decimal(token.replace(",", "").replace("−", "-").rstrip("%"))
+class RevisionOut(BaseModel):
+    sentences: list[Replacement]
 
 
-def numeric_hints(unit, evidence, analyses=None):
-    refs = [reference_target(k, evidence)[0] for k in CITATION.findall(unit["text"])]
-    refs = [k for k in refs if k in evidence]
-    text = " ".join(evidence[k]["text"] for k in refs)
-    for key in CITATION.findall(unit["text"]):
-        if key in (analyses or {}):
-            result = analyses[key]
-            text += " " + json.dumps({"output": result["output"],
-                                       "calculation_basis": result.get("calculation_basis", {})}, ensure_ascii=False)
-    available = {number_value(x) for x in numeric_tokens(text)}
-    return [token for token in numeric_tokens(unit["text"]) if number_value(token) not in available]
+class InputError(ValueError):
+    def __init__(self, code, message, status=400, llm_calls=None):
+        super().__init__(message)
+        self.code, self.message, self.status, self.llm_calls = code, message, status, llm_calls
 
 
+class Budget:
+    """Counts chat_json calls against max_llm_calls and keeps the call records."""
 
-def locate_span(text, item):
-    """Resolve one exact occurrence; offsets are relative to the containing unit."""
-    span = item.get("span", "")
-    if not isinstance(span, str) or not span:
-        raise ValueError("陈述缺少非空原文span")
-    if "span_start" in item or "span_end" in item:
-        start, end = item.get("span_start"), item.get("span_end")
-        if (type(start) is not int or type(end) is not int
-                or not 0 <= start < end <= len(text) or text[start:end] != span):
-            raise ValueError("陈述位置无效或与span不一致")
-        return start, end
-    start = text.find(span)
-    if start < 0:
-        raise ValueError("陈述未逐字对应原稿：" + span)
-    if text.find(span, start + 1) >= 0:
-        raise ValueError("陈述位置不唯一；请给出span_start/span_end或包含引用的唯一原句：" + span)
-    return start, start + len(span)
+    def __init__(self, llm, limit):
+        self.llm, self.left, self.calls = llm, limit, []
+
+    def ask(self, stage, system, payload, model_cls, **options):
+        if self.left <= 0:
+            return None, "llm_call_limit"
+        self.left -= 1
+        parsed, call = self.llm(stage, system, payload, model_cls, **options)
+        self.calls.append(call)
+        return parsed, call.get("error") or ("empty_output" if parsed is None else None)
 
 
-def claim_citations(text, start, end):
-    """Read citations at the already resolved occurrence."""
-    explicit = CITATION.findall(text[start:end])
-    following = re.match(r"\s*(?:\[[A-Za-z][A-Za-z0-9_.:-]*\]\s*)+", text[end:])
-    if following:
-        explicit.extend(CITATION.findall(following.group()))
-    if explicit:
-        return set(explicit)
-    # The remainder of this sentence may carry a shared citation.
-    tail = re.split(r"[。！？!?;\n；]", text[end:], maxsplit=1)[0]
-    sentence_refs = CITATION.findall(tail)
-    return set(sentence_refs or CITATION.findall(text))
+def materials(req):
+    ids = [e["id"] for e in req.get("evidence", [])] + [a["id"] for a in req.get("analysis_results", [])]
+    if not ids:
+        raise InputError("no_materials", "需要至少一份evidence或analysis_results")
+    if len(set(ids)) != len(ids):
+        raise InputError("duplicate_id", "evidence与analysis_results的id必须唯一")
+    # Only these fields reach the model; evaluation labels and other extras never do.
+    return {k: req[k] for k in ("question", "evidence", "analysis_results", "source_updates",
+                                "research_scope", "previous_report") if req.get(k) is not None}
 
 
-def _draft_sentences(text):
-    """Number draft sentences for diagnostics; never change source segment IDs."""
-    sentences, start = [], 0
-    for match in re.finditer(r"[。！？]+[”’」』]?|[.!?]+(?=\s|\[|$)|\n+|\Z", text):
-        end = match.end()
-        if text[start:end].strip():
-            sentences.append({"number": len(sentences) + 1, "start": start, "end": end})
-        start = end
-    return sentences
+def references(req):
+    """id -> the text a citation may be checked against (analysis results as canonical JSON)."""
+    refs = {e["id"]: {"ref": e["id"], "title": e.get("title", ""), "source_kind": e["source_kind"],
+                      "verified": e["verified"], "published_at": e.get("published_at"), "text": e["text"]}
+            for e in req.get("evidence", [])}
+    for a in req.get("analysis_results", []):
+        body = {k: a.get(k) for k in ("method", "output", "calculation_basis", "limitations")}
+        refs[a["id"]] = {"ref": a["id"], "kind": "analysis_result",
+                         "text": json.dumps(body, ensure_ascii=False, sort_keys=True)}
+    return refs
 
 
-def _add_sentence_diagnostics(review):
-    for unit in review["units"]:
-        sentences = _draft_sentences(unit["text"])
-        unit["sentences"] = sentences
-        for field, index_field in (("claims", "claim_index"), ("issues", "issue_index")):
-            for index, finding in enumerate(unit[field]):
-                start, end = locate_span(unit["text"], finding)
-                finding[index_field] = index
-                finding["sentence_numbers"] = [s["number"] for s in sentences
-                                               if start < s["end"] and end > s["start"]]
+def context(sentences, claim):
+    i = claim["index"] - 1
+    return {"previous": sentences[i - 1]["text"] if i else None,
+            "next": sentences[i + 1]["text"] if i + 1 < len(sentences) else None}
 
 
-def verify(packet, draft, call, *, max_verify_retries=0, mode="whole", previous_review=None):
-    if type(max_verify_retries) is not int or max_verify_retries not in (0, 1):
-        raise ValueError("max_verify_retries只允许0或1")
-    if mode not in ("whole", "paragraph"):
-        raise ValueError("mode只允许whole或paragraph")
-    if mode == "paragraph" and max_verify_retries:
-        raise ValueError("分段核验只重发明确截断的段，不启用整稿结构纠错")
-    source = packet_input(packet)
-    if not isinstance(draft, str) or not draft.strip():
-        raise ValueError("待核稿不能为空")
-    if mode == "paragraph":
-        from . import claims
-        return claims.verify(source, draft, call, previous_review)
-    if previous_review is not None:
-        raise ValueError("previous_review只用于主张级核验，旧whole模式不复用")
-    units = split_units(draft)
-    lookup = {e["id"]: e for e in source["evidence"]}
-    analyses = analysis_results(source)
-    catalog = evidence_catalog(source)
-    model_units = [dict(u, numeric_hints=numeric_hints(u, lookup, analyses),
-                        citations=[{"reference": m.group(1), "start": m.start(), "end": m.end()}
-                                   for m in CITATION.finditer(u["text"])]) for u in units]
-    payload = model_input(dict(source, draft=draft, units=model_units))
-    response = call("verify", VERIFY, payload)
-    try:
-        check_verification_contract(response, model_units)
-    except VerificationContractError as error:
-        if not max_verify_retries or not error.retry_eligible:
-            raise
-        original = deepcopy(response)
-        repair = {"attempt": 1, "max_attempts": 1, "failed_output": original,
-                  "diagnostics": error.diagnostics, "diagnostics_omitted": error.omitted}
-        response = call("verify_repair", VERIFY + VERIFY_REPAIR, dict(payload, verify_repair=repair))
-        try:
-            check_verification_contract(response, model_units)
-        except VerificationContractError as second:
-            second.repair_attempted = 1
-            raise
-        if not same_outside_errors(original, response, error.invalid_paths):
-            raise ValueError("结构纠错改动了未报错的核验内容，不能采用")
-    reviews = response.get("reviews", [])
-    if len(reviews) != len(units) or {r.get("unit_id") for r in reviews} != {u["id"] for u in units}:
-        raise ValueError("核验结果遗漏或重复了原稿段落")
-    by_id = {r["unit_id"]: r for r in reviews}
-    problems, results, verification_errors = [], [], []
-    for unit in model_units:
-        review = by_id[unit["id"]]
-        verdict = review.get("verdict")
-        if verdict not in {"supported", "contradicted", "insufficient"}:
-            raise ValueError("无效核验结论")
-        issues, unit_errors, scope_gaps, requests, source_gaps = [], [], [], [], []
-
-        def request_read(claim, index, reason):
-            refs = [x for x in claim.get("evidence", []) if isinstance(x, dict)] if isinstance(claim.get("evidence", []), list) else []
-            refs = list(refs)
-            # Actual draft citations identify candidate sources, not proof of support.
-            try:
-                start, end = locate_span(unit["text"], claim)
-                citations = claim_citations(unit["text"], start, end)
-            except ValueError:
-                citations = CITATION.findall(unit["text"])
-            for citation in sorted(citations):
-                key, part = reference_target(citation, lookup)
-                if key in lookup and not any(x.get("evidence_id") == key for x in refs):
-                    refs.append({"evidence_id": key, **({"segment_id": part} if part else {})})
-            needed = read_requests(refs, catalog, claim.get("span", unit["text"]), reason=reason)
-            requests.extend(dict(x, unit_id=unit["id"], claim_index=index) for x in needed)
-        citation_status = None
-
-        def support(items, *, allow_scope=False):
-            # One malformed item must not erase other correctly located passages.
-            located = []
-            if not isinstance(items, list):
-                unit_errors.append("核验依据须为列表")
-                return located
-            for item in items:
-                try:
-                    if not isinstance(item, dict):
-                        raise ValueError("核验依据须为对象")
-                    located.extend(locate_support([item], lookup, allow_scope=allow_scope))
-                except ValueError as error:
-                    unit_errors.append(str(error))
-            return located
-
-        def computed(items):
-            try:
-                return locate_analysis(items, analyses)
-            except ValueError as error:
-                unit_errors.append(str(error))
-                return []
-
-        for issue in review.get("issues", []):
-            labels = issue.get("labels", [])
-            if not labels or set(labels) - LABELS:
-                raise ValueError("问题标签无效")
-            try:
-                start, end = locate_span(unit["text"], issue)
-            except ValueError as error:
-                unit_errors.append(str(error))
-                continue
-            issues.append(dict(issue, span_start=start, span_end=end,
-                               evidence=support(issue.get("evidence", []), allow_scope=True)))
-            if "REF" in labels:
-                citation_status = "invalid"
-        claims = review.get("claims", [])
-        if not claims:
-            raise ValueError("核验缺少对子陈述的检查")
-        normalized = []
-        claim_positions = set()
-        for index, claim in enumerate(claims):
-            span = claim.get("span", "")
-            cv = claim.get("verdict")
-            if cv not in {"supported", "contradicted", "insufficient"}:
-                raise ValueError("子陈述结论无效")
-            try:
-                start, end = locate_span(unit["text"], claim)
-            except ValueError as error:
-                unit_errors.append(str(error))
-                request_read(claim, index, str(error))
-                continue
-            if (start, end) in claim_positions:
-                unit_errors.append("同一陈述位置被重复核验，无法区分原稿中的不同陈述")
-                continue
-            claim_positions.add((start, end))
-            previous_errors = len(unit_errors)
-            kind = claim.get("kind", "fact")
-            if kind not in CLAIM_KINDS:
-                unit_errors.append("陈述kind无效")
-            absence = kind == "source_absence"
-            if absence and not claim.get("missing_information"):
-                unit_errors.append("缺省判断未说明本次材料缺少什么")
-            items = claim.get("evidence", [])
-            scopes = []
-            if not absence and isinstance(items, list):
-                passages, scope_items = [], []
-                for item in items:
-                    if isinstance(item, dict) and item.get("scope") == "whole_source":
-                        scope_items.append({k: v for k, v in item.items() if k != "segment_id"})
-                        if item.get("segment_id"):
-                            passages.append({k: v for k, v in item.items() if k != "scope"})
-                    else:
-                        passages.append(item)
-                supports = support(passages)
-                scopes = support(scope_items, allow_scope=True)
-                if scopes:
-                    scope_gaps.append({"claim_index": index, "span": span,
-                                       "reason": claim.get("missing_information") or claim.get("reason", ""),
-                                       "evidence": scopes,
-                                       "scope": "仅本次提供材料；全文范围不能代替肯定事实的片段依据"})
-            else:
-                supports = support(items, allow_scope=absence)
-            derived = computed(claim.get("analysis_refs", []))
-            if kind == "fact" and derived:
-                unit_errors.append("计算结果须标为analysis_result或hypothesis，不能当作原始实验事实")
-            if absence and derived:
-                unit_errors.append("原文材料缺省须引用实际检查范围，不能用分析输出代替")
-            if kind == "analysis_result" and not derived:
-                unit_errors.append("分析陈述缺少analysis_refs输出位置")
-            if derived and numeric_tokens(span):
-                binding = claim.get("binding")
-                if not analysis_binding_matches(binding, derived):
-                    unit_errors.append("分析数字缺少一致的单位、期间、总体、分母和分析单位绑定")
-                selected_values = json.dumps([{ "value": r["value"], "basis": r["calculation_basis"]}
-                                              for r in derived], ensure_ascii=False)
-                available = {number_value(t) for t in numeric_tokens(selected_values)}
-                for token in numeric_tokens(span):
-                    if number_value(token) not in available and token not in unit["numeric_hints"]:
-                        unit["numeric_hints"].append(token)
-            if cv in {"supported", "contradicted"} and not (supports or derived):
-                unit_errors.append("核验判断缺少原文位置或分析输出：" + span)
-            if len(unit_errors) > previous_errors:
-                cv = "insufficient"
-                request_read(claim, index, "；".join(unit_errors[previous_errors:]))
-            # Version changes and unconfirmed-source status are independent of model confidence.
-            cited_refs = [{"evidence_id": reference_target(k, lookup)[0]}
-                          for k in claim_citations(unit["text"], start, end)]
-            policy_claim = dict(claim, analysis_refs=derived)
-            gaps, support_scope = check_source_use(policy_claim, supports, analyses, source, cited_refs=cited_refs)
-            if gaps:
-                source_gaps.extend(dict(g, claim_index=index, span=span) for g in gaps)
-                if cv != "contradicted":
-                    cv = "insufficient"
-            local_status = None
-            if cv == "supported":
-                local_targets = [reference_target(k, lookup) for k in claim_citations(unit["text"], start, end)]
-                missing_passage = any(
-                    not any(key == e["evidence_id"] and (part is None or part == e.get("segment_id"))
-                            for key, part in local_targets)
-                    for e in supports)
-                if absence:
-                    # Scope can cover a whole package, but the sentence's citation
-                    # must still identify at least one source actually inspected.
-                    missing_passage = not any(
-                        key == e["evidence_id"] and (part is None or e.get("scope") == "whole_source"
-                                                     or part == e.get("segment_id"))
-                        for key, part in local_targets for e in supports)
-                local_refs = {key for key, part in local_targets}
-                missing_analysis = any(e["analysis_id"] not in local_refs for e in derived)
-                if missing_passage or missing_analysis:
-                    issues.append({"span": span, "span_start": start, "span_end": end,
-                                   "labels": ["REF"], "evidence": supports,
-                                   **({"analysis_refs": derived} if derived else {}),
-                                   "reason": "本句引用与核验依据不一致"})
-                    # A citation error is not a medical or scientific contradiction.
-                    citation_status = local_status = "invalid"
-            normalized_claim = dict(claim, span_start=start, span_end=end, verdict=cv, evidence=supports)
-            if scopes:
-                normalized_claim["scope_evidence"] = scopes
-            if derived:
-                normalized_claim["analysis_refs"] = derived
-            if local_status:
-                normalized_claim["citation_status"] = local_status
-            if support_scope:
-                normalized_claim["support_scope"] = support_scope
-            if gaps:
-                normalized_claim["source_gaps"] = gaps
-            normalized_claim["read_requests"] = [x for x in requests if x.get("claim_index") == index]
-            if cv == "insufficient" and not normalized_claim["read_requests"] and not gaps:
-                normalized_claim["read_requests"] = read_requests(
-                    supports + cited_refs, catalog, span, reason=claim.get("reason", "需要补充支持材料"))
-            normalized.append(normalized_claim)
-        if any(c["verdict"] == "contradicted" for c in normalized):
-            verdict = "contradicted"
-        elif any(c["verdict"] == "insufficient" for c in normalized):
-            verdict = "insufficient"
-        elif verdict == "contradicted":
-            verdict = "insufficient"
-        cited = [reference_target(k, lookup)[0] for k in CITATION.findall(unit["text"])]
-        # A package-wide absence can legitimately inspect sources not cited one by one.
-        used = {e["evidence_id"] for c in normalized if c["verdict"] == "supported"
-                for e in c["evidence"] if e.get("scope") != "whole_source"}
-        if used - set(cited):
-            issues.append({"span": unit["text"], "labels": ["REF"],
-                           "reason": "支持依据未绑定到本段的实际引用：" + ", ".join(sorted(used - set(cited))),
-                           "evidence": []})
-            citation_status = "invalid"
-        unknown = sorted(set(cited) - lookup.keys() - analyses.keys())
-        if unknown:
-            issues.append({"span": unit["text"], "labels": ["REF"],
-                           "reason": "未知引用：" + ", ".join(unknown), "evidence": []})
-            citation_status = "invalid"
-        if not cited:
-            issues.append({"span": unit["text"], "labels": ["REF"],
-                           "reason": "本段没有绑定原文或分析引用", "evidence": []})
-            citation_status = "missing"
-            if verdict == "supported":
-                verdict = "insufficient"
-        resolutions = {}
-        for item in review.get("numeric_resolutions", []):
-            token = item.get("token")
-            if token in unit["numeric_hints"] and item.get("reason"):
-                supports = support(item.get("evidence", []))
-                derived = computed(item.get("analysis_refs", []))
-                if derived:
-                    calc = item.get("calculation", {})
-                    if (not isinstance(calc, dict) or not isinstance(calc.get("expression"), str)
-                            or not calc["expression"].strip()
-                            or {"unit", "period", "population", "denominator"} - calc.keys()):
-                        unit_errors.append("分析换算缺少计算式、单位、期间、总体或分母")
-                        continue
-                    # A changed output unit can be an explicit conversion; the
-                    # source period, population, denominator and analysis unit cannot.
-                    context = ("period", "population", "denominator", "analysis_unit")
-                    if any(k in result["calculation_basis"]
-                           and (k not in calc or calc[k] != result["calculation_basis"][k])
-                           for result in derived for k in context):
-                        unit_errors.append("分析换算与所引结果的期间、总体、分母或分析单位不一致")
-                        continue
-                if supports or derived:
-                    resolutions[token] = dict(item, evidence=supports,
-                                              **({"analysis_refs": derived} if derived else {}))
-        unresolved = [t for t in unit["numeric_hints"] if t not in resolutions]
-        if unresolved and verdict == "supported":
-            verdict = "insufficient"
-            issues.append({"span": unit["text"], "labels": ["NUM"],
-                           "reason": "下列数字尚缺原文、分析输出或换算解释：" + ", ".join(unresolved),
-                           "evidence": []})
-        if issues and verdict == "supported":
-            verdict = "insufficient"
-        if unit_errors:
-            if not any(c["verdict"] == "contradicted" for c in normalized):
-                verdict = "insufficient"
-            verification_errors.append({"unit_id": unit["id"], "errors": unit_errors})
-        item = {"unit_id": unit["id"], "text": unit["text"], "start": unit["start"], "end": unit["end"],
-                "verdict": verdict, "reason": review.get("reason", ""), "claims": normalized,
-                "issues": issues, "numeric_hints": unit["numeric_hints"],
-                "numeric_resolutions": list(resolutions.values())}
-        if citation_status:
-            item["citation_status"] = citation_status
-        if scope_gaps:
-            item["scope_gaps"] = scope_gaps
-        if source_gaps:
-            item["source_gaps"] = source_gaps
-        if requests:
-            item["read_requests"] = requests
-        results.append(item)
-        if verdict != "supported" or citation_status == "invalid":
-            problems.append(unit["id"])
-    coverage = response.get("coverage", {})
-    if coverage.get("verdict") not in {"complete", "incomplete", "uncertain"}:
-        raise ValueError("核验结果缺少任务覆盖评价")
-    status = "FAIL" if any(x["verdict"] == "contradicted" or x.get("citation_status") == "invalid" for x in results) else (
-        "REVIEW" if problems or coverage["verdict"] != "complete" else "PASS")
-    all_requests = []
-    for unit in results:
-        candidates = list(unit.get("read_requests", []))
-        candidates += [dict(r, unit_id=unit["unit_id"], claim_index=i)
-                       for i, c in enumerate(unit["claims"]) for r in c.get("read_requests", [])]
-        candidates += [dict(r, unit_id=unit["unit_id"], claim_index=g.get("claim_index"))
-                       for g in unit.get("source_gaps", []) for r in g.get("read_requests", [])]
-        for request in candidates:
-            if request not in all_requests:
-                all_requests.append(request)
-    result = {"status": status, "draft": draft, "units": results, "problem_units": problems,
-            "coverage": coverage, "verification_errors": verification_errors,
-            "raw_response": deepcopy(response), "evidence_catalog": catalog,
-            "source_updates": source_updates(source), "analysis_signature": analysis_signature(source),
-            "read_requests": all_requests,
-            "scope": "固定材料内的机器核验；段落覆盖由程序检查，子声明语义由模型判断；分析仅核对给定输出，复算及总体构建由Radar负责"}
-    return result
+def hints(claim, refs):
+    cited = [" ".join(str(refs[r].get(k) or "") for k in ("title", "published_at", "text")) for r in claim["citations"]]
+    return C.numeric_hints(claim["text"], cited)
 
 
-def review_locations_match(review):
-    draft, saved = review.get("draft"), review.get("units", [])
-    if not isinstance(draft, str) or not isinstance(saved, list):
-        return False
-    actual = split_units(draft)
-    return len(actual) == len(saved) and all(
-        u.get("unit_id") == v["id"] and all(u.get(k) == v[k] for k in ("text", "start", "end"))
-        for u, v in zip(saved, actual))
+def generate(req, llm=chat_json):
+    payload = materials(req)
+    budget = Budget(llm, req.get("max_llm_calls", 20))
+    thinking = os.environ.get("LLM_WRITE_THINKING", "false").lower() in ("1", "true", "yes")
+    out, error = budget.ask("generate", WRITE, payload, DraftOut, max_tokens=8192, thinking=thinking)
+    if out is None or not out.draft.strip():
+        raise InputError(error or "empty_draft", "生成失败：" + (error or "draft为空"),
+                         400 if error == "llm_call_limit" else 502, budget.calls)
+    return {"draft": out.draft.strip(), "llm_calls": budget.calls}
 
 
-def _validate_audit_answer(answer, passages):
-    """Validate one answer against its selected passages, without judging semantics."""
-    verdict, reason = answer.get("verdict"), answer.get("reason")
-    supports = answer.get("support", [])
-    if (not isinstance(verdict, str) or verdict not in {"supported", "not_supported", "uncertain"}
-            or not isinstance(reason, str) or not reason.strip()):
-        raise ValueError("片段复核缺少有效结论或理由")
-    if not isinstance(supports, list) or (verdict == "supported" and not supports):
-        raise ValueError("支持结论须摘录所选片段中的原文")
-    selected = {(p["evidence_id"], p["segment_id"]): p for p in passages}
-    for support in supports:
-        if not isinstance(support, dict) or not all(isinstance(support.get(k), str) for k in ("evidence_id", "segment_id")):
-            raise ValueError("复核摘录格式无效")
-        passage = selected.get((support.get("evidence_id"), support.get("segment_id")))
-        quote = support.get("quote")
-        if passage is None or not isinstance(quote, str) or not quote.strip() or quote not in passage["quote"]:
-            raise ValueError("复核摘录不在本条所选片段中")
+def judge(claim, answer, refs, evidence):
+    """Apply one model answer to one sentence; bad quotes downgrade only this sentence."""
+    labels = [x for x in dict.fromkeys(answer.labels) if x in C.LABELS]
+    problems, good = [], set()
+    for q in answer.quotes:
+        where = C.locate_quote(refs[q.ref]["text"], q.quote) if q.ref in claim["citations"] else "outside"
+        claim["quotes"].append({"ref": q.ref, "quote": q.quote, "found": where in ("found", "ambiguous")})
+        if where == "found":
+            good.add(q.ref)
+        else:
+            problems.append({"outside": f"quote_outside_citation: {q.ref}不是本句的引用",
+                             "not_found": f"quote_not_found: 短引不在{q.ref}原文中",
+                             "ambiguous": f"quote_ambiguous: 短引在{q.ref}中出现多次，不能唯一定位"}[where])
+    if answer.verdict == "supported":
+        missing = [r for r in claim["citations"] if r not in good]
+        if missing:
+            problems.append("missing_quote: 缺少" + "、".join(missing) + "的有效短引")
+        unexplained = [t for t in hints(claim, refs)
+                       if t not in answer.reason and t.rstrip("%") not in answer.reason]
+        if unexplained:
+            problems.append("numeric_unexplained: 数字" + "、".join(unexplained) + "不在所引原文中，也未说明换算")
+            labels = list(dict.fromkeys(labels + ["NUM"]))
+    if answer.verdict == "contradicted" and not good:
+        problems.append("missing_quote: 矛盾判定缺少有效短引")
+    claim["verdict"] = "insufficient" if problems else answer.verdict
+    claim["labels"] = labels
+    claim["reason"] = "；".join(problems) + "｜模型理由：" + answer.reason if problems else answer.reason
+    if (answer.verdict == "insufficient" and not problems and answer.scope_span
+            and all(r in evidence and r in good for r in claim["citations"])
+            and C.scope_span_ok(claim["text"], answer.scope_span)):
+        claim["scope_span"] = answer.scope_span
 
 
-def _audit_source_context(passages, lookup):
-    contexts = {}
-    for passage in passages:
-        key = passage["evidence_id"]
-        source = lookup[key]
-        context = contexts.setdefault(key, {"evidence_id": key, "version": source["version"],
-            "title": source.get("title", ""), "role": "identity_only", "paragraphs": []})
-        paragraphs = split_units(source["text"])
-        indices = {i for i, p in enumerate(paragraphs)
-                   if passage["start"] < p["end"] and passage["end"] > p["start"]}
-        nearby = {j for i in indices for j in (i - 1, i, i + 1) if 0 <= j < len(paragraphs)}
-        for index in sorted(nearby):
-            paragraph = {k: paragraphs[index][k] for k in ("start", "end", "text")}
-            if paragraph not in context["paragraphs"]:
-                context["paragraphs"].append(paragraph)
-    for context in contexts.values():
-        context["paragraphs"].sort(key=lambda p: p["start"])
-    return list(contexts.values())
+def verify(req, llm=chat_json):
+    materials(req)
+    refs, evidence = references(req), {e["id"]: e for e in req.get("evidence", [])}
+    updates = req.get("source_updates", [])
+    budget = Budget(llm, req.get("max_llm_calls", 20))
+    sentences = C.sentences(req["draft"])
+    if not sentences:
+        raise InputError("empty_draft", "draft中没有可核验的句子")
+    pending, unknown_ref, reads, source_problems = [], False, [], {}
+    for claim in sentences:
+        claim.update(verdict="insufficient", labels=[], quotes=[], reason="")
+        unknown = [r for r in claim["citations"] if r not in refs]
+        if not claim["citations"]:
+            claim.update(labels=["REF"], reason="no_citation: 本句没有引用，不能借用相邻句的引用")
+        elif unknown:
+            unknown_ref = True
+            claim.update(labels=["REF"], reason="unknown_ref: 引用了不存在的编号" + "、".join(unknown))
+        else:
+            source_problems[claim["index"]], found = C.source_use_problems(
+                claim["text"], claim["citations"], evidence, updates)
+            reads += found
+            pending.append(claim)
 
-
-def audit_support(packet, review, call, *, targets=None):
-    """Check selected passages only. This opt-in call never edits a draft or its old review."""
-    source = packet_input(packet)
-    lookup = {e["id"]: e for e in source["evidence"]}
-    requested = None if targets is None else set(targets)
-    found, items, skipped, errors = set(), [], [], []
-    result = {"status": "NOT_RUN", "original_status": review["status"], "checks": [],
-              "skipped": skipped, "verification_errors": errors,
-              "draft": review["draft"], "evidence_catalog": evidence_catalog(source),
-              "source_updates": source_updates(source), "analysis_signature": analysis_signature(source),
-              "scope": "仅复核checks列出的陈述及所选片段；PASS不代表整稿通过，不判断事实整体真伪，不自动修订正文"}
-    if (not review_locations_match(review)
-            or review.get("evidence_catalog") != evidence_catalog(source)
-            or review.get("source_updates", []) != source_updates(source)
-            or review.get("analysis_signature") != analysis_signature(source)):
-        errors.append({"reason": "来源身份或状态已变化，须先重新核验整稿"})
-        result["status"] = "REVIEW"
-        return result
-    if review.get("verification_errors"):
-        result.update(status="REVIEW", verification_errors=review["verification_errors"])
-        return result
-    for unit in review["units"]:
-        for index, claim in enumerate(unit["claims"]):
-            key = (unit["unit_id"], index)
-            found.add(key)
-            if requested is not None and key not in requested:
-                continue
-            identity = {"unit_id": key[0], "claim_index": index}
-            if (claim.get("kind", "fact") != "fact" or claim["verdict"] != "supported"
-                    or claim.get("scope_evidence") or claim.get("support_scope")):
-                skipped.append(dict(identity, reason="只复核已判支持的纯事实选段；材料缺省及含全文范围的复合陈述须另查范围"))
-                continue
-            try:
-                start, end = locate_span(unit["text"], claim)
-                selected = claim.get("evidence", [])
-                passages = locate_support(selected, lookup)
-                if not passages:
-                    raise ValueError("缺少所选片段")
-                for saved, actual in zip(selected, passages):
-                    for field in ("version", "start", "end", "quote"):
-                        if field in saved and saved[field] != actual[field]:
-                            raise ValueError("保存的片段与当前固定材料不一致：" + field)
-                for passage in passages:
-                    source = lookup[passage["evidence_id"]]
-                    passage["source_identity"] = {k: source[k] for k in ("title", "record_id") if k in source}
-                    if source.get("text_basis") in {"prior_report", "retrieval_log"}:
-                        passage["source_identity"]["text_basis"] = source["text_basis"]
-                items.append(dict(identity, span=claim["span"], span_start=start, span_end=end,
-                                  context=unit["text"], evidence=passages,
-                                  source_context=_audit_source_context(passages, lookup)))
-            except ValueError as error:
-                errors.append(dict(identity, reason=str(error)))
-    if requested is not None and requested - found:
-        raise ValueError("复核目标不存在")
-    if errors:
-        result["status"] = "REVIEW"
-        return result
-    if not items:
-        return result
-    response = call("support_audit", SUPPORT_AUDIT, {"claims": items})
-    result["raw_response"] = deepcopy(response)
-    checks = response.get("checks", [])
-    expected = {(x["unit_id"], x["claim_index"]) for x in items}
-    valid_identity = isinstance(checks, list) and all(
-        isinstance(c, dict) and isinstance(c.get("unit_id"), str)
-        and type(c.get("claim_index")) is int for c in checks)
-    if (not valid_identity or len(checks) != len(items)
-            or {(c["unit_id"], c["claim_index"]) for c in checks} != expected):
-        errors.append({"reason": "片段复核回执缺项、重复或目标不一致"})
-        result["status"] = "REVIEW"
-        return result
-    by_id = {(c["unit_id"], c["claim_index"]): c for c in checks}
-    for item in items:
-        answer = by_id[(item["unit_id"], item["claim_index"])]
-        verdict, reason = answer.get("verdict"), answer.get("reason")
-        supports = answer.get("support", [])
-        try:
-            _validate_audit_answer(answer, item["evidence"])
-        except ValueError as error:
-            errors.append({"unit_id": item["unit_id"], "claim_index": item["claim_index"], "reason": str(error)})
-            verdict = "uncertain"
-        result["checks"].append(dict(item, verdict=verdict, reason=reason, support=supports))
-    result["status"] = "PASS" if not errors and all(c["verdict"] == "supported" for c in result["checks"]) else "REVIEW"
-    return result
-
-
-
-def quality_feedback(review, audit=None, *, source_errors=()):
-    """Route existing findings; choosing queries, stopping and version storage stay with Radar."""
-    review = review or {}
-    gaps, waiting, candidates, blocked = [], [], [], set()
-    result = {"machine_status": review.get("status"), "evidence_gaps": gaps,
-              "repair_units": [], "review_required": waiting,
-              "audit_status": audit.get("status") if audit is not None else "not_requested"}
-    if review.get("status") not in {"PASS", "REVIEW", "FAIL"} or not review.get("units"):
-        waiting.append({"kind": "verification_unavailable", "reason": "没有完整成稿核验回执"})
-    if review.get("units") and not review_locations_match(review):
-        waiting.append({"kind": "review_mismatch", "reason": "核验段落与完整稿件不一致，须重核"})
-    waiting.extend({"kind": "source_failure", "detail": x} for x in source_errors)
-    errors = review.get("verification_errors", [])
-    waiting.extend({"kind": "verification_error", "detail": x} for x in errors)
-    invalid_units = {x.get("unit_id") for x in errors}
-    units = {u["unit_id"]: u for u in review.get("units", [])}
-    catalog = review.get("evidence_catalog", [])
-
-    def gap(kind, unit_id, reason, **extra):
-        gaps.append(dict(kind=kind, unit_id=unit_id, reason=reason, **extra))
-        blocked.add(unit_id)
-
-    if audit is not None:
-        if (audit.get("draft") != review.get("draft")
-                or audit.get("evidence_catalog") != review.get("evidence_catalog")
-                or audit.get("source_updates", []) != review.get("source_updates", [])
-                or audit.get("analysis_signature") != review.get("analysis_signature")):
-            waiting.append({"kind": "audit_mismatch", "reason": "片段复核属于另一份完整稿件或来源状态"})
-            audit = None
-    if audit is not None:
-        audit_errors = audit.get("verification_errors", [])
-        if not isinstance(audit_errors, list):
-            audit_errors = [{"reason": "片段复核错误清单须为列表"}]
-        waiting.extend({"kind": "audit_error", "detail": x} for x in audit_errors)
-        if audit.get("status") not in {"PASS", "REVIEW", "NOT_RUN"}:
-            waiting.append({"kind": "audit_error", "reason": "片段复核没有有效状态"})
-        checks = audit.get("checks", [])
-        valid_ids = isinstance(checks, list) and all(
-            isinstance(c, dict) and isinstance(c.get("unit_id"), str)
-            and type(c.get("claim_index")) is int for c in checks)
-        if not valid_ids or len({(c["unit_id"], c["claim_index"]) for c in checks}) != len(checks):
-            waiting.append({"kind": "audit_mismatch", "reason": "片段复核条目须有唯一的段落和陈述序号"})
-            checks = []
-        check_ids = {(c["unit_id"], c["claim_index"]) for c in checks}
-        invalid_checks, unbound_error = set(), False
-        for error in audit_errors:
-            if (isinstance(error, dict) and isinstance(error.get("unit_id"), str)
-                    and type(error.get("claim_index")) is int
-                    and (error["unit_id"], error["claim_index"]) in check_ids):
-                invalid_checks.add((error["unit_id"], error["claim_index"]))
-            else:
-                unbound_error = True
-        for check in checks:
-            # A local error blocks its own finding, not an independently bound finding.
-            if (unbound_error or audit.get("status") not in {"PASS", "REVIEW"}
-                    or (check["unit_id"], check["claim_index"]) in invalid_checks
-                    or check["unit_id"] in invalid_units or None in invalid_units):
-                continue
-            unit = units.get(check["unit_id"])
-            index = check["claim_index"]
-            if unit is None or not 0 <= index < len(unit.get("claims", [])):
-                waiting.append({"kind": "audit_mismatch", "reason": "片段复核不属于本稿陈述"})
-                continue
-            claim = unit["claims"][index]
-            if (claim.get("kind", "fact") != "fact" or claim.get("verdict") != "supported"
-                    or claim.get("scope_evidence") or claim.get("support_scope")):
-                waiting.append({"kind": "audit_mismatch", "reason": "本条不属于已支持事实的选段复核"})
-                continue
-            fields = ("evidence_id", "version", "segment_id", "start", "end", "quote")
-            selected, saved = claim.get("evidence"), check.get("evidence")
-            valid_passages = all(isinstance(refs, list) and refs and all(
-                isinstance(e, dict) and all(k in e for k in fields) for e in refs)
-                for refs in (selected, saved))
-            if (not valid_passages or check.get("span") != claim["span"] or check.get("context") != unit["text"]
-                    or [{k: e[k] for k in fields} for e in selected] != [{k: e[k] for k in fields} for e in saved]):
-                waiting.append({"kind": "audit_mismatch", "reason": "片段复核的正文或选段已经变化"})
-                continue
-            try:
-                start, end = locate_span(unit["text"], claim)
-                if (type(check.get("span_start")) is not int or type(check.get("span_end")) is not int
-                        or check["span_start"] != start or check["span_end"] != end):
-                    raise ValueError("片段复核的陈述位置已经变化")
-                _validate_audit_answer(check, selected)
-            except ValueError as error:
-                waiting.append({"kind": "audit_mismatch", "unit_id": unit["unit_id"],
-                                "claim_index": index, "reason": str(error)})
-                continue
-            if check["verdict"] == "not_supported":
-                gap("evidence_selection", unit["unit_id"], check["reason"],
-                    claim_index=index, span=claim["span"], evidence=check["evidence"],
-                    read_requests=read_requests(check["evidence"], catalog, claim["span"], reason=check["reason"]),
-                    action="reselect_or_retrieve")
-            elif check["verdict"] == "uncertain":
-                waiting.append({"kind": "audit_uncertain", "unit_id": unit["unit_id"],
-                                "claim_index": index, "reason": check["reason"]})
-
-    for unit_id, unit in units.items():
-        if unit.get("read_requests"):
-            gap("source_position", unit_id, "核验缺少可用定位；先补读或修复回执，再重核原稿",
-                read_requests=unit["read_requests"], action="locate_then_verify")
-        for finding in unit.get("source_gaps", []):
-            if finding.get("repair_supported") and unit_id not in invalid_units:
-                candidates.append(unit_id)
-            else:
-                gap(finding["kind"], unit_id, finding["reason"],
-                    **{k: v for k, v in finding.items() if k not in {"kind", "reason"}})
-        if unit_id in invalid_units or None in invalid_units:
+    for batch in C.batches(pending):
+        cited = list(dict.fromkeys(r for c in batch for r in c["citations"]))
+        payload = {"question": req["question"],
+                   "claims": [{"index": c["index"], "text": c["text"], "citations": c["citations"],
+                               "numeric_hints": hints(c, refs),
+                               "context": context(sentences, c)} for c in batch],
+                   "references": [refs[r] for r in cited],
+                   "source_updates": [u for u in updates if u["target"] in cited or u["replacement"] in cited]}
+        out, error = budget.ask("verify_claims", CLAIM_VERIFY, payload, CheckBatch)
+        if out is None:
+            reason = "unchecked: 已达max_llm_calls上限" if error == "llm_call_limit" else f"batch_failed: {error}"
+            for c in batch:
+                c["reason"] = reason
             continue
-        claims = unit.get("claims", [])
-        for scoped in unit.get("scope_gaps", []):
-            gap("material_absence", unit_id, scoped.get("reason", ""),
-                claim_index=scoped.get("claim_index"), span=scoped.get("span", ""),
-                evidence=scoped.get("evidence", []), action="assess_need_for_retrieval")
-        for index, claim in enumerate(claims):
-            if claim.get("verdict") == "insufficient" and not claim.get("source_gaps"):
-                gap("missing_support", unit_id, claim.get("reason", ""),
-                    claim_index=index, span=claim["span"],
-                    read_requests=claim.get("read_requests") or read_requests(
-                        claim.get("evidence", []), catalog, claim["span"], reason=claim.get("reason", "")),
-                    action="check_existing_then_retrieve")
-            elif (claim.get("verdict") == "supported" and claim.get("kind") == "source_absence"
-                  and claim.get("missing_information")):
-                gap("material_absence", unit_id, claim["missing_information"],
-                    claim_index=index, span=claim["span"], action="assess_need_for_retrieval")
-            elif claim.get("verdict") == "contradicted" and (claim.get("evidence") or claim.get("analysis_refs")):
-                candidates.append(unit_id)
-        for issue in unit.get("issues", []):
-            if "REF" in issue.get("labels", []) and (issue.get("evidence") or issue.get("analysis_refs")):
-                candidates.append(unit_id)
-        if unit_id in review.get("problem_units", []) and unit_id not in blocked and unit_id not in candidates:
-            waiting.append({"kind": "unresolved_check", "unit_id": unit_id,
-                            "reason": unit.get("reason", "缺少可安全修订的原文依据")})
-    coverage = review.get("coverage", {})
-    if coverage.get("verdict") in {"incomplete", "uncertain"}:
-        gap("coverage", None, coverage.get("reason", ""), action="check_scope_and_existing_evidence")
-    # A whole paragraph edit can alter a correct-but-unproven statement in that paragraph.
-    if not waiting:
-        result["repair_units"] = list(dict.fromkeys(u for u in candidates if u not in blocked))
-    if review.get("verification_method") == "cited_claims":
-        from .claims import repair_candidates
-        result["repair_claims"] = repair_candidates(review) if not waiting else []
-        result["repair_units"] = list(dict.fromkeys(
-            u["unit_id"] for u in review.get("units", []) for c in u.get("claims", [])
-            if c.get("claim_id") in result["repair_claims"]))
-    return result
+        answers = {}
+        for answer in out.claims:
+            answers.setdefault(answer.index, answer)  # indexes outside this batch are ignored
+        for c in batch:
+            if c["index"] in answers:
+                judge(c, answers[c["index"]], refs, evidence)
+                if c["verdict"] == "insufficient" and c.get("scope_span") is None:
+                    reads += [{"ref": r, "reason": f"第{c['index']}句缺少支持，补读{r}全文或相关段落后重核"}
+                              for r in c["citations"] if r in evidence]
+            else:
+                c["reason"] = "no_answer: 模型未返回本句结论"
+
+    for claim in pending:
+        problems = source_problems[claim["index"]]
+        if problems:
+            claim.pop("scope_span", None)
+            claim["labels"] = list(dict.fromkeys(claim["labels"] + ["REF"]))
+            claim["reason"] = "；".join(problems + ([claim["reason"]] if claim["reason"] else []))
+            if claim["verdict"] != "contradicted":
+                claim["verdict"] = "insufficient"
+
+    findings = [{"index": c["index"], "text": c["text"], "verdict": c["verdict"],
+                 **({"reason": c["reason"][:200]} if c["verdict"] != "supported" else {})} for c in sentences]
+    payload = {"question": req["question"], "sentences": findings,
+               "materials": [{"id": e["id"], "title": e.get("title", ""), "source_kind": e["source_kind"]}
+                             for e in req.get("evidence", [])]
+                            + [{"id": a["id"], "method": a.get("method", "")} for a in req.get("analysis_results", [])],
+               "research_scope": req.get("research_scope", {}),
+               "previous_report": req.get("previous_report")}
+    out, error = budget.ask("verify_coverage", VERIFY_COVERAGE, payload, CoverageOut)
+    coverage = out.model_dump() if out else {
+        "verdict": "uncertain",
+        "reason": "unchecked: 已达max_llm_calls上限" if error == "llm_call_limit" else f"coverage_failed: {error}"}
+
+    if unknown_ref or any(c["verdict"] == "contradicted" for c in sentences):
+        status = "FAIL"
+    elif any(c["verdict"] != "supported" for c in sentences) or coverage["verdict"] != "complete":
+        status = "REVIEW"
+    else:
+        status = "PASS"
+    read_requests = {}
+    for request in reads:
+        read_requests.setdefault(request["ref"], request)  # first reason per ref wins
+    for claim in sentences:
+        claim.pop("paragraph")
+    return {"status": status, "claims": sentences, "coverage": coverage,
+            "read_requests": list(read_requests.values()), "llm_calls": budget.calls}
 
 
-def revise(packet, review, call, *, audit=None, source_errors=()):
-    if review.get("verification_method") == "cited_claims":
-        from . import claims
-        return claims.revise(packet, review, call, audit=audit, source_errors=source_errors)
-    source = packet_input(packet)
-    units = review["units"]
-    feedback = quality_feedback(review, audit, source_errors=source_errors)
-    if (review.get("evidence_catalog") != evidence_catalog(source)
-            or review.get("source_updates", []) != source_updates(source)
-            or review.get("analysis_signature") != analysis_signature(source)):
-        feedback["review_required"].append({"kind": "source_changed", "reason": "补读或来源状态变化后须先重核原稿"})
-        feedback["repair_units"] = []
-    editable = [u for u in units if u["unit_id"] in feedback["repair_units"]]
-    if not editable:
-        return {"draft": review["draft"], "changed_units": [], "feedback": feedback, "requires_verification": False,
-                "reason": "没有可安全自动修订的段落；补查与待核问题见feedback"}
-    request = dict(source, draft=review["draft"], editable_units=editable)
-    result = call("revise", REVISE, model_input(request, numbered=False))
-    replacements = result.get("replacements", [])
-    if len(replacements) != len(editable) or {r.get("unit_id") for r in replacements} != {u["unit_id"] for u in editable}:
-        raise ValueError("修订没有严格对应允许修改的段落")
-    mapped = {r["unit_id"]: r["text"] for r in replacements}
-    draft = review["draft"]
-    changes = []
-    for unit in reversed(units):
-        if unit["unit_id"] in mapped:
-            text = mapped[unit["unit_id"]]
-            if not isinstance(text, str) or not text.strip():
-                raise ValueError("不能用删除整段代替修订")
-            draft = draft[:unit["start"]] + text + draft[unit["end"]:]
-            if text != unit["text"]:
-                changes.append({"unit_id": unit["unit_id"], "before": unit["text"], "after": text})
-    return {"draft": draft, "changed_units": list(reversed(changes)), "requires_verification": bool(changes)}
-
-
-def run(packet, call, method="bound", *, repair=True):
-    generated = generate(packet, call, method)
-    review = verify(packet, generated["draft"], call)
-    result = {"generated": generated, "initial_review": review, "final_review": review, "revision": None}
-    result["initial_feedback"] = quality_feedback(review)
-    if repair and result["initial_feedback"]["repair_units"]:
-        revision = revise(packet, review, call)
-        result["revision"] = revision
-        if revision["changed_units"]:
-            result["final_review"] = verify(packet, revision["draft"], call)
-    result["feedback"] = quality_feedback(result["final_review"])
-    result["final_text"] = result["final_review"]["draft"]
-    result["status"] = result["final_review"]["status"]
-    return result
+def revise(req, llm=chat_json):
+    materials(req)
+    refs, draft = references(req), req["draft"]
+    current = {c["index"]: c for c in C.sentences(draft)}
+    sentences = list(current.values())
+    replaced, to_model = {}, []
+    for old in req["review"]["claims"]:
+        now = current.get(old["index"])
+        if now is None or (now["text"], now["start"]) != (old["text"], old["start"]):
+            raise InputError("review_mismatch", "review与draft的句子不对应，请先对这份draft重新核验", 409)
+        if old["verdict"] == "contradicted" and any(q["found"] for q in old["quotes"]):
+            to_model.append(dict(now, verdict=old["verdict"], labels=old["labels"],
+                                 reason=old["reason"], quotes=old["quotes"]))
+        elif old["verdict"] == "insufficient" and C.scope_span_ok(now["text"], old.get("scope_span")):
+            replaced[now["index"]] = C.scope_revision(now["text"], old["scope_span"])
+    budget = Budget(llm, req.get("max_llm_calls", 20))
+    for batch in C.batches(sorted(to_model, key=lambda c: c["index"]), size=C.MAX_BATCH):
+        cited = list(dict.fromkeys(r for c in batch for r in c["citations"]))
+        payload = {"question": req["question"],
+                   "claims": [{k: c[k] for k in ("index", "text", "citations", "verdict", "labels", "reason", "quotes")}
+                              | {"context": context(sentences, c)} for c in batch],
+                   "references": [refs[r] for r in cited if r in refs]}
+        out, _ = budget.ask("revise", CLAIM_REVISE, payload, RevisionOut)
+        allowed = {c["index"]: c for c in batch}
+        for item in (out.sentences if out else []):
+            old, text = allowed.get(item.index), item.text.strip()
+            if old is None or item.index in replaced or "\n" in text or len(C.sentences(text)) != 1:
+                continue
+            cites = C.citations(text)
+            if cites and set(cites) <= set(old["citations"]):  # only the sentence's own references
+                replaced[item.index] = text
+    changed, out_draft = [], draft
+    for index in sorted(replaced, reverse=True):
+        before, after = current[index]["text"], replaced[index]
+        if after != before:
+            out_draft = out_draft[:current[index]["start"]] + after + out_draft[current[index]["end"]:]
+            changed.insert(0, {"index": index, "before": before, "after": after})
+    return {"draft": out_draft, "changed": changed, "llm_calls": budget.calls}

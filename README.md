@@ -1,34 +1,113 @@
 # BioCheck
 
-潘倩维护生成质量：约束准备表达的内容，生成实际报告，核对正文与原文，最多一次有依据的修订，并单独复核所选支持片段。原文、来源版本、对象关系和机制评价由 Fabric、唐蔚雯与 MechEvidence 提供；查询与补查由李明洋的策略及雷达执行器安排。
+维护人：潘倩。
 
-## 启动和检查
+BioCheck 是 BioRadar 的一个专业服务：根据雷达给的固定材料写一份中文研究回答，然后**逐句**核对这份稿子是否被它引用的原文支持，最后只对明确有错的句子做一次有限修订。材料检索、版本、预算和报告保存都由雷达负责；BioCheck 只看本次请求里给的材料，不联网补事实。
 
-Python 3.10+，HTTP 专业服务使用标准库。通过私有环境提供 `BIOCHECK_SERVICE_TOKEN`，服务不加载模型密钥或 `.env`，由雷达统一执行付费请求：
+## 运行服务
+
+Python 3.10+。
 
 ```sh
-python3 -m app.service --host 127.0.0.1 --port 18562
-python3 -m unittest discover -s tests -v
+pip install -r requirements.txt
+export LLM_PROVIDER=deepseek             # deepseek 或 openai（OpenAI 兼容接口）
+export LLM_BASE_URL=https://api.deepseek.com
+export LLM_API_KEY=sk-...
+export LLM_MODEL=deepseek-chat
+export LLM_TIMEOUT_SECONDS=180           # 可选，默认 180
+export LLM_WRITE_THINKING=false          # 可选，只影响 generate；核验与修订总是关闭思考
+export SERVICE_TOKEN=一个足够长的随机串
+uvicorn app.service:app --host 127.0.0.1 --port 18562
 ```
 
-`GET /health`、`GET /v1/capabilities` 和 `POST /v1/execute` 均需 Bearer 令牌。请求使用 `bioradar.professional.v1`、稳定 operation_id、operation、arguments、model_receipts。服务需要模型时返回下一次公开请求；宿主保存真实调用、执行并携回回执。固定 provider_version 与原参数恢复，结果未知不盲重发。
+`GET /health` 不需要令牌；`/v1/*` 都要请求头 `Authorization: Bearer $SERVICE_TOKEN`。没有配置 `SERVICE_TOKEN` 时服务拒绝所有 `/v1/*` 请求（503）。
 
-雷达设置 `BIORADAR_BIOCHECK_TRANSPORT=http`、`BIORADAR_BIOCHECK_SERVICE_URL` 与 `BIORADAR_BIOCHECK_SERVICE_TOKEN`。完整链路及四项集成检查见 [BioRadar README](../BioRadar/README.md)；本项目本地检查为 unittest，无独立四项 Makefile。
+不想起 HTTP 时可以用 `python -m app.cli verify request.json`（请求体与 HTTP 相同，会真实调用模型）。
 
-## 用真实问题完整验证
+## 三个接口
 
-从 Fabric 读取 DREAMM-2 等实际摘要或登记固定版本，提问“两个剂量组的 ORR、PFS、OS 和研究限制分别是什么？”雷达取证后依次运行 generate、verify、必要的 revise 与支持片段复核，保存报告及真实状态，追问另存版本。
+三个接口共用同一份材料格式（编号由雷达分配，稿子里只写 `[E1]`、`[A1]` 这样的引用）：
 
-独立 CLI 仍可使用 `python3 -m app.cli data/cases/dreamm.json --output runs/pan-first --method bound`；该文件是私有材料，缺失时先运行 `python3 -m app.prepare --output data/my-materials`，从生成的 cases.json 选择实际问题包。独立模式读取本项目私有模型配置并产生费用；雷达联调使用 HTTP 模式即可。
+```json
+{"question": "DREAMM-2两个剂量组的ORR是多少？",
+ "evidence": [{"id": "E1", "title": "DREAMM-2 final analysis", "source": "pubmed",
+               "published_at": "2020-01-01", "source_kind": "research", "verified": true,
+               "text": "In the 2.5 mg/kg arm ORR was 32%. In the 3.4 mg/kg arm ORR was 35%."}],
+ "analysis_results": [],
+ "source_updates": [],
+ "research_scope": {"checked": ["pubmed"], "not_checked": ["专利库"], "failed": []},
+ "previous_report": null,
+ "max_llm_calls": 20}
+```
 
-纯函数入口为 `app.core.run(packet, execute, method="bound")`，另有 generate/verify/revise/audit_support/quality_feedback。对象、数值、时间、条件、结论强度和引用分别检查。逐字短引有出处不等于语义支持，整篇材料支持不等于所选片段支持；正文更新后不能沿用旧审查。quality_feedback 返回缺材料、可修订或核验故障，不替查询规划器决定动作。计算结果必须带固定输入、方法、单位与计算口径，不能冒充原始研究。
+- `source_kind` 取 `official|research|news|social|registry|company`；`verified` 必填。
+- `analysis_results`：`{"id": "A1", "method": "...", "output": {...}, "calculation_basis": {...}, "limitations": [...]}`。
+- `source_updates`：`{"target": "E2", "replacement": "E5", "kind": "correction|retraction"}`，表示 E2 已被 E5 更正或撤回。
+- `max_llm_calls`（默认 20）：本次最多调用几次模型，用完后剩下的句子判为待核（`unchecked`）。
 
-## 本轮实际验证与未完成
+**POST /v1/generate** → `{"draft": "……", "llm_calls": [...]}`
 
-2026-11-01 记录在 `/home/zk_test/zk_projects/.branch-archive-20261101/runs.jsonl`。系统共有 32 项业务分析、233 次新模型请求、已知 token 下界 5,863,856 和 1 次用量未知。保存的专业 HTTP 往返中 BioCheck generate 26、verify 59、quality_feedback 7 条，包含恢复往返，不等于相同数量的独立完整任务。10 份草稿中 7 份原生报告 FAIL、3 份候选未完成核验；不能将接通算成报告通过。
+**POST /v1/verify**（再加 `"draft"`）。例：`draft` 为 `"2.5 mg/kg组ORR为32%[E1]。3.4 mg/kg组ORR为32%[E1]。"`，返回（节选）：
 
-前后减负零调用比较涵盖全部 97 条专业往返，无结果变化。既有 read_requests 集合顺序有 3 处差异，内容一致，未为比较改写原回执。
+```json
+{"status": "FAIL",
+ "claims": [
+  {"index": 1, "text": "2.5 mg/kg组ORR为32%[E1]。", "start": 0, "end": 22, "citations": ["E1"],
+   "verdict": "supported", "labels": [],
+   "quotes": [{"ref": "E1", "quote": "In the 2.5 mg/kg arm ORR was 32%", "found": true}], "reason": "与原文一致"},
+  {"index": 2, "text": "3.4 mg/kg组ORR为32%[E1]。", "start": 22, "end": 44, "citations": ["E1"],
+   "verdict": "contradicted", "labels": ["NUM"],
+   "quotes": [{"ref": "E1", "quote": "In the 3.4 mg/kg arm ORR was 35%", "found": true}], "reason": "3.4 mg/kg组ORR为35%"}],
+ "coverage": {"verdict": "complete", "reason": "……"},
+ "read_requests": [],
+ "llm_calls": [{"stage": "verify_claims", "model": "deepseek-chat", "finish_reason": "stop",
+                "usage": {"prompt_tokens": 1200, "completion_tokens": 180, "total_tokens": 1380},
+                "seconds": 3.2, "error": null},
+               {"stage": "verify_coverage", "...": "..."}]}
+```
 
-未完成：全量 C 的 professional_rpc_operation_failed 和 2,836 字未核候选需与雷达一起恢复；长稿漏检、所选片段不支持与修订新增错误仍需独立人工标签评价。当前 PASS 是机器检查状态，不能代替独立准确率；不能用生成/核验双方共享的判断代替专业标签。
+处理过程：
 
-按用户最新决定，本地仅保留 main，不推送远端。旧代码保存在 BioCheck.bundle；原材料与运行日志继续保留在受控归档或原有私有数据目录中。
+1. 程序拆句（句号、问号、换行；紧跟在句号后面的 `[E1]` 归前一句），按 1..n 编号。
+2. 没有引用的句子直接 `insufficient`（`no_citation`）；引用了不存在的编号的句子标 `unknown_ref`，整份 `FAIL`。
+3. 其余句子每批最多 4 句、同一段，连同所引原文发给模型。模型按句号回答 `verdict / labels / quotes / reason`。
+4. 程序在原文里查找每条短引：找不到（`quote_not_found`）、出现多次（`quote_ambiguous`）、引了本句没引的来源（`quote_outside_citation`）、supported 却缺某个引用的短引、或有不在原文中又没解释的数字（`numeric_unexplained`），都把这一句降为 `insufficient`。
+5. 来源规则（程序检查）：引用了已被更正/撤回的来源，除非句子明确写成“当时……，后更正……”并同时引用两端，否则不能当作当前事实；引用 `social` 或 `verified=false` 的来源，句子里须同时有转述（网传/据称/帖子称）和未证实限定，或写成待验证的假设，或只叙述删帖/辟谣/处罚事件。
+6. 最后一次调用检查整稿覆盖（是否回答问题、漏了什么重要结果或反证）。
+
+`labels` 只用六类：OBJ 对象/组别，NUM 数值单位分母，TIME 时间，COND 人群/研究条件，STR 推断强度/因果，REF 引用是否支持。
+
+状态：任一 `contradicted` 或引用了不存在的编号 → `FAIL`；任一 `insufficient`/待核，或 `coverage` 不是 `complete` → `REVIEW`；否则 `PASS`。PASS 只表示本次机器检查没发现问题，不是独立准确率。
+
+`read_requests: [{"ref": "E2", "reason": "..."}]` 告诉雷达该补读哪份材料：缺支持的句子 → 补读它引用的 E 编号；被更正的来源但更正通知不在材料里 → 补读更正通知的编号。
+
+批次失败（模型两次都没给出合格 JSON、超时等）只影响这一批的句子（`batch_failed`），其余照常。
+
+**POST /v1/revise**（再加 `"draft"` 和上一步的 `"review"`）→ `{"draft": "……", "changed": [{"index": 2, "before": "……", "after": "……"}], "llm_calls": [...]}`
+
+- 只改两类句子：`contradicted` 且有找到的短引的句子（交给模型，每句换成一句，只能用原句自己的引用；不合格的替换直接丢弃，原句不动）；核验时被标出 `scope_span` 的“未报告写成未实施”的句子（程序直接改成“本次引用材料不足以确认“……”这一说法”，不调用模型）。
+- `review` 必须是对同一份 `draft` 的核验结果，否则返回 409 `review_mismatch`。
+- 改完后由雷达再调一次 `/v1/verify`。
+
+错误统一为 `{"error_code": "...", "message": "..."}`：401 `unauthorized`、400 `invalid_request`/`no_materials`/`duplicate_id`、409 `review_mismatch`、502 生成失败（附 `llm_calls`）。
+
+## 运行测试
+
+```sh
+python -m pytest -q
+```
+
+测试不联网，用 `tests/conftest.py` 里的 `FakeLLM` 代替模型。`evaluation/` 下保留 `tasks.json`（题目及 Fabric 记录版本）、`controls.json` 和 `regressions.json`（正确/错误对照句），供以后用真实材料评测。
+
+## 这次重写改了什么
+
+上一轮验收中，逐句核验开着 DeepSeek 思考模式，12k–16k 的输出额度全部用在思考上，正文为空；再加上“服务把下一次模型请求交回雷达、雷达代调再回传回执”的反向协议，以及指纹、哈希、结构纠错重放，整条链很脆。这次改成普通的同步 HTTP 服务，自己调模型；核验、覆盖和修订一律关闭思考，`max_tokens` 4096（写稿 8192）；模型只按程序给的句号回答，一句答错只影响这一句。删除了 rpc.py、合约版本与哈希、复用缓存、整稿旧核验、规划步骤、结构纠错重放和 support_audit（并入短引检查）。代码从约 2,900 行减到约 730 行。
+
+## 已知限制
+
+- 短引只做逐字查找（空白合并），模型稍有改写就会判 `quote_not_found`，结果偏保守（多出 REVIEW）。
+- 社媒归因、历史回顾、范围修订的措辞检查靠关键词，可能漏判少见说法；实质语义仍由模型判断。
+- 分析结果按整段 JSON 文本查短引，不再按 output 路径定位；同一数字出现在不同字段时由模型和短引唯一性共同把关。
+- 每批都会重发所引原文全文，长材料较费 token。
+- 覆盖检查只看到材料标题和逐句结论，看不到原文全文，可能漏报“遗漏了某个重要结果”。
+- 还没有用真实模型跑过新版本的评测；生成/核验共用同一模型，不能代替独立的人工专业标注。

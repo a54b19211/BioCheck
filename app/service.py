@@ -1,121 +1,154 @@
-"""Internal HTTP service: python3 -m app.service --host 127.0.0.1 --port 18562."""
-import argparse
+"""HTTP service: uvicorn app.service:app --port 18562  (see README for environment variables)."""
 import hmac
-import json
 import os
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Literal
 
-from .rpc import PROVIDER, PROVIDER_VERSION, SCHEMA_VERSION, capabilities, execute
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException
 
-MAX_REQUEST_BYTES = 16 * 1024 * 1024
-
-
-def _unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON key")
-        result[key] = value
-    return result
+from . import core
+from .llm import chat_json
 
 
-def _reject_constant(value):
-    raise ValueError("non-finite JSON value")
+class Evidence(BaseModel):
+    id: str
+    title: str = ""
+    source: str = ""
+    published_at: str | None = None
+    source_kind: Literal["official", "research", "news", "social", "registry", "company"]
+    verified: bool
+    text: str = Field(min_length=1)
 
 
-def make_server(address, token):
-    if not isinstance(token, str) or len(token) < 24:
-        raise ValueError("BIOCHECK_SERVICE_TOKEN须为至少24字符的私有服务凭据")
+class AnalysisResult(BaseModel):
+    id: str
+    method: str = ""
+    output: Any
+    calculation_basis: dict = {}
+    limitations: list[str] = []
 
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args):
-            # Access logs must not echo source text, request bodies or Authorization.
-            pass
 
-        def setup(self):
-            super().setup()
-            self.connection.settimeout(15)
+class SourceUpdate(BaseModel):
+    target: str
+    replacement: str
+    kind: Literal["correction", "retraction"]
 
-        def send_json(self, status, data):
-            body = json.dumps(data, ensure_ascii=True, allow_nan=False).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
 
-        def error(self, status, code):
-            self.send_json(status, {"schema_version": SCHEMA_VERSION, "provider": PROVIDER,
-                                    "provider_version": PROVIDER_VERSION, "status": "failed",
-                                    "error_code": code})
+class ResearchScope(BaseModel):
+    checked: list[str] = []
+    not_checked: list[str] = []
+    failed: list[str] = []
 
-        def authorized(self):
-            supplied = self.headers.get("Authorization", "")
+
+class PreviousReport(BaseModel):
+    draft: str
+    date: str = ""
+
+
+class GenerateRequest(BaseModel):
+    question: str = Field(min_length=1)
+    evidence: list[Evidence] = []
+    analysis_results: list[AnalysisResult] = []
+    source_updates: list[SourceUpdate] = []
+    research_scope: ResearchScope = ResearchScope()
+    previous_report: PreviousReport | None = None
+    max_llm_calls: int = Field(20, ge=0)
+
+
+class VerifyRequest(GenerateRequest):
+    draft: str = Field(min_length=1)
+
+
+class ReviewQuote(BaseModel):
+    ref: str
+    quote: str
+    found: bool
+
+
+class ReviewClaim(BaseModel):
+    index: int
+    text: str
+    start: int
+    end: int
+    citations: list[str]
+    verdict: Literal["supported", "contradicted", "insufficient"]
+    labels: list[str] = []
+    quotes: list[ReviewQuote] = []
+    reason: str = ""
+    scope_span: str | None = None
+
+
+class Review(BaseModel):
+    status: Literal["PASS", "REVIEW", "FAIL"]
+    claims: list[ReviewClaim]
+
+
+class ReviseRequest(VerifyRequest):
+    review: Review
+
+
+def error(status, code, message, **extra):
+    return JSONResponse({"error_code": code, "message": message, **extra}, status_code=status)
+
+
+def create_app(llm=chat_json):
+    app = FastAPI(title="BioCheck", version="2")
+
+    @app.middleware("http")
+    async def bearer_token(request: Request, call_next):
+        if request.url.path.startswith("/v1/"):
+            token = os.environ.get("SERVICE_TOKEN", "")
+            supplied = request.headers.get("Authorization", "")
+            if not token:
+                return error(503, "service_token_missing", "服务未配置SERVICE_TOKEN")
             if not hmac.compare_digest(supplied.encode(), ("Bearer " + token).encode()):
-                self.error(401, "unauthorized")
-                return False
-            return True
+                return error(401, "unauthorized", "缺少或错误的Bearer令牌")
+        return await call_next(request)
 
-        def do_GET(self):
-            if not self.authorized():
-                return
-            if self.path == "/health":
-                self.send_json(200, {"schema_version": SCHEMA_VERSION, "provider": PROVIDER,
-                                    "provider_version": PROVIDER_VERSION, "status": "ok"})
-            elif self.path == "/v1/capabilities":
-                self.send_json(200, dict(capabilities(), max_request_bytes=MAX_REQUEST_BYTES))
-            else:
-                self.error(404, "not_found")
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request, exc):
+        first = exc.errors()[0] if exc.errors() else {}
+        where = ".".join(str(x) for x in first.get("loc", ()))
+        return error(400, "invalid_request", f"{where}: {first.get('msg', '请求格式错误')}")
 
-        def do_POST(self):
-            if not self.authorized():
-                return
-            if self.path != "/v1/execute":
-                self.error(404, "not_found")
-                return
-            if self.headers.get("Transfer-Encoding") or len(self.headers.get_all("Content-Length", [])) != 1:
-                self.error(400, "invalid_body_length")
-                return
-            try:
-                size = int(self.headers["Content-Length"])
-                if not 0 < size <= MAX_REQUEST_BYTES:
-                    self.error(413, "request_too_large")
-                    return
-                if self.headers.get_content_type() != "application/json":
-                    self.error(415, "json_required")
-                    return
-                body = self.rfile.read(size)
-                if len(body) != size:
-                    self.error(400, "incomplete_body")
-                    return
-                request = json.loads(body.decode(), object_pairs_hook=_unique_object,
-                                     parse_constant=_reject_constant)
-            except (ValueError, UnicodeError, RecursionError, TimeoutError):
-                self.error(400, "invalid_json")
-                return
-            # Protocol/method failures are explicit JSON statuses; only transport failures use HTTP errors.
-            self.send_json(200, execute(request))
+    @app.exception_handler(HTTPException)
+    async def http_error(request, exc):
+        return error(exc.status_code, {404: "not_found", 405: "method_not_allowed"}.get(exc.status_code, "http_error"),
+                     str(exc.detail))
 
-    server = ThreadingHTTPServer(address, Handler)
-    server.daemon_threads = True
-    return server
+    @app.exception_handler(core.InputError)
+    async def input_error(request, exc):
+        extra = {"llm_calls": exc.llm_calls} if exc.llm_calls is not None else {}
+        return error(exc.status, exc.code, exc.message, **extra)
+
+    @app.exception_handler(Exception)
+    async def internal_error(request, exc):
+        return error(500, "internal_error", type(exc).__name__)
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok"}
+
+    @app.post("/v1/generate")
+    def generate(req: GenerateRequest):
+        return core.generate(req.model_dump(), llm)
+
+    @app.post("/v1/verify")
+    def verify(req: VerifyRequest):
+        return core.verify(req.model_dump(), llm)
+
+    @app.post("/v1/revise")
+    def revise(req: ReviseRequest):
+        return core.revise(req.model_dump(), llm)
+
+    return app
 
 
-def main():
-    parser = argparse.ArgumentParser(description="BioCheck无模型持钥专业服务")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=18562)
-    args = parser.parse_args()
-    token = os.environ.get("BIOCHECK_SERVICE_TOKEN", "")
-    with make_server((args.host, args.port), token) as server:
-        print(json.dumps({"provider": PROVIDER, "provider_version": PROVIDER_VERSION,
-                          "host": args.host, "port": server.server_port, "model_access": "host_only"}), flush=True)
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            pass
-
+app = create_app()
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "18562")))
