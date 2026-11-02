@@ -67,3 +67,12 @@ def test_list_markers_are_not_numbers_to_check():
 def test_product_codes_are_not_numbers_to_check():
     from app.claims import numeric_tokens
     assert numeric_tokens("XQ-17与LVR7、COVID-19及XQ301有关，ORR为-0.5") == ["-0.5"]
+
+
+def test_history_wording_may_name_the_correction_without_citing_it():
+    evidence = {"E1": {"source_kind": "official", "verified": True}, "E4": {"source_kind": "official", "verified": True}}
+    updates = [{"target": "E1", "replacement": "E4", "kind": "correction"}]
+    ok = "初稿当时披露验收20套，后该初稿被E4更正[E1]。"
+    assert C.source_use_problems(ok, ["E1"], evidence, updates)[0] == []
+    for bad in ("初稿披露验收20套[E1]。", "当时披露验收20套，后被E40更正[E1]。"):
+        assert C.source_use_problems(bad, ["E1"], evidence, updates)[0]

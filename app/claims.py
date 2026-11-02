@@ -14,15 +14,16 @@ MAX_BATCH = 4
 ATTRIBUTION = re.compile(r"网传|网帖|据称|传言|帖|贴文|声称|自称|称|所述|转发|转述|转载|社媒|微博|账号|"
                          r"报道|通报|声明|来源|"
                          r"reported|post|alleged|claim|rumou?r|according to", re.I)
-UNCERTAIN = re.compile(r"未证实|未经证实|未获证实|未核实|未经核实|无法核实|难以核实|待核|待验证|尚待|"
+UNCERTAIN = re.compile(r"未证实|未经证实|未获证实|未核实|未经核实|无法核实|难以核实|无法核验|无可核|不可核|"
+                       r"未能证实|难以证实|待核|待验证|尚待|"
                        r"尚未确认|未经确认|无法确认|不能确认|无法证实|不能证实|真实性不明|存疑|疑似|假设|"
                        r"置信低|可信度低|"
                        r"unconfirmed|unverified|alleged|hypothes", re.I)
 HYPOTHESIS = re.compile(r"假设|待验证|hypothes", re.I)
 EVENT = re.compile(r"删帖|删除|辟谣|处罚|澄清|delet|denial|penalt|censor", re.I)
 # Wording of an explicit historical account of a corrected / retracted source.
-THEN = re.compile(r"当时|此前|原先|早先|曾披露|曾报告|最初|initial|previous|original|at the time", re.I)
-UPDATED = re.compile(r"已更正|后更正|更正为|已修订|后修订|已撤回|后撤回|被撤回|已撤稿|"
+THEN = re.compile(r"当时|此前|原先|早先|曾披露|曾报告|最初|初报|初稿|原报|initial|previous|original|at the time", re.I)
+UPDATED = re.compile(r"已更正|后更正|更正为|已修订|后修订|已撤回|后撤回|被撤回|已撤稿|[被经][^。；]{0,12}(?:更正|修订|撤回)|"
                      r"was corrected|was retracted|was withdrawn", re.I)
 
 
@@ -113,8 +114,9 @@ def source_use_problems(text, cited, evidence, updates):
         if target not in cited:
             continue
         kind = "撤回" if update["kind"] == "retraction" else "更正"
-        historical = (THEN.search(body) and UPDATED.search(body)
-                      and replacement in cited and replacement in evidence)
+        # Naming the correction is enough when the sentence only says the old value was later corrected.
+        named = replacement in cited or re.search(rf"(?<![A-Za-z0-9]){re.escape(replacement)}(?![0-9])", body)
+        historical = THEN.search(body) and UPDATED.search(body) and named and replacement in evidence
         if not historical:
             reasons.append(f"source_updated: {target}已被{replacement}{kind}，旧内容不能当作当前事实；"
                            f"历史回顾须写明“当时…，后{kind}…”并同时引用两端")
