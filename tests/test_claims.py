@@ -69,13 +69,13 @@ def test_product_codes_are_not_numbers_to_check():
     assert numeric_tokens("XQ-17与LVR7、COVID-19及XQ301有关，ORR为-0.5") == ["-0.5"]
 
 
-def test_a_corrected_source_needs_its_correction_cited_or_named():
+def test_a_corrected_source_is_flagged_only_until_its_correction_is_read():
     evidence = {"E1": {"source_kind": "official", "verified": True}, "E4": {"source_kind": "official", "verified": True}}
     updates = [{"target": "E1", "replacement": "E4", "kind": "correction"}]
-    assert C.source_use_problems("初稿当时披露验收20套，后该初稿被E4更正[E1]。", ["E1"], evidence, updates)[0] == []
-    assert C.source_use_problems("初报HR为0.62[E1]，以更正后0.69为准[E4]。", ["E1", "E4"], evidence, updates)[0] == []
-    for bad in ("初稿披露验收20套[E1]。", "当时披露验收20套，后被E40更正[E1]。"):
-        assert C.source_use_problems(bad, ["E1"], evidence, updates)[0]
+    # Read: whether a changed part is used as current is the model's call; unchanged content may stand alone.
+    assert C.source_use_problems("初稿披露医护患病未证实[E1]。", ["E1"], evidence, updates)[0] == []
+    reasons, reads = C.source_use_problems("初稿披露验收20套[E1]。", ["E1"], {"E1": evidence["E1"]}, updates)
+    assert reasons[0].startswith("source_updated") and reads[0]["ref"] == "E4"
 
 
 def test_timestamps_and_glued_source_numbers():

@@ -112,14 +112,12 @@ def source_use_problems(text, cited, evidence, updates):
         if target not in cited:
             continue
         kind = "撤回" if update["kind"] == "retraction" else "更正"
-        # The sentence must cite or name the correction; whether the old value is still presented as
-        # current is the model's call (it sees source_updates and both texts).
-        named = replacement in cited or re.search(rf"(?<![A-Za-z0-9]){re.escape(replacement)}(?![0-9])", body)
-        if not (named and replacement in evidence):
-            reasons.append(f"source_updated: {target}已被{replacement}{kind}，旧内容不能当作当前事实；"
-                           f"同句须引用{replacement}，写明“当时…，后{kind}…”")
-            if replacement not in evidence:
-                reads.append({"ref": replacement, "reason": f"读取{target}的{kind}通知{replacement}，再核对旧数的适用范围"})
+        # Without the notice nobody can tell which part changed. With it, the model judges whether the
+        # sentence uses a changed part as current (it sees source_updates and both texts); unchanged
+        # content of the old source may be cited alone.
+        if replacement not in evidence:
+            reasons.append(f"source_updated: {target}已被{replacement}{kind}，未读{kind}通知前旧内容不能当作当前事实")
+            reads.append({"ref": replacement, "reason": f"读取{target}的{kind}通知{replacement}，再核对旧数的适用范围"})
     unverified = [r for r in cited if r in evidence
                   and (evidence[r]["source_kind"] == "social" or not evidence[r]["verified"])]
     if unverified:
