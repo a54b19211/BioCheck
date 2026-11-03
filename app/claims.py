@@ -12,10 +12,10 @@ MAX_BATCH = 4
 
 # Wording a sentence needs when it cites an unverified or social-media source.
 ATTRIBUTION = re.compile(r"网传|网帖|据称|传言|帖|贴文|声称|自称|称|所述|转发|转述|转载|社媒|微博|账号|"
-                         r"报道|通报|声明|来源|"
+                         r"报道|通报|声明|来源|说法|匿名|"
                          r"reported|post|alleged|claim|rumou?r|according to", re.I)
 UNCERTAIN = re.compile(r"未证实|未经证实|未获证实|未核实|未经核实|无法核实|难以核实|无法核验|无可核|不可核|"
-                       r"未能证实|难以证实|待核|待验证|尚待|"
+                       r"未能证实|难以证实|待核|待验证|尚待|尚需|有待|"
                        r"尚未确认|未经确认|无法确认|不能确认|无法证实|不能证实|真实性不明|存疑|疑似|假设|"
                        r"置信低|可信度低|"
                        r"unconfirmed|unverified|alleged|hypothes", re.I)
