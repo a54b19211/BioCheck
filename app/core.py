@@ -79,14 +79,15 @@ def materials(req):
     if len(set(ids)) != len(ids):
         raise InputError("duplicate_id", "evidence与analysis_results的id必须唯一")
     # Only these fields reach the model; evaluation labels and other extras never do.
-    return {k: req[k] for k in ("question", "evidence", "analysis_results", "source_updates",
+    return {k: req[k] for k in ("question", "evidence", "analysis_results", "source_updates", "source_relations",
                                 "research_scope", "previous_report", "hypotheses") if req.get(k) is not None}
 
 
 def references(req):
     """id -> the text a citation may be checked against (analysis results as canonical JSON)."""
     refs = {e["id"]: {"ref": e["id"], "title": e.get("title", ""), "source_kind": e["source_kind"],
-                      "verified": e["verified"], "published_at": e.get("published_at"), "text": e["text"]}
+                      "verified": e["verified"], "published_at": e.get("published_at"),
+                      "origin_group": e.get("origin_group"), "text": e["text"]}
             for e in req.get("evidence", [])}
     for a in req.get("analysis_results", []):
         body = {k: a.get(k) for k in ("method", "output", "calculation_basis", "limitations")}
@@ -200,7 +201,9 @@ def verify(req, llm=chat_json):
                                "numeric_hints": hints(c, refs),
                                "context": context(sentences, c)} for c in batch],
                    "references": [refs[r] for r in cited],
-                   "source_updates": [u for u in updates if u["target"] in cited or u["replacement"] in cited]}
+                   "source_updates": [u for u in updates if u["target"] in cited or u["replacement"] in cited],
+                   "source_relations": [r for r in req.get("source_relations", [])
+                                        if r["source"] in cited or r.get("target") in cited]}
         out, error = budget.ask("verify_claims", CLAIM_VERIFY, payload, CheckBatch)
         if out is None:
             reason = "unchecked: 已达max_llm_calls上限" if error == "llm_call_limit" else f"batch_failed: {error}"

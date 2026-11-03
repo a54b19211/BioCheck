@@ -112,3 +112,28 @@ def test_hypotheses_reach_the_writer_over_http(client):
     response = client(FakeLLM(generate=generate)).post("/v1/generate", json=body, headers=auth())
     assert response.status_code == 200
     assert seen[0]["hypotheses"][0]["id"] == "H1" and seen[0]["hypotheses"][0]["facts"][0]["ref"] == "E1"
+
+
+def test_reposts_and_origin_groups_reach_the_writer_and_the_checker_over_http(client):
+    """T-23: a field the request models do not declare is dropped silently, as hypotheses once were."""
+    seen = {}
+
+    def keep(stage, answer):
+        def run(payload):
+            seen[stage] = payload
+            return answer(payload)
+        return run
+
+    llm = FakeLLM(generate=keep("generate", lambda p: {"draft": "转载内容与原文一致[E2]。"}),
+                  verify_claims=keep("verify_claims", supported(quote="ORR was 32%", ref="E1")))
+    body = request(source_relations=[{"kind": "repost", "source": "E2", "target": "E1", "target_record": "R1"}])
+    body["evidence"][1]["origin_group"] = "og-1"
+    http = client(llm)
+    assert http.post("/v1/generate", json=body, headers=auth()).status_code == 200
+    assert seen["generate"]["source_relations"][0] == {
+        "kind": "repost", "source": "E2", "target": "E1", "target_record": "R1", "read": True,
+    }
+    assert seen["generate"]["evidence"][1]["origin_group"] == "og-1"
+    assert http.post("/v1/verify", json=dict(body, draft="转载内容与原文一致[E2]。"), headers=auth()).status_code == 200
+    assert seen["verify_claims"]["source_relations"][0]["target"] == "E1"
+    assert seen["verify_claims"]["references"][0]["origin_group"] == "og-1"

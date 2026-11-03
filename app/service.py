@@ -21,6 +21,7 @@ class Evidence(BaseModel):
     source_kind: Literal["official", "research", "news", "social", "registry", "company"]
     verified: bool
     text: str = Field(min_length=1)
+    origin_group: str | None = None  # Fabric's explicit same-origin group; absent = independence unknown
 
 
 class AnalysisResult(BaseModel):
@@ -35,6 +36,16 @@ class SourceUpdate(BaseModel):
     target: str
     replacement: str
     kind: Literal["correction", "retraction"]
+
+
+class SourceRelation(BaseModel):
+    """A repost or supplement Fabric stated between two records; it supersedes nothing."""
+
+    kind: Literal["repost", "supplement"]
+    source: str  # the evidence id of the reposting / supplementing record
+    target: str | None = None  # the evidence id of the original, when it was read
+    target_record: str = ""
+    read: bool = True
 
 
 class ResearchScope(BaseModel):
@@ -70,6 +81,7 @@ class GenerateRequest(BaseModel):
     evidence: list[Evidence] = []
     analysis_results: list[AnalysisResult] = []
     source_updates: list[SourceUpdate] = []
+    source_relations: list[SourceRelation] = []
     research_scope: ResearchScope = ResearchScope()
     previous_report: PreviousReport | None = None
     hypotheses: list[Hypothesis] = []
