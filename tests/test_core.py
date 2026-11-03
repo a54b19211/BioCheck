@@ -88,6 +88,9 @@ def test_supported_verdict_with_an_unexplained_extra_number_is_not_accepted():
     explained = verify("ORR约为三分之一（32%，约0.32）[E1]。",
                        FakeLLM(verify_claims=supported(reason="32%换算为0.32")))
     assert explained["claims"][0]["verdict"] == "supported"
+    # digits inside a ref or a year do not explain the number
+    vague = verify("最终分析纳入3组，ORR为32%[E1]。", FakeLLM(verify_claims=supported(reason="见E3及2023年稿")))
+    assert vague["claims"][0]["verdict"] == "insufficient"
 
 
 def test_attributed_social_claim_needs_attribution_and_uncertainty_wording():

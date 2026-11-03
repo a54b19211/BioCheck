@@ -1,5 +1,6 @@
 """generate / verify / revise. Requests are plain dicts (see service.py); the model caller is injected."""
 import json
+import re
 import os
 from typing import Literal
 
@@ -140,8 +141,10 @@ def judge(claim, answer, refs, evidence, known=frozenset()):
         missing = [r for r in claim["citations"] if r not in good]
         if missing:
             problems.append("missing_quote: 缺少" + "、".join(missing) + "的有效短引")
+        # The reason must name the number itself, not merely contain its digits ("E3", "2023").
         unexplained = [t for t in hints(claim, refs)
-                       if t not in answer.reason and t.rstrip("%") not in answer.reason]
+                       if not re.search(r"(?<![A-Za-z0-9_.])" + re.escape(t.rstrip("%")) + r"(?![0-9])",
+                                        answer.reason)]
         if unexplained:
             problems.append("numeric_unexplained: 数字" + "、".join(unexplained) + "不在所引原文中，也未说明换算")
             labels = list(dict.fromkeys(labels + ["NUM"]))
