@@ -220,9 +220,7 @@ def test_revise_keeps_one_sentence_and_only_its_own_citations(replacement, appli
     ("该组结果此后有更正[E2]。", False),  # E2 is not a neighbour's citation
 ])
 def test_revise_may_give_an_uncited_sentence_a_neighbours_citation(replacement, applied):
-    draft = "2.5 mg/kg组ORR为32%[E1]。" + "
-
-" + "该组结果此后有更正。"
+    draft = "2.5 mg/kg组ORR为32%[E1]。\n\n该组结果此后有更正。"
     req = dict(request(), draft=draft)
     review = core.verify(req, FakeLLM(verify_claims=supported()))
     assert review["claims"][1]["reason"].startswith("no_citation")
