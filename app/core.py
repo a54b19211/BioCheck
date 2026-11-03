@@ -271,6 +271,13 @@ def revise(req, llm=chat_json):
                                  reason=old["reason"], quotes=old["quotes"]))
         elif old["verdict"] == "insufficient" and C.scope_span_ok(now["text"], old.get("scope_span")):
             replaced[now["index"]] = C.scope_revision(now["text"], old["scope_span"])
+        elif old["verdict"] == "insufficient" and not now["citations"] and old["reason"].startswith("no_citation"):
+            # An uncited fact may take a citation from its neighbours, and only from them.
+            near = [current.get(now["index"] + d) for d in (-1, 1)]
+            nearby = list(dict.fromkeys(r for o in near if o for r in o["citations"] if r in refs))
+            if nearby:
+                to_model.append(dict(now, citations=nearby, verdict=old["verdict"], labels=old["labels"],
+                                     reason=old["reason"], quotes=[]))
     budget = Budget(llm, req.get("max_llm_calls", 20))
     for batch in C.batches(sorted(to_model, key=lambda c: c["index"]), size=C.MAX_BATCH):
         cited = list(dict.fromkeys(r for c in batch for r in c["citations"]))

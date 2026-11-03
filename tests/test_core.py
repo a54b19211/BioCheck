@@ -215,6 +215,22 @@ def test_revise_keeps_one_sentence_and_only_its_own_citations(replacement, appli
     assert [c["index"] for c in result["changed"]] == ([1] if applied else [])
 
 
+@pytest.mark.parametrize("replacement,applied", [
+    ("该组结果此后有更正[E1]。", True),
+    ("该组结果此后有更正[E2]。", False),  # E2 is not a neighbour's citation
+])
+def test_revise_may_give_an_uncited_sentence_a_neighbours_citation(replacement, applied):
+    draft = "2.5 mg/kg组ORR为32%[E1]。
+
+该组结果此后有更正。"
+    req = dict(request(), draft=draft)
+    review = core.verify(req, FakeLLM(verify_claims=supported()))
+    assert review["claims"][1]["reason"].startswith("no_citation")
+    llm = FakeLLM(revise=lambda p: {"sentences": [{"index": 2, "text": replacement}]})
+    result = core.revise(dict(req, review=review), llm)
+    assert result["draft"].endswith(replacement) is applied
+
+
 def test_revise_refuses_a_review_of_a_different_draft():
     req, review = contradicted_review("2.5 mg/kg组ORR为35%[E1]。")
     with pytest.raises(core.InputError) as raised:
