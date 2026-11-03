@@ -82,6 +82,10 @@ def test_a_corrected_source_is_flagged_only_until_its_correction_is_read():
 def test_timestamps_and_glued_source_numbers():
     assert C.numeric_tokens("只用2016-05-03T12:20:01+08:00前的材料，共3例") == ["3"]
     assert C.numeric_hints("95%CI 0.4%–64.1%", ["Clopper-Pearson双侧95%CI0.4%–64.1%"]) == []
+    # rounding an analysis output to the digits shown is fine; a different number is not
+    assert C.numeric_hints("收入增长28.57%，约28.6%，覆盖比83%", ['{"value": 28.5714}', '{"value": 83.3333}']) == []
+    assert C.numeric_hints("收入增长28.58%", ['{"value": 28.5714}']) == ["28.58%"]
+    assert C.numeric_hints("共3例", ["共3.4例"]) == ["3"]
     assert C.numeric_tokens("8月30日更正：2019年12月31日起共12例，8月29日07时列14条") == ["12", "14"]
     assert C.numeric_tokens("2019-12-31的帖子称27例，2020/01/04增至44例") == ["27", "44"]
     assert C.numeric_tokens("8月26日至27日门诊5人") == ["5"]

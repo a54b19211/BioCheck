@@ -1,6 +1,6 @@
 """Deterministic sentence work: split, cite, locate quotes, check source use. No model calls."""
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 LABELS = ("OBJ", "NUM", "TIME", "COND", "STR", "REF")
 ID = r"[A-Za-z][A-Za-z_]*\d[A-Za-z0-9_.:-]*"  # a ref has a digit: [E1], [A2]; [A] or [scope] is prose
@@ -91,9 +91,21 @@ def _value(token):
 
 
 def numeric_hints(sentence, cited_texts):
-    """Numbers in the sentence that do not literally occur in the cited texts."""
-    available = {_value(m.group()) for text in cited_texts for m in SOURCE_NUMBER.finditer(text)}
-    return [t for t in numeric_tokens(sentence) if _value(t) not in available]
+    """Numbers in the sentence that do not occur in the cited texts, even rounded to the digits shown
+    (28.57% for an analysis output of 28.5714)."""
+    available = {_value(m.group()) for text in cited_texts for m in SOURCE_NUMBER.finditer(text)} - {None}
+
+    def found(token):
+        value = _value(token)
+        if value is None or value in available:
+            return value is not None
+        places = -value.as_tuple().exponent if value.as_tuple().exponent < 0 else 0
+        if not places and not token.endswith("%"):
+            return False  # "3例" is not a rounded 3.4
+        step = Decimal(1).scaleb(-places)
+        return any(a.quantize(step, rounding=ROUND_HALF_UP) == value for a in available if abs(a - value) < 1)
+
+    return [t for t in numeric_tokens(sentence) if not found(t)]
 
 
 def locate_quote(text, quote):
