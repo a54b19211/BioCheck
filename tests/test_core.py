@@ -229,6 +229,37 @@ def test_revise_may_give_an_uncited_sentence_a_neighbours_citation(replacement, 
     assert result["draft"].endswith(replacement) is applied
 
 
+def wrong_ref_review():
+    """Codex r26: the sentence cites E1 (the trial), but what it says is in E2 (the post)."""
+    draft = "网帖称医院出现多例不明肺炎[E1]。"
+    answer = lambda p: {"claims": [{"index": 1, "verdict": "insufficient", "labels": ["REF"], "quotes": [],
+                                    "reason": "E1 是 DREAMM-2 试验，没有写肺炎"}]}
+    req = dict(request(), draft=draft)
+    return req, core.verify(req, FakeLLM(verify_claims=answer))
+
+
+@pytest.mark.parametrize("sentence,quotes,applied", [
+    ("网帖称医院出现多例不明肺炎[E2]。", [{"ref": "E2", "quote": "网帖称某市医院出现多例不明肺炎"}], True),
+    ("网帖称医院出现多例不明肺炎[E2]。", [], False),  # a new citation needs a quote
+    ("网帖称医院出现多例不明肺炎[E2]。", [{"ref": "E2", "quote": "帖子称已确诊"}], False),  # not in E2
+    ("网帖称医院出现多例不明肺炎[E9]。", [{"ref": "E9", "quote": "多例不明肺炎"}], False),  # unknown ref
+])
+def test_a_wrong_citation_may_move_to_a_read_material_that_says_it_with_a_quote(sentence, quotes, applied):
+    req, review = wrong_ref_review()
+    llm = FakeLLM(revise=lambda p: {"sentences": [{"index": 1, "text": sentence, "quotes": quotes}]})
+    result = core.revise(dict(req, review=review), llm)
+    sent = llm.payloads[0][1]
+    assert sent["claims"][0]["alternatives"] == ["E2"] and {r["ref"] for r in sent["references"]} == {"E1", "E2"}
+    assert result["draft"] == (sentence if applied else req["draft"])
+
+
+def test_without_ref_label_no_other_material_is_offered():
+    req, review = contradicted_review("2.5 mg/kg组ORR为35%[E1]。")
+    llm = FakeLLM(revise=lambda p: {"sentences": [{"index": 1, "text": "2.5 mg/kg组ORR为32%[E1]。"}]})
+    core.revise(dict(req, review=review), llm)
+    assert llm.payloads[0][1]["claims"][0]["alternatives"] == []
+
+
 def test_revise_refuses_a_review_of_a_different_draft():
     req, review = contradicted_review("2.5 mg/kg组ORR为35%[E1]。")
     with pytest.raises(core.InputError) as raised:

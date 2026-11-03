@@ -42,6 +42,7 @@ class CoverageOut(BaseModel):
 class Replacement(BaseModel):
     index: int
     text: str
+    quotes: list[QuoteOut] = []  # a verbatim quote for every reference the sentence did not cite before
 
 
 class RevisionOut(BaseModel):
@@ -94,6 +95,21 @@ def references(req):
         refs[a["id"]] = {"ref": a["id"], "kind": "analysis_result",
                          "text": json.dumps(body, ensure_ascii=False, sort_keys=True)}
     return refs
+
+
+ALTERNATIVES = 3
+
+
+def alternatives(claim, refs):
+    """For a sentence whose cited material does not support it (REF): the few other materials of this
+    request that share the most of its wording. Only these may replace the citation, each with a quote."""
+    def grams(text):
+        text = "".join(C.CITE.sub("", text).split())
+        return {text[i:i + 2] for i in range(len(text) - 1)}
+    own = grams(claim["text"])
+    scored = [(len(own & grams(r.get("title", "") + r["text"])), ref) for ref, r in refs.items()
+              if ref not in claim["citations"] and r.get("kind") != "analysis_result"]
+    return [ref for score, ref in sorted(scored, key=lambda x: (-x[0], x[1])) if score][:ALTERNATIVES]
 
 
 def context(sentences, claim):
@@ -274,7 +290,8 @@ def revise(req, llm=chat_json):
         if (old["verdict"] == "contradicted" and any(q["found"] for q in old["quotes"])) or (
                 overreach and not old.get("scope_span")):
             to_model.append(dict(now, verdict=old["verdict"], labels=old["labels"],
-                                 reason=old["reason"], quotes=old["quotes"]))
+                                 reason=old["reason"], quotes=old["quotes"],
+                                 alternatives=alternatives(now, refs) if "REF" in old["labels"] else []))
         elif old["verdict"] == "insufficient" and C.scope_span_ok(now["text"], old.get("scope_span")):
             replaced[now["index"]] = C.scope_revision(now["text"], old["scope_span"])
         elif old["verdict"] == "insufficient" and not now["citations"] and old["reason"].startswith("no_citation"):
@@ -283,12 +300,13 @@ def revise(req, llm=chat_json):
             nearby = list(dict.fromkeys(r for o in near if o for r in o["citations"] if r in refs))
             if nearby:
                 to_model.append(dict(now, citations=nearby, verdict=old["verdict"], labels=old["labels"],
-                                     reason=old["reason"], quotes=[]))
+                                     reason=old["reason"], quotes=[], alternatives=[]))
     budget = Budget(llm, req.get("max_llm_calls", 20))
     for batch in C.batches(sorted(to_model, key=lambda c: c["index"]), size=C.MAX_BATCH):
-        cited = list(dict.fromkeys(r for c in batch for r in c["citations"]))
+        cited = list(dict.fromkeys(r for c in batch for r in c["citations"] + c["alternatives"]))
         payload = {"question": req["question"],
-                   "claims": [{k: c[k] for k in ("index", "text", "citations", "verdict", "labels", "reason", "quotes")}
+                   "claims": [{k: c[k] for k in ("index", "text", "citations", "verdict", "labels", "reason", "quotes",
+                                                 "alternatives")}
                               | {"context": context(sentences, c)} for c in batch],
                    "references": [refs[r] for r in cited if r in refs],
                    # the reviser must see which cited materials are one source reposted
@@ -301,7 +319,11 @@ def revise(req, llm=chat_json):
             if old is None or item.index in replaced or "\n" in text or len(C.sentences(text)) != 1:
                 continue
             cites = C.citations(text)
-            if cites and set(cites) <= set(old["citations"]):  # only the sentence's own references
+            # its own references, or offered alternatives each backed by a quote found in that material
+            new = set(cites) - set(old["citations"])
+            quoted = {q.ref for q in item.quotes
+                      if q.ref in refs and C.locate_quote(refs[q.ref]["text"], q.quote) in ("found", "ambiguous")}
+            if cites and new <= set(old["alternatives"]) & quoted:
                 replaced[item.index] = text
     changed, out_draft = [], draft
     for index in sorted(replaced, reverse=True):
