@@ -48,6 +48,23 @@ class PreviousReport(BaseModel):
     date: str = ""
 
 
+class HypothesisFact(BaseModel):
+    ref: str
+    text: str
+    stance: Literal["supports", "refutes", "limits", "context"]
+
+
+class Hypothesis(BaseModel):
+    """A testable intelligence hypothesis the radar formed from a signal (written as 「情报假设」)."""
+
+    id: str
+    statement: str
+    alternatives: list[str] = []
+    confirm: list[str] = []
+    refute: list[str] = []
+    facts: list[HypothesisFact] = []
+
+
 class GenerateRequest(BaseModel):
     question: str = Field(min_length=1)
     evidence: list[Evidence] = []
@@ -55,6 +72,7 @@ class GenerateRequest(BaseModel):
     source_updates: list[SourceUpdate] = []
     research_scope: ResearchScope = ResearchScope()
     previous_report: PreviousReport | None = None
+    hypotheses: list[Hypothesis] = []
     max_llm_calls: int = Field(20, ge=0)
 
 

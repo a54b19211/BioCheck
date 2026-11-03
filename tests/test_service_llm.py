@@ -96,3 +96,19 @@ def test_empty_output_at_length_limit_and_timeout_are_not_resent():
     client, sent = fake_api([httpx.ReadTimeout("slow")])
     parsed, call = chat_json("verify_claims", "sys", {}, CheckBatch, client=client)
     assert parsed is None and call["error"] == "timeout" and len(sent) == 1
+
+
+def test_hypotheses_reach_the_writer_over_http(client):
+    seen = []
+
+    def generate(payload):
+        seen.append(payload)
+        return {"draft": "待验证的假设：XQ-17 准备申报[E1]。"}
+
+    hypothesis = {"id": "H1", "statement": "XQ-17 准备申报", "alternatives": ["只是更正"],
+                  "confirm": ["受理公告"], "refute": ["试验终止"],
+                  "facts": [{"ref": "E1", "text": "ORR 32%", "stance": "supports"}]}
+    body = dict(request(), hypotheses=[hypothesis])
+    response = client(FakeLLM(generate=generate)).post("/v1/generate", json=body, headers=auth())
+    assert response.status_code == 200
+    assert seen[0]["hypotheses"][0]["id"] == "H1" and seen[0]["hypotheses"][0]["facts"][0]["ref"] == "E1"
