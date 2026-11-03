@@ -149,7 +149,8 @@ def test_the_reviser_also_sees_which_materials_are_one_source(client):
     body = request(source_relations=[{"kind": "repost", "source": "E2", "target": "E1", "target_record": "R1"}])
     draft = "两个独立来源都报告了ORR 32%[E1][E2]。"
     review = {"status": "REVIEW", "claims": [{"index": 1, "text": draft, "start": 0, "end": len(draft),
-              "citations": ["E1", "E2"], "verdict": "contradicted", "labels": [], "quotes": [],
+              "citations": ["E1", "E2"], "verdict": "contradicted", "labels": [],
+              "quotes": [{"ref": "E1", "quote": "ORR was 32%", "found": True}],
               "reason": "E2 转载自 E1"}]}
     response = client(FakeLLM(revise=revise)).post(
         "/v1/revise", json=dict(body, draft=draft, review=review), headers=auth()
