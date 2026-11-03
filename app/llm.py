@@ -23,13 +23,13 @@ def shape(tp):
     return {str: "string", int: "int", float: "number", bool: "bool", type(None): "null"}.get(tp, "any")
 
 
-def chat_json(stage, system, payload, model_cls, *, max_tokens=4096, thinking=False, client=None):
+def chat_json(stage, system, payload, model_cls, *, max_tokens=4096, thinking=False, client=None, retry=True):
     """Return (parsed object or None, call record). Never raises for model or network failures."""
     provider = os.environ.get("LLM_PROVIDER", "deepseek")
     model = os.environ.get("LLM_MODEL", "deepseek-chat")
     call = {"stage": stage, "model": model, "finish_reason": None,
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-            "seconds": 0.0, "error": None}
+            "seconds": 0.0, "error": None, "requests": 0}
     body = {"model": model, "max_tokens": max_tokens, "response_format": {"type": "json_object"},
             "messages": [{"role": "system", "content": system + "\n\n只返回一个JSON对象，格式：" + shape(model_cls)},
                          {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]}
@@ -42,7 +42,8 @@ def chat_json(stage, system, payload, model_cls, *, max_tokens=4096, thinking=Fa
     client = client or httpx.Client(timeout=float(os.environ.get("LLM_TIMEOUT_SECONDS", "180")))
     started = time.monotonic()
     try:
-        for attempt in range(2):
+        for attempt in range(2 if retry else 1):
+            call["requests"] += 1
             try:
                 response = client.post(url, json=body, headers=headers)
             except httpx.TimeoutException:

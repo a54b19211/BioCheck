@@ -64,7 +64,10 @@ class Budget:
         if self.left <= 0:
             return None, "llm_call_limit"
         self.left -= 1
+        if not self.left:
+            options = dict(options, retry=False)  # no room for a format retry
         parsed, call = self.llm(stage, system, payload, model_cls, **options)
+        self.left -= max(0, call.get("requests", 1) - 1)
         self.calls.append(call)
         return parsed, call.get("error") or ("empty_output" if parsed is None else None)
 

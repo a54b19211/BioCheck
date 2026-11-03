@@ -256,3 +256,17 @@ def test_coverage_sees_only_the_sentence_text():
     verify("2.5 mg/kg组ORR为32%[E1]。", llm)
     coverage = next(p for stage, p, _ in llm.payloads if stage == "verify_coverage")
     assert coverage["sentences"] == [{"index": 1, "text": "2.5 mg/kg组ORR为32%[E1]。"}]
+
+
+def test_a_format_retry_counts_against_max_llm_calls():
+    seen = []
+
+    def llm(stage, system, payload, model_cls, **options):
+        seen.append(options.get("retry", True))
+        return None, {"stage": stage, "error": "invalid_output", "requests": 2 if options.get("retry", True) else 1}
+
+    budget = core.Budget(llm, 3)
+    budget.ask("verify_claims", "", {}, None)  # two requests: the answer and its retry
+    budget.ask("verify_claims", "", {}, None)  # the last request: no room for a retry
+    assert seen == [True, False] and budget.left == 0
+    assert budget.ask("verify_claims", "", {}, None) == (None, "llm_call_limit")
