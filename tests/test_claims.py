@@ -83,3 +83,4 @@ def test_timestamps_and_glued_source_numbers():
     assert C.numeric_hints("95%CI 0.4%–64.1%", ["Clopper-Pearson双侧95%CI0.4%–64.1%"]) == []
     assert C.numeric_tokens("8月30日更正：2019年12月31日起共12例，8月29日07时列14条") == ["12", "14"]
     assert C.numeric_tokens("2019-12-31的帖子称27例，2020/01/04增至44例") == ["27", "44"]
+    assert C.numeric_tokens("8月26日至27日门诊5人") == ["5"]

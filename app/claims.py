@@ -23,7 +23,7 @@ HYPOTHESIS = re.compile(r"假设|待验证|hypothes", re.I)
 EVENT = re.compile(r"删帖|删除|辟谣|处罚|澄清|delet|denial|penalt|censor", re.I)
 SOURCE_NUMBER = re.compile(r"[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")  # sources glue numbers: CI0.4%
 TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:?\d{2}|Z)?")
-DATE = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|(?:\d{4}年)?\d{1,2}月(?:\d{1,2}日)?(?:\d{1,2}时)?|\d{4}年")  # dates come from metadata; the model checks them
+DATE = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|(?:\d{4}年)?\d{1,2}月(?:\d{1,2}日)?(?:\d{1,2}时)?|\d{4}年|(?<=[至到~～-])\d{1,2}日")  # dates come from metadata; the model checks them
 
 
 def citations(text):
