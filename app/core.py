@@ -80,7 +80,7 @@ def materials(req):
         raise InputError("duplicate_id", "evidence与analysis_results的id必须唯一")
     # Only these fields reach the model; evaluation labels and other extras never do.
     return {k: req[k] for k in ("question", "evidence", "analysis_results", "source_updates",
-                                "research_scope", "previous_report") if req.get(k) is not None}
+                                "research_scope", "previous_report", "hypotheses") if req.get(k) is not None}
 
 
 def references(req):
