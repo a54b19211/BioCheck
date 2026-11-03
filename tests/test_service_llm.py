@@ -137,3 +137,22 @@ def test_reposts_and_origin_groups_reach_the_writer_and_the_checker_over_http(cl
     assert http.post("/v1/verify", json=dict(body, draft="转载内容与原文一致[E2]。"), headers=auth()).status_code == 200
     assert seen["verify_claims"]["source_relations"][0]["target"] == "E1"
     assert seen["verify_claims"]["references"][0]["origin_group"] == "og-1"
+
+
+def test_the_reviser_also_sees_which_materials_are_one_source(client):
+    seen = []
+
+    def revise(payload):
+        seen.append(payload)
+        return {"sentences": []}
+
+    body = request(source_relations=[{"kind": "repost", "source": "E2", "target": "E1", "target_record": "R1"}])
+    draft = "两个独立来源都报告了ORR 32%[E1][E2]。"
+    review = {"status": "REVIEW", "claims": [{"index": 1, "text": draft, "start": 0, "end": len(draft),
+              "citations": ["E1", "E2"], "verdict": "contradicted", "labels": [], "quotes": [],
+              "reason": "E2 转载自 E1"}]}
+    response = client(FakeLLM(revise=revise)).post(
+        "/v1/revise", json=dict(body, draft=draft, review=review), headers=auth()
+    )
+    assert response.status_code == 200
+    assert seen and seen[0]["source_relations"][0]["target"] == "E1"

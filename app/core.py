@@ -290,7 +290,10 @@ def revise(req, llm=chat_json):
         payload = {"question": req["question"],
                    "claims": [{k: c[k] for k in ("index", "text", "citations", "verdict", "labels", "reason", "quotes")}
                               | {"context": context(sentences, c)} for c in batch],
-                   "references": [refs[r] for r in cited if r in refs]}
+                   "references": [refs[r] for r in cited if r in refs],
+                   # the reviser must see which cited materials are one source reposted
+                   "source_relations": [r for r in req.get("source_relations", [])
+                                        if r["source"] in cited or r.get("target") in cited]}
         out, _ = budget.ask("revise", CLAIM_REVISE, payload, RevisionOut)
         allowed = {c["index"]: c for c in batch}
         for item in (out.sentences if out else []):
