@@ -6,10 +6,10 @@ from typing import Any, Literal
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException
 
-from . import core
+from . import core, extraction
 from .llm import chat_json
 
 
@@ -120,6 +120,81 @@ class ReviseRequest(VerifyRequest):
     review: Review
 
 
+# ---- extraction consistency (v3 6.2): strict on purpose - an unknown or misplaced field is a 400, never a
+# silently ignored field answered with 200 as if it had been checked
+
+class Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+SHA256 = r"^[0-9a-f]{64}$"
+
+
+class ArtifactRef(Strict):
+    processor_version: str = Field(min_length=1, max_length=120)
+    text_sha256: str = Field(pattern=SHA256)
+
+
+class Subject(Strict):
+    """The fixed version and processing product the passage was cut from (Fabric's identities)."""
+
+    source_id: str = Field(min_length=1, max_length=80)
+    record_id: str = Field(min_length=1, max_length=2000)
+    version_id: str = Field(min_length=1, max_length=128)
+    raw_sha256: str = Field(pattern=SHA256)
+    artifact: ArtifactRef
+
+
+class Passage(Strict):
+    """The product's text [start, end) in its own offsets, as the caller read it from the fixed artifact."""
+
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+    text: str = Field(min_length=1, max_length=20000)
+
+
+class Producer(Strict):
+    name: str = Field(min_length=1, max_length=80)
+    version: str = Field(min_length=1, max_length=80)
+
+
+class Locator(Strict):
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+
+
+class IdentifierField(Strict):
+    scheme: str = Field(min_length=1, max_length=40)
+    raw: str = Field(min_length=1, max_length=200)  # as written in the source
+    value: str = Field(min_length=1, max_length=200)  # as the producer normalized it
+
+
+class ItemFields(Strict):
+    identifier: IdentifierField | None = None
+    value: str | None = Field(None, min_length=1, max_length=200)
+    unit: str | None = Field(None, min_length=1, max_length=40)
+    denominator: str | None = Field(None, min_length=1, max_length=200)
+    numerator: str | None = Field(None, min_length=1, max_length=200)
+    period: str | None = Field(None, min_length=1, max_length=200)
+    population: str | None = Field(None, min_length=1, max_length=200)
+    label: str | None = Field(None, min_length=1, max_length=200)
+
+
+class Item(Strict):
+    id: str = Field(min_length=1, max_length=64)
+    kind: Literal["identifier", "measurement", "claim", "annotation"]
+    producer: Producer
+    locator: Locator
+    quote: str = Field(min_length=1, max_length=300)
+    fields: ItemFields = ItemFields()
+
+
+class ExtractionRequest(Strict):
+    subject: Subject
+    passage: Passage
+    items: list[Item] = Field(min_length=1, max_length=50)
+
+
 def error(status, code, message, **extra):
     return JSONResponse({"error_code": code, "message": message, **extra}, status_code=status)
 
@@ -173,6 +248,13 @@ def create_app(llm=chat_json):
     @app.post("/v1/revise")
     def revise(req: ReviseRequest):
         return core.revise(req.model_dump(), llm)
+
+    @app.post("/v1/extraction-consistency")
+    def extraction_consistency(req: ExtractionRequest):
+        try:
+            return extraction.check(req.model_dump())
+        except extraction.ContractError as exc:
+            return error(400, "invalid_request", str(exc))
 
     return app
 

@@ -24,7 +24,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 
 不想起 HTTP 时可以用 `python -m app.cli verify request.json`（请求体与 HTTP 相同，会真实调用模型）。
 
-## 三个接口
+## 三个接口（报告的生成、核验、修订）
 
 三个接口共用同一份材料格式（编号由雷达分配，稿子里只写 `[E1]`、`[A1]` 这样的引用）：
 
@@ -90,6 +90,46 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 - 改完后由雷达再调一次 `/v1/verify`。
 
 错误统一为 `{"error_code": "...", "message": "..."}`：401 `unauthorized`、400 `invalid_request`/`no_materials`/`duplicate_id`、409 `review_mismatch`、502 生成失败（附 `llm_calls`）。
+
+## 抽取一致性接口（v3 6.2）
+
+**POST /v1/extraction-consistency**（契约 `extraction_consistency.v1`）。这个接口只核对加工产物和它取自的原文是否对应，不判断事实真伪，也不调模型，`llm_calls` 恒为 `[]`。
+
+请求是严格格式：多一个字段、写错字段名、某类条目带了不该带的字段，或者 `end - start` 不等于原文长度，都返回 400 `invalid_request`，不会返回 200 冒充已检查。
+
+```json
+{"subject": {"source_id": "nmpa", "record_id": "…", "version_id": "…", "raw_sha256": "<64位>",
+             "artifact": {"processor_version": "datafabric.clean_text.v11", "text_sha256": "<64位>"}},
+ "passage": {"start": 1000, "end": 1093, "text": "<从固定产物切出的 [start,end) 原文>"},
+ "items": [{"id": "m1", "kind": "measurement", "producer": {"name": "…", "version": "…"},
+            "locator": {"start": 1040, "end": 1045}, "quote": "100mg",
+            "fields": {"value": "100", "unit": "mg"}}]}
+```
+
+- `kind` 和它允许的 `fields`：
+  - `identifier`：只能带 `identifier`（`{scheme, raw, value}`，即原文写法和生产者规范化后的写法）；
+  - `measurement`：必须带 `value`，可选 `unit`、`denominator`（数字或 `unknown`）、`numerator`、`period`、`population`；
+  - `claim`：可带以上数值字段，以及 `label`；
+  - `annotation`：不带字段，只核对定位和短引。
+- `locator` 用产物里的绝对偏移，`quote` 必须正好是定位处的文字。定位不对时，其余字段一律不读，记 `unsupported`。
+- 每个字段的结果是以下四种之一：
+  - `match`：对上了；
+  - `mismatch`：原文写的是别的；
+  - `not_found`：原文里找不到；
+  - `unsupported`：规则判断不了，例如单位不在单位表里、`label` 属于语义判断、比例关系无法用规则核对。
+- 条目状态：所有字段都是 `match` 才算 `consistent`；只要有 `mismatch` 或 `not_found` 就是 `inconsistent`；其余（含任何 `unsupported`）都是 `unchecked`。`unchecked` 不能当作已检查通过。
+- 规则：数值按 `/v1/verify` 的舍入规则核对；单位用 `app/extraction.py` 里带版本的固定单位表；分母识别 `n/N`、`n of N`、"N例中…n" 和 `N=`、"共N" 这几种写法；时间和人群只做字面核对。改动规则或单位表时，必须同时提升 `checker_version`。
+
+返回：
+
+```json
+{"contract_version": "extraction_consistency.v1", "checker_version": "biocheck.extraction_rules.v1",
+ "subject": {…},
+ "items": [{"id": "m1", "kind": "measurement", "status": "consistent",
+            "fields": {"locator": {"result": "match", "span": [1040, 1045]}, "quote": {…},
+                       "value": {…}, "unit": {…}}}],
+ "counts": {"consistent": 1, "inconsistent": 0, "unchecked": 0}, "llm_calls": []}
+```
 
 ## 运行测试
 
