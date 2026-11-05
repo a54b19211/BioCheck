@@ -35,6 +35,9 @@ def chat_json(stage, system, payload, model_cls, *, max_tokens=4096, thinking=Fa
                          {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]}
     if provider == "deepseek":
         body["thinking"] = {"type": "enabled" if thinking else "disabled"}
+    elif provider == "vllm":
+        # local vLLM serving Qwen: the same per-call switch, as its chat template reads it
+        body["chat_template_kwargs"] = {"enable_thinking": bool(thinking)}
     if not thinking:
         body["temperature"] = 0
     url = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com").rstrip("/") + "/chat/completions"

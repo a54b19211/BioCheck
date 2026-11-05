@@ -73,6 +73,15 @@ def fake_api(responses):
     return httpx.Client(transport=httpx.MockTransport(handler)), sent
 
 
+def test_local_vllm_gets_the_per_call_thinking_switch_its_template_reads(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "vllm")
+    client, sent = fake_api([('{"verdict": "complete", "reason": "ok"}', "stop")] * 2)
+    chat_json("verify_coverage", "sys", {"q": 1}, CoverageOut, client=client)
+    chat_json("verify_coverage", "sys", {"q": 1}, CoverageOut, client=client, thinking=True)
+    assert sent[0]["chat_template_kwargs"] == {"enable_thinking": False} and "thinking" not in sent[0]
+    assert sent[1]["chat_template_kwargs"] == {"enable_thinking": True} and "temperature" not in sent[1]
+
+
 def test_chat_json_retries_once_with_the_validation_error_and_disables_thinking(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "deepseek")
     client, sent = fake_api([('{"verdict": "maybe"}', "stop"), ('{"verdict": "complete", "reason": "ok"}', "stop")])
