@@ -16,9 +16,10 @@ def en(client, prefix, period_text, unit="contacts", metric="close contacts", pe
     return answer(client, synthetic(text, text, f))
 
 
-def test_the_checker_is_v9_with_normalize_v2():
-    assert v9.CHECKER_VERSION == "biocheck.extraction_rules.v9"
-    assert v9.NORMALIZE_VERSION == "extraction_normalize.v2"
+def test_the_checker_reads_with_normalize_v2_or_later():
+    # v9 on its own commit (58f7b08) read with extraction_normalize.v2; from v10 on, v3 (test_extraction_v10)
+    assert v9.CHECKER_VERSION == "biocheck.extraction_rules.v10"
+    assert v9.NORMALIZE_VERSION == "extraction_normalize.v3"
 
 
 @pytest.mark.parametrize("prefix,period_text", [("In 2018", "In 2018"), ("In 2018", "2018"),

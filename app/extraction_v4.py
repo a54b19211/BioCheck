@@ -31,8 +31,11 @@ CONTRACT_VERSION = "extraction_consistency.v2"
 # (no month, day, range, start or sub-period continues it: "2018" of "In January 2018" or "Since 2018" is not the
 # year); a unit in the bound metric phrase must be the phrase's head counting noun ("close" of "14 close
 # contacts" is not a unit). v8 stays as released on its own commit (43dba74)
-CHECKER_VERSION = "biocheck.extraction_rules.v9"
-NORMALIZE_VERSION = norm.NORMALIZE_V2
+# v10 (Codex r163): v9 + extraction_normalize.v3 - the unit is the head of the metric phrase's own subject: a
+# subset named after including / excluding / such as / a comma ("children" of "close contacts excluding
+# children") is never the unit. v9 stays as released on its own commit (58f7b08)
+CHECKER_VERSION = "biocheck.extraction_rules.v10"
+NORMALIZE_VERSION = norm.NORMALIZE_V3
 FIELDS = ("object", "metric", "value", "unit", "period", "scope", "denominator", "measure_kind", "qualifier",
           "modality")
 CANONICAL_DECIMAL = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?")
@@ -268,9 +271,9 @@ def whole_period(P, span):
 
 
 def bound_unit(P, f, unit, vspan):
-    """The stated unit is the head counting noun of the stated metric phrase that starts right after the value,
-    nothing between the value and the unit but words (extraction_normalize.v2 unit_head); the metric span must
-    hold its value."""
+    """The stated unit is the head of the stated metric phrase's own subject, a counting noun, the phrase
+    starting right after the value with nothing between the value and the unit but words
+    (extraction_normalize.v3 unit_subject_head); the metric span must hold its value."""
     metric = f["metric"]
     if not v3.stated(metric) or len({vspan["passage"], unit["span"]["passage"], metric["span"]["passage"]}) != 1:
         return False
@@ -279,7 +282,7 @@ def bound_unit(P, f, unit, vspan):
         return False
     p = P.by_id[vspan["passage"]]
     b = p["start"]
-    return norm.unit_head(p["text"], vspan["end"] - b, unit["span"]["start"] - b, unit["span"]["end"] - b,
+    return norm.unit_subject_head(p["text"], vspan["end"] - b, unit["span"]["start"] - b, unit["span"]["end"] - b,
                            metric["span"]["start"] - b, metric["span"]["end"] - b)
 
 
