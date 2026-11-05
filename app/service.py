@@ -1,12 +1,12 @@
 """HTTP service: uvicorn app.service:app --port 18562  (see README for environment variables)."""
 import hmac
 import os
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.exceptions import HTTPException
 
 from . import core, extraction
@@ -120,14 +120,16 @@ class ReviseRequest(VerifyRequest):
     review: Review
 
 
-# ---- extraction consistency (v3 6.2): strict on purpose - an unknown or misplaced field is a 400, never a
-# silently ignored field answered with 200 as if it had been checked
+# ---- extraction consistency (v3 6.2): strict on purpose - an unknown, misplaced or missing field is a 400,
+# never a silently ignored field answered with 200 as if it had been checked. Field semantics follow Fabric's
+# contracts/data_objects.py (Measurement: object, metric, value, unit, period, scope, denominator, measure_kind).
 
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
 SHA256 = r"^[0-9a-f]{64}$"
+PASSAGE_ID = r"^[A-Za-z0-9_.-]{1,32}$"
 
 
 class ArtifactRef(Strict):
@@ -136,21 +138,48 @@ class ArtifactRef(Strict):
 
 
 class Subject(Strict):
-    """The fixed version and processing product the passage was cut from (Fabric's identities)."""
+    """The fixed version and processing product the passages were cut from (Fabric's identities). The caller
+    reads them from that fixed artifact; this service only checks the passages it is given."""
 
     source_id: str = Field(min_length=1, max_length=80)
     record_id: str = Field(min_length=1, max_length=2000)
     version_id: str = Field(min_length=1, max_length=128)
     raw_sha256: str = Field(pattern=SHA256)
+    is_demo: bool
     artifact: ArtifactRef
 
 
 class Passage(Strict):
-    """The product's text [start, end) in its own offsets, as the caller read it from the fixed artifact."""
+    """A bounded slice [start, end) of the artifact in its own offsets. A table header and a data row are two
+    passages (role context / primary), never one invented continuous range."""
 
+    id: str = Field(pattern=PASSAGE_ID)
+    role: Literal["primary", "context"]
     start: int = Field(ge=0)
     end: int = Field(ge=0)
     text: str = Field(min_length=1, max_length=20000)
+
+
+class Span(Strict):
+    passage: str = Field(pattern=PASSAGE_ID)
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+
+
+class FieldValue(Strict):
+    """A field as extracted: its value and where it is written, or explicitly not stated by the source."""
+
+    state: Literal["stated", "unknown", "not_applicable"] = "stated"
+    value: str | None = Field(None, min_length=1, max_length=300)
+    span: Span | None = None
+
+    @model_validator(mode="after")
+    def stated_has_value_and_span(self):
+        if self.state == "stated" and (self.value is None or self.span is None):
+            raise ValueError("a stated field needs value and span")
+        if self.state != "stated" and (self.value is not None or self.span is not None):
+            raise ValueError("an unknown / not_applicable field has no value or span")
+        return self
 
 
 class Producer(Strict):
@@ -158,41 +187,64 @@ class Producer(Strict):
     version: str = Field(min_length=1, max_length=80)
 
 
-class Locator(Strict):
-    start: int = Field(ge=0)
-    end: int = Field(ge=0)
+class MeasurementFields(Strict):
+    object: FieldValue
+    metric: FieldValue
+    value: FieldValue
+    unit: FieldValue
+    period: FieldValue
+    scope: FieldValue
+    denominator: FieldValue
+    measure_kind: Literal["stock", "flow", "cumulative", "rate"]
 
 
-class IdentifierField(Strict):
+class IdentifierFields(Strict):
     scheme: str = Field(min_length=1, max_length=40)
-    raw: str = Field(min_length=1, max_length=200)  # as written in the source
-    value: str = Field(min_length=1, max_length=200)  # as the producer normalized it
+    identifier: FieldValue
 
 
-class ItemFields(Strict):
-    identifier: IdentifierField | None = None
-    value: str | None = Field(None, min_length=1, max_length=200)
-    unit: str | None = Field(None, min_length=1, max_length=40)
-    denominator: str | None = Field(None, min_length=1, max_length=200)
-    numerator: str | None = Field(None, min_length=1, max_length=200)
-    period: str | None = Field(None, min_length=1, max_length=200)
-    population: str | None = Field(None, min_length=1, max_length=200)
-    label: str | None = Field(None, min_length=1, max_length=200)
+class ClaimFields(Strict):
+    statement: FieldValue
+    polarity: Literal["affirmed", "negated", "uncertain"]
+    qualifiers: list[str] = Field([], max_length=10)
 
 
-class Item(Strict):
+class AnnotationFields(Strict):
+    label: str = Field(min_length=1, max_length=80)
+
+
+class ItemBase(Strict):
     id: str = Field(min_length=1, max_length=64)
-    kind: Literal["identifier", "measurement", "claim", "annotation"]
     producer: Producer
-    locator: Locator
+    locator: Span  # where the short quote is
     quote: str = Field(min_length=1, max_length=300)
-    fields: ItemFields = ItemFields()
+
+
+class MeasurementItem(ItemBase):
+    kind: Literal["measurement"]
+    fields: MeasurementFields
+
+
+class IdentifierItem(ItemBase):
+    kind: Literal["identifier"]
+    fields: IdentifierFields
+
+
+class ClaimItem(ItemBase):
+    kind: Literal["claim"]
+    fields: ClaimFields
+
+
+class AnnotationItem(ItemBase):
+    kind: Literal["annotation"]
+    fields: AnnotationFields
 
 
 class ExtractionRequest(Strict):
     subject: Subject
-    passage: Passage
-    items: list[Item] = Field(min_length=1, max_length=50)
+    passages: list[Passage] = Field(min_length=1, max_length=8)
+    items: list[Annotated[MeasurementItem | IdentifierItem | ClaimItem | AnnotationItem,
+                          Field(discriminator="kind")]] = Field(min_length=1, max_length=50)
 
 
 def error(status, code, message, **extra):

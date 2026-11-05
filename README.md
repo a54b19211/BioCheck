@@ -93,42 +93,64 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 
 ## 抽取一致性接口（v3 6.2）
 
-**POST /v1/extraction-consistency**（契约 `extraction_consistency.v1`）。这个接口只核对加工产物和它取自的原文是否对应，不判断事实真伪，也不调模型，`llm_calls` 恒为 `[]`。
+**POST /v1/extraction-consistency**（契约 `extraction_consistency.v1`）。这个接口核对加工产物和它取自的固定原文是否对应：每个字段都写在了它指出的位置，并且这些字段属于同一个数量。它不判断事实真伪，也不调模型，`llm_calls` 恒为 `[]`。
 
-请求是严格格式：多一个字段、写错字段名、某类条目带了不该带的字段，或者 `end - start` 不等于原文长度，都返回 400 `invalid_request`，不会返回 200 冒充已检查。
+请求格式是严格的。下面任何一种情况都返回 400 `invalid_request`，不会回 200 冒充已检查：
+- 多了未知字段，或者少了某类条目的必填维度；
+- `stated` 的字段缺少值或位置，或者 `unknown` 的字段却带了值；
+- 某段原文的区间与文本长度不符；
+- 各段原文的区间互相重叠；
+- 位置指向了请求里不存在的段。
 
 ```json
-{"subject": {"source_id": "nmpa", "record_id": "…", "version_id": "…", "raw_sha256": "<64位>",
+{"subject": {"source_id": "nmpa", "record_id": "…", "version_id": "…", "raw_sha256": "<64位>", "is_demo": true,
              "artifact": {"processor_version": "datafabric.clean_text.v11", "text_sha256": "<64位>"}},
- "passage": {"start": 1000, "end": 1093, "text": "<从固定产物切出的 [start,end) 原文>"},
+ "passages": [{"id": "h", "role": "context", "start": 5200, "end": 5310, "text": "| 序号 | 药品品名 | … |\n| ---- | … |"},
+              {"id": "r", "role": "primary", "start": 400156, "end": 400260, "text": "| 954 | 利巴韦林片 | … | 100mg | … |"}],
  "items": [{"id": "m1", "kind": "measurement", "producer": {"name": "…", "version": "…"},
-            "locator": {"start": 1040, "end": 1045}, "quote": "100mg",
-            "fields": {"value": "100", "unit": "mg"}}]}
+            "locator": {"passage": "r", "start": 400189, "end": 400194}, "quote": "100mg",
+            "fields": {"object": {"value": "利巴韦林片", "span": {"passage": "r", "start": …, "end": …}},
+                       "metric": {"value": "药品规格", "span": {"passage": "h", "start": …, "end": …}},
+                       "value": {"value": "100", "span": {…}}, "unit": {"value": "mg", "span": {…}},
+                       "period": {"state": "unknown"}, "scope": {"state": "unknown"},
+                       "denominator": {"state": "not_applicable"}, "measure_kind": "stock"}}]}
 ```
 
-- `kind` 和它允许的 `fields`：
-  - `identifier`：只能带 `identifier`（`{scheme, raw, value}`，即原文写法和生产者规范化后的写法）；
-  - `measurement`：必须带 `value`，可选 `unit`、`denominator`（数字或 `unknown`）、`numerator`、`period`、`population`；
-  - `claim`：可带以上数值字段，以及 `label`；
-  - `annotation`：不带字段，只核对定位和短引。
-- `locator` 用产物里的绝对偏移，`quote` 必须正好是定位处的文字。定位不对时，其余字段一律不读，记 `unsupported`。
+- `passages`：同一份固定产物里有界的几段原文（最多 8 段，合计不超过 2 万字），各自用产物的绝对偏移。表格的表头和数据行是两段，不能拼接成一个伪造的连续区间。原文由调用方从固定产物回读得到，这里只核对给出的这几段，不代表已经核验了来源原件。
+- 每个字段写成 `{"value": …, "span": {"passage", "start", "end"}}`，或者 `{"state": "unknown" | "not_applicable"}`（来源没写）。各类条目的必填维度：
+  - `measurement`（语义同 Fabric `Measurement`）：object、metric、value、unit、period、scope、denominator，以及 measure_kind；
+  - `identifier`：scheme 和 identifier；
+  - `claim`：statement 和 polarity，可带 qualifiers；
+  - `annotation`：label。
+- 规则：
+  - `quote` 必须正好是 `locator` 处的文字，否则其余字段一律不读，记 `unsupported`。
+  - value 必须在 quote 里，并且与 span 处的数字精确相等。只做两种转换：全角数字、千分位逗号。不沿用报告接口的舍入。
+  - unit 必须紧跟在这个数字后面。用 `app/extraction.py` 里带版本的单位表，取最长匹配，所以 mg/kg、mg/day 不会被读成 mg 或分母。
+  - denominator 必须是这个数字所在比例的分母，比例要写在它所在的分句里（分句以 "；;。！？" 和换行切分，表格的一行算一个分句）。百分数可以由同一分句里写明的比例按显示的位数复算。
+  - period 和 scope 必须在数值所在的分句里。
+  - object 和 metric 要在同一分句或同一行；如果是表格的列名，必须是数值所在那一列的表头。
+  - measure_kind 只对"带 % 或带比例的 rate"做核对。
+  - identifier 只核对原文的字面写法；需要规范化才对得上的，记 `unsupported`。
+  - claim 的 polarity 和 qualifiers、annotation 的判断，都属于语义判断，记 `unsupported`。
+  - `unknown` 只有在规则能证明来源确实没写时才算 `match`。例如分句里写了日期，不能证明那就是这个测量的时期，这时记 `unsupported`，不记 `mismatch`。
 - 每个字段的结果是以下四种之一：
   - `match`：对上了；
-  - `mismatch`：原文写的是别的；
+  - `mismatch`：原文写的是别的，或者这个字段属于另一个数量、另一列；
   - `not_found`：原文里找不到；
-  - `unsupported`：规则判断不了，例如单位不在单位表里、`label` 属于语义判断、比例关系无法用规则核对。
-- 条目状态：所有字段都是 `match` 才算 `consistent`；只要有 `mismatch` 或 `not_found` 就是 `inconsistent`；其余（含任何 `unsupported`）都是 `unchecked`。`unchecked` 不能当作已检查通过。
-- 规则：数值按 `/v1/verify` 的舍入规则核对；单位用 `app/extraction.py` 里带版本的固定单位表；分母识别 `n/N`、`n of N`、"N例中…n" 和 `N=`、"共N" 这几种写法；时间和人群只做字面核对。改动规则或单位表时，必须同时提升 `checker_version`。
+  - `unsupported`：规则证明不了。
+- 条目状态：所有字段都是 `match` 才算 `consistent`；只要有 `mismatch` 或 `not_found`，就是 `inconsistent`；其余（含任何 `unsupported`）都是 `unchecked`。`unchecked` 不能当作已检查通过。
+- 改动任何规则、单位表或转换时，必须同时提升 `checker_version`。
 
 返回：
 
 ```json
 {"contract_version": "extraction_consistency.v1", "checker_version": "biocheck.extraction_rules.v1",
  "subject": {…},
- "items": [{"id": "m1", "kind": "measurement", "status": "consistent",
-            "fields": {"locator": {"result": "match", "span": [1040, 1045]}, "quote": {…},
-                       "value": {…}, "unit": {…}}}],
- "counts": {"consistent": 1, "inconsistent": 0, "unchecked": 0}, "llm_calls": []}
+ "items": [{"id": "m1", "kind": "measurement", "status": "unchecked",
+            "fields": {"locator": {"result": "match", "span": {…}},
+                       "metric": {"result": "match", "reason": "header_of_value_column", "span": {…}},
+                       "measure_kind": {"result": "unsupported", "reason": "measure_kind_not_rule_checkable"}, …}}],
+ "counts": {"consistent": 0, "inconsistent": 0, "unchecked": 1}, "llm_calls": []}
 ```
 
 ## 运行测试

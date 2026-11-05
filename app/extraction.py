@@ -1,27 +1,30 @@
-"""Extraction consistency (v3 6.2): does a processing product correspond to the passage it was extracted from?
-Rules only, no model calls. It checks correspondence - locator, short quote, identifier, number, unit,
-denominator, numerator, period, population - never whether a fact is true. A field the rules cannot decide is
-"unsupported", which makes the item "unchecked", never "consistent"."""
-import re
+"""Extraction consistency (v3 6.2): does a processing product correspond to the fixed text it was extracted
+from? Rules only, no model calls. It checks correspondence, never whether a fact is true.
 
-from .claims import (
-    DATE,
-    SOURCE_NUMBER,
-    TIMESTAMP,
-    _value,
-    numeric_hints,
-    numeric_tokens,
-)
+Each field of an item names its own span in one of the request's passages (bounded slices of one fixed
+artifact, each with its own offsets - a table's header and a data row are two passages, never one invented
+continuous range), or says explicitly that the source states none ("unknown" / "not_applicable"). The value is
+the anchor: unit, denominator, period and scope must belong to that same quantity (the unit written right at
+the number, the denominator in an explicit ratio of that number within its clause, period and scope in that
+clause), and a table metric's header must head the value's column. Whatever the rules cannot prove is
+"unsupported", which makes the item "unchecked", never "consistent"."""
+
+import re
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+
+from .claims import DATE, TIMESTAMP
 
 CONTRACT_VERSION = "extraction_consistency.v1"
-CHECKER_VERSION = "biocheck.extraction_rules.v1"  # bump whenever a rule or the unit table below changes
+# Bump whenever a rule, the unit table, the number conversions or the clause rule below changes.
+CHECKER_VERSION = "biocheck.extraction_rules.v1"
 
-# Units the rules know, canonical -> spellings. Longest spelling wins at a position, so "mg/kg" is never
-# read as "mg". A unit not listed here is "unsupported", not guessed.
+# Units the rules know, canonical -> spellings. The longest spelling wins at a position ("mg/kg" is never "mg",
+# "mg/day" is no ratio). A unit not listed here is "unsupported", never guessed.
 UNITS = {
     "%": ("%", "％", "percent"),
     "mg/kg": ("mg/kg", "毫克/千克"),
     "mg/m2": ("mg/m2", "mg/m²", "mg/㎡"),
+    "mg/day": ("mg/day", "mg/d", "毫克/天", "毫克/日"),
     "mg": ("mg", "毫克"),
     "g": ("g", "克"),
     "kg": ("kg", "千克", "公斤"),
@@ -34,195 +37,311 @@ UNITS = {
     "例": ("例",),
     "人": ("人", "名"),
     "次": ("次",),
-    "天": ("天", "日", "days", "day", "d"),
-    "周": ("周", "weeks", "week", "wk"),
-    "月": ("个月", "月", "months", "month", "mo"),
-    "年": ("年", "years", "year", "yr"),
-    "小时": ("小时", "hours", "hour", "h"),
+    "天": ("天", "days", "day"),
+    "周": ("周", "weeks", "week"),
+    "月": ("个月", "months", "month"),
+    "年": ("years", "year"),
+    "小时": ("小时", "hours", "hour"),
     "分钟": ("分钟", "minutes", "min"),
 }
 SPELLINGS = sorted(((s, unit) for unit, spells in UNITS.items() for s in spells), key=lambda x: -len(x[0]))
 CANONICAL = {s.casefold(): unit for s, unit in SPELLINGS}
-# Explicit denominator statements: (numerator, denominator) groups.
-RATIO = re.compile(r"(\d[\d,]*)\s*/\s*(\d[\d,]*)")
-OF_N = re.compile(r"(\d[\d,]*)\s*(?:例|人|名)?\s*(?:of|out of)\s+(\d[\d,]*)", re.IGNORECASE)
-IN_N = re.compile(r"(\d[\d,]*)\s*(?:例|人|名)(?:患者|受试者|病例)?中[^0-9]{0,12}?(\d[\d,]*)")
-TOTAL_N = re.compile(r"(?:\b[Nn]\s*=\s*|共\s*|总计\s*|合计\s*)(\d[\d,]*)")
-SENTENCE_STOP = "。！？!?\n"
-FIELDS = {
-    "identifier": {"identifier"},
-    "measurement": {"value", "unit", "denominator", "numerator", "period", "population"},
-    "claim": {"value", "unit", "denominator", "numerator", "period", "population", "label"},
-    "annotation": set(),  # a profile annotation: only its locator and short quote are checked
+NUMBER = re.compile(r"(?<![\d.])[-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?![\d])")
+FULLWIDTH = str.maketrans("０１２３４５６７８９．，－", "0123456789.,-")
+# Explicit ratios inside one clause, as (numerator span, denominator span) group numbers.
+RATIOS = (
+    (re.compile(r"(\d[\d,]*)\s*/\s*(\d[\d,]*)"), 1, 2),  # 32/120 (dates are blanked first; mg/day has no digits)
+    (re.compile(r"(\d[\d,]*)\s*(?:例|人|名)?\s*(?:of|out of)\s+(\d[\d,]*)", re.IGNORECASE), 1, 2),
+    (re.compile(r"(\d[\d,]*)\s*(?:例|人|名)(?:患者|受试者|病例)?中[^0-9；;。]{0,12}?(\d[\d,]*)"), 2, 1),
+)
+TOTAL = re.compile(r"(?:\b[Nn]\s*=\s*|共\s*|总计\s*|合计\s*)(\d[\d,]*)")
+CLAUSE_STOP = "；;。！？!?\n"
+TABLE_RULE = re.compile(r"^\|?\s*:?-{3,}")
+
+KIND_FIELDS = {
+    "measurement": ("object", "metric", "value", "unit", "period", "scope", "denominator"),
+    "identifier": ("identifier",),
+    "claim": ("statement",),
+    "annotation": (),
 }
 
 
 class ContractError(ValueError):
-    """The request breaks the contract in a way pydantic cannot see (fields not allowed for a kind)."""
+    """The request breaks the contract in a way the HTTP schema cannot see."""
 
 
 def squash(text):
     return " ".join((text or "").split())
 
 
-def result(kind, reason="", span=None):
+def outcome(kind, reason="", span=None):
     out = {"result": kind}
     if reason:
         out["reason"] = reason
     if span is not None:
-        out["span"] = list(span)
+        out["span"] = span
     return out
 
 
-def sentence_around(text, a, b):
-    """The passage-relative sentence holding [a, b): from after the previous stop to the next one."""
-    start = max(text.rfind(c, 0, a) for c in SENTENCE_STOP) + 1
-    ends = [i for i in (text.find(c, b) for c in SENTENCE_STOP) if i >= 0]
-    return start, (min(ends) + 1 if ends else len(text))
+def number(text):
+    """A written number as a Decimal: only full-width digits and thousands separators are converted
+    (versioned with CHECKER_VERSION); anything else is not a number here."""
+    t = squash(text).translate(FULLWIDTH).replace("−", "-")
+    if not re.fullmatch(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?", t):
+        return None
+    try:
+        return Decimal(t.replace(",", ""))
+    except InvalidOperation:
+        return None
 
 
-def number_spans(text):
-    return [(m.start(), m.end(), _value(m.group())) for m in SOURCE_NUMBER.finditer(text)]
+class Passages:
+    """The request's passages of one fixed artifact, each in its own artifact offsets."""
+
+    def __init__(self, passages):
+        self.by_id = {p["id"]: p for p in passages}
+
+    def text(self, span):
+        p = self.by_id.get(span["passage"])
+        if p is None:
+            raise ContractError(f"span names passage {span['passage']!r}, which is not in the request")
+        a, b = span["start"] - p["start"], span["end"] - p["start"]
+        if a < 0 or b > len(p["text"]) or a >= b:
+            return None
+        return p["text"][a:b]
+
+    def clause(self, span):
+        """(passage id, clause start, clause end) in artifact offsets: the clause around the span, cut at
+        "；;。！？!?" and line ends; a markdown table row is one line, so a row is one clause."""
+        p = self.by_id[span["passage"]]
+        text, a, b = p["text"], span["start"] - p["start"], span["end"] - p["start"]
+        start = max(text.rfind(c, 0, a) for c in CLAUSE_STOP) + 1
+        ends = [i for i in (text.find(c, b) for c in CLAUSE_STOP) if i >= 0]
+        end = min(ends) if ends else len(text)
+        return p["id"], p["start"] + start, p["start"] + end, text[start:end]
+
+    def inside(self, inner, outer):
+        return inner["passage"] == outer["passage"] and outer["start"] <= inner["start"] and inner["end"] <= outer["end"]
 
 
 def unit_at(text, pos):
-    """The longest known unit spelling starting at pos (after spaces), as (canonical, start, end), or None."""
+    """(canonical unit, start, end) of the longest known spelling at pos (after spaces), or None."""
     while pos < len(text) and text[pos] == " ":
         pos += 1
     for spelling, unit in SPELLINGS:
-        if text.startswith(spelling, pos) or (spelling.isascii() and text[pos:pos + len(spelling)].casefold()
-                                              == spelling.casefold()):
+        piece = text[pos:pos + len(spelling)]
+        if piece == spelling or (spelling.isascii() and piece.casefold() == spelling.casefold()):
             end = pos + len(spelling)
-            if spelling.isascii() and spelling[-1].isalpha() and end < len(text) and text[end].isalpha():
-                continue  # "d" is not the start of "dose"
+            if spelling[-1].isascii() and spelling[-1].isalpha() and end < len(text) and text[end].isalpha():
+                continue  # "day" is not the start of "days later"; "min" is not "minor"
             return unit, pos, end
     return None
 
 
-def check_number(name, value, quote, offset):
-    """A number field: its value must be a number of the quote (rounded to the digits shown, as /v1/verify)."""
-    tokens = numeric_tokens(value)
-    if len(tokens) != 1:
-        return result("unsupported", f"{name}_not_a_single_number")
-    if numeric_hints(tokens[0], [quote]):
-        return result("not_found", f"{name}_not_in_quote")
-    wanted = _value(tokens[0])
-    for a, b, v in number_spans(quote):
-        if v is not None and wanted is not None and abs(v - wanted) < 1:
-            return result("match", span=(offset + a, offset + b))
-    return result("match")
+def ratios_in(clause_text, offset):
+    """Explicit (numerator, denominator) statements in a clause: [(num_start, num_end, num, den_start, den_end, den)]
+    in artifact offsets. Dates and timestamps are blanked first (2015/3/1 is no ratio)."""
+    text = DATE.sub(lambda m: " " * len(m.group()), TIMESTAMP.sub(lambda m: " " * len(m.group()), clause_text))
+    out = []
+    for pattern, n, d in RATIOS:
+        for m in pattern.finditer(text):
+            out.append((offset + m.start(n), offset + m.end(n), number(m.group(n)),
+                        offset + m.start(d), offset + m.end(d), number(m.group(d))))
+    return out
 
 
-def stated_ratios(text):
-    """Explicit (numerator, denominator) statements and bare totals of a text, as Decimals. Dates and
-    timestamps are taken out first, so 2015/3/1 is no ratio; "120例中…32例" states the total first."""
-    text = DATE.sub(" ", TIMESTAMP.sub(" ", text))
-    pairs = [(_value(m.group(1)), _value(m.group(2))) for p in (RATIO, OF_N) for m in p.finditer(text)]
-    pairs += [(_value(m.group(2)), _value(m.group(1))) for m in IN_N.finditer(text)]
-    totals = [_value(m.group(1)) for m in TOTAL_N.finditer(text)]
-    return pairs, totals
+def stated(field):
+    return field is not None and field.get("state", "stated") == "stated"
 
 
-def check_item(item, passage):
-    text, p_start = passage["text"], passage["start"]
-    allowed = FIELDS[item["kind"]]
-    given = {k: v for k, v in (item.get("fields") or {}).items() if v is not None}
-    extra = set(given) - allowed
-    if extra:
-        raise ContractError(f"items[{item['id']}].fields: {', '.join(sorted(extra))} not allowed for {item['kind']}")
-    if item["kind"] == "identifier" and "identifier" not in given:
-        raise ContractError(f"items[{item['id']}].fields.identifier is required for an identifier")
-    if item["kind"] == "measurement" and "value" not in given:
-        raise ContractError(f"items[{item['id']}].fields.value is required for a measurement")
-    fields = {}
-    a, b = item["locator"]["start"] - p_start, item["locator"]["end"] - p_start
-    if a < 0 or b > len(text) or a >= b:
-        fields["locator"] = result("mismatch", "locator_outside_passage")
-        fields["quote"] = result("not_found" if squash(item["quote"]) not in squash(text) else "mismatch",
-                                 "locator_outside_passage")
-        for name in given:
-            fields[name] = result("unsupported", "locator_outside_passage")
-        return fields
-    located = text[a:b]
-    quote = item["quote"]
-    if squash(located) == squash(quote):
-        fields["locator"] = result("match", span=(p_start + a, p_start + b))
-        fields["quote"] = result("match", span=(p_start + a, p_start + b))
+def check_measurement(item, P, fields):
+    f = item["fields"]
+    value_field = f["value"]
+    if not stated(value_field):
+        raise ContractError(f"items[{item['id']}].fields.value: a measurement states its value")
+    vspan = value_field["span"]
+    vtext = P.text(vspan)
+    if vtext is None:
+        fields["value"] = outcome("mismatch", "span_outside_passage")
+        for name in KIND_FIELDS["measurement"] + ("measure_kind",):
+            fields.setdefault(name, outcome("unsupported", "no_valid_value_span"))
+        return
+    if not P.inside(vspan, item["locator"]):
+        fields["value"] = outcome("mismatch", "value_outside_quote")
+    elif number(vtext) is None or number(value_field["value"]) is None:
+        fields["value"] = outcome("unsupported", "value_not_a_plain_number")
+    elif number(vtext) != number(value_field["value"]):
+        fields["value"] = outcome("mismatch", "value_differs_from_span")
     else:
-        where = squash(text).find(squash(quote)) if squash(quote) else -1
-        fields["locator"] = result("mismatch", "located_text_differs_from_quote")
-        fields["quote"] = result("mismatch", "quote_elsewhere_in_passage") if where >= 0 else result(
-            "not_found", "quote_not_in_passage")
-    # the fields are read from the located text when the locator holds; otherwise nothing else can be decided
+        fields["value"] = outcome("match", span=vspan)
+    pid, c_start, c_end, clause_text = P.clause(vspan)
+    passage = P.by_id[pid]
+    after = vspan["end"] - passage["start"]
+    at_value = unit_at(passage["text"], after)
+    percent_written = passage["text"][after:after + 1] in ("%", "％")
+    # unit: written right at the number
+    unit = f["unit"]
+    if stated(unit):
+        canonical = CANONICAL.get(squash(unit["value"]).casefold())
+        utext = P.text(unit["span"])
+        if canonical is None:
+            fields["unit"] = outcome("unsupported", "unit_not_in_table")
+        elif utext is None or CANONICAL.get(squash(utext).casefold()) != canonical:
+            fields["unit"] = outcome("mismatch", "unit_differs_from_span")
+        elif at_value and (unit["span"]["passage"], unit["span"]["start"]) == (pid, passage["start"] + at_value[1]) \
+                and at_value[0] == canonical:
+            fields["unit"] = outcome("match", span=unit["span"])
+        elif at_value and at_value[0] != canonical:
+            fields["unit"] = outcome("mismatch", "another_unit_at_value:" + at_value[0])
+        else:
+            fields["unit"] = outcome("mismatch", "unit_not_at_value")
+    else:
+        fields["unit"] = (outcome("mismatch", "unit_written_at_value:" + at_value[0]) if at_value
+                          else outcome("match", "no_unit_at_value"))
+    # denominator: the denominator of an explicit ratio of this very number, inside its clause
+    ratios = ratios_in(clause_text, c_start)
+    mine = [r for r in ratios if (r[0], r[1]) == (vspan["start"], vspan["end"])]
+    den = f["denominator"]
+    if stated(den):
+        dtext = P.text(den["span"])
+        wanted = number(den["value"])
+        if dtext is None or wanted is None or number(dtext) != wanted:
+            fields["denominator"] = outcome("mismatch", "denominator_differs_from_span")
+        elif any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in mine):
+            fields["denominator"] = outcome("match", span=den["span"])
+        elif mine:
+            fields["denominator"] = outcome("mismatch", "the_value_has_another_denominator")
+        elif percent_written and number(vtext) is not None:
+            # a percentage of a ratio stated in the same clause: n/N*100 rounded to the digits shown
+            shown = number(vtext)
+            places = max(0, -shown.as_tuple().exponent)
+            fits = [r for r in ratios if (r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) and r[5]
+                    and (r[2] / r[5] * 100).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP) == shown]
+            fields["denominator"] = (outcome("match", "percentage_of_stated_ratio", den["span"]) if fits
+                                     else outcome("mismatch", "percentage_does_not_follow_from_ratio")
+                                     if any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in ratios)
+                                     else outcome("unsupported", "denominator_relation_not_rule_checkable"))
+        else:
+            fields["denominator"] = outcome("unsupported", "denominator_relation_not_rule_checkable")
+    else:
+        # "unknown": wrong for certain only when this very number has a stated denominator; other ratios or
+        # totals in the clause may belong to other quantities
+        fields["denominator"] = (outcome("mismatch", "the_value_has_a_stated_denominator") if mine
+                                 else outcome("unsupported", "other_ratio_or_total_in_value_clause")
+                                 if ratios or TOTAL.search(clause_text)
+                                 else outcome("match", "no_denominator_in_value_clause"))
+    # period and scope: in the value's clause
+    for name in ("period", "scope"):
+        field = f[name]
+        if not stated(field):
+            if name == "period":
+                blanked = TIMESTAMP.sub(" ", clause_text)
+                # a date in the clause may be something else (a pharmacopoeia edition "2015年版"): not proof
+                fields[name] = (outcome("unsupported", "date_in_value_clause") if DATE.search(blanked)
+                                else outcome("match", "no_date_in_value_clause"))
+            else:
+                fields[name] = outcome("unsupported", "absence_of_scope_not_rule_checkable")
+            continue
+        text = P.text(field["span"])
+        if text is None or squash(text).casefold() != squash(field["value"]).casefold():
+            fields[name] = outcome("mismatch", f"{name}_differs_from_span")
+        elif field["span"]["passage"] == pid and c_start <= field["span"]["start"] and field["span"]["end"] <= c_end:
+            fields[name] = outcome("match", span=field["span"])
+        else:
+            fields[name] = outcome("unsupported", f"{name}_not_in_value_clause")
+    # object and metric: in the value's clause or row, or (a table metric) the header of the value's column
+    for name in ("object", "metric"):
+        field = f[name]
+        if not stated(field):
+            fields[name] = outcome("unsupported", f"unknown_{name}_not_rule_checkable")
+            continue
+        text = P.text(field["span"])
+        if text is None or squash(text).casefold() != squash(field["value"]).casefold():
+            fields[name] = outcome("mismatch", f"{name}_differs_from_span")
+            continue
+        if field["span"]["passage"] == pid and c_start <= field["span"]["start"] and field["span"]["end"] <= c_end:
+            fields[name] = outcome("match", span=field["span"])
+            continue
+        column = header_column(P, field["span"], vspan)
+        fields[name] = (outcome("match", "header_of_value_column", field["span"]) if column is True
+                        else outcome("mismatch", "header_of_another_column") if column is False
+                        else outcome("unsupported", f"{name}_not_in_value_clause"))
+    kind = item["fields"]["measure_kind"]
+    if kind == "rate" and (percent_written or (fields["unit"]["result"] == "match" and
+                                               CANONICAL.get(squash(f["unit"].get("value")).casefold()) == "%")
+                           or fields["denominator"]["result"] == "match"):
+        fields["measure_kind"] = outcome("match", "rate_with_percentage_or_ratio")
+    else:
+        fields["measure_kind"] = outcome("unsupported", "measure_kind_not_rule_checkable")
+
+
+def cell_index(line, pos):
+    """The 0-based cell number of a markdown table line at character pos, or None."""
+    if not line.startswith("|") or pos >= len(line):
+        return None
+    return line[:pos].count("|") - 1
+
+
+def header_column(P, header_span, value_span):
+    """True / False when header_span is a cell of a table header line (a line followed by a separator row in
+    its passage) and value_span sits in a table row line: same column or not. None when not that shape."""
+    hp, vp = P.by_id[header_span["passage"]], P.by_id[value_span["passage"]]
+    ht, ha = hp["text"], header_span["start"] - hp["start"]
+    hl_start = ht.rfind("\n", 0, ha) + 1
+    hl_end = ht.find("\n", ha)
+    hl_end = len(ht) if hl_end < 0 else hl_end
+    following = ht[hl_end + 1:].split("\n", 1)[0] if hl_end < len(ht) else ""
+    if not (ht[hl_start:hl_end].startswith("|") and TABLE_RULE.match(following.strip())):
+        return None
+    vt, va = vp["text"], value_span["start"] - vp["start"]
+    vl_start = vt.rfind("\n", 0, va) + 1
+    vl_end = vt.find("\n", va)
+    vl_end = len(vt) if vl_end < 0 else vl_end
+    row = vt[vl_start:vl_end]
+    if not row.startswith("|") or TABLE_RULE.match(row.strip()):
+        return None
+    hc, vc = cell_index(ht[hl_start:hl_end], ha - hl_start), cell_index(row, va - vl_start)
+    return None if hc is None or vc is None else hc == vc
+
+
+def check_item(item, P):
+    fields = {}
+    quote = P.text(item["locator"])
+    if quote is None:
+        fields["locator"] = outcome("mismatch", "locator_outside_passage")
+    elif squash(quote) == squash(item["quote"]):
+        fields["locator"] = outcome("match", span=item["locator"])
+    else:
+        anywhere = any(squash(item["quote"]) in squash(p["text"]) for p in P.by_id.values())
+        fields["locator"] = outcome("mismatch", "quote_elsewhere_in_passages" if anywhere else "quote_not_in_passages")
     if fields["locator"]["result"] != "match":
-        for name in given:
-            fields[name] = result("unsupported", "no_valid_location")
+        for name in KIND_FIELDS[item["kind"]] + (("measure_kind",) if item["kind"] == "measurement" else ()):
+            fields[name] = outcome("unsupported", "no_valid_location")
         return fields
-    s_start, s_end = sentence_around(text, a, b)
-    sentence = text[s_start:s_end]
-    for name, value in given.items():
-        if name == "identifier":
-            raw, normalized = value["raw"], value["value"]
-            if squash(raw) != squash(located):
-                fields[name] = result("mismatch", "identifier_raw_differs_from_source")
-            elif re.sub(r"[\W_]", "", raw).casefold() != re.sub(r"[\W_]", "", normalized).casefold():
-                fields[name] = result("mismatch", "identifier_value_differs_from_source")
-            else:
-                fields[name] = result("match", span=(p_start + a, p_start + b))
-        elif name == "value":
-            fields[name] = check_number("value", value, located, p_start + a)
-        elif name == "unit":
-            canonical = CANONICAL.get(value.strip().casefold()) or (value.strip() if value.strip() in UNITS else None)
-            if canonical is None:
-                fields[name] = result("unsupported", "unit_not_in_table")
-                continue
-            number = numeric_tokens(given.get("value") or "")
-            spots = [s for s in number_spans(located) if number and s[2] == _value(number[0].rstrip("%"))]
-            if not spots:
-                fields[name] = result("unsupported", "unit_without_located_value")
-                continue
-            # a source number token carries its own "%" (26.7%): that is the unit written at the value
-            found = [("%", end - 1, end) if located[end - 1] == "%" else unit_at(located, end)
-                     for _, end, _ in spots]
-            if any(f and f[0] == canonical for f in found):
-                f = next(f for f in found if f and f[0] == canonical)
-                fields[name] = result("match", span=(p_start + a + f[1], p_start + a + f[2]))
-            elif any(found):
-                fields[name] = result("mismatch", "another_unit_at_value:" + next(f for f in found if f)[0])
-            else:
-                fields[name] = result("not_found", "no_unit_at_value")
-        elif name in ("denominator", "numerator"):
-            pairs, totals = stated_ratios(sentence)
-            if name == "denominator" and value.strip().casefold() == "unknown":
-                fields[name] = (result("mismatch", "denominator_stated_in_source") if pairs or totals
-                                else result("match", "no_denominator_stated"))
-                continue
-            tokens = numeric_tokens(value)
-            if len(tokens) != 1:
-                fields[name] = result("unsupported", f"{name}_not_a_single_number")
-                continue
-            wanted = _value(tokens[0])
-            side = [d for _, d in pairs] + totals if name == "denominator" else [n for n, _ in pairs]
-            if wanted in side:
-                fields[name] = result("match")
-            elif side:
-                fields[name] = result("mismatch", f"source_states_another_{name}")
-            elif any(v == wanted for _, _, v in number_spans(sentence)):
-                fields[name] = result("unsupported", f"{name}_relation_not_rule_checkable")
-            else:
-                fields[name] = result("not_found", f"{name}_not_in_sentence")
-        elif name == "period":
-            if squash(value).casefold().replace(" ", "") in squash(sentence).casefold().replace(" ", ""):
-                fields[name] = result("match")
-            elif DATE.search(value) and DATE.search(sentence):
-                fields[name] = result("mismatch", "source_states_another_period")
-            else:
-                fields[name] = result("not_found", "period_not_in_sentence")
-        elif name == "population":
-            fields[name] = (result("match") if squash(value).casefold() in squash(sentence).casefold()
-                            else result("not_found", "population_not_in_sentence"))
-        elif name == "label":
-            fields[name] = result("unsupported", "label_is_semantic")
+    f = item["fields"]
+    if item["kind"] == "measurement":
+        check_measurement(item, P, fields)
+    elif item["kind"] == "identifier":
+        field = f["identifier"]
+        text = P.text(field["span"])
+        if text is None or not P.inside(field["span"], item["locator"]):
+            fields["identifier"] = outcome("mismatch", "identifier_outside_quote")
+        elif squash(text) == squash(field["value"]):
+            fields["identifier"] = outcome("match", span=field["span"])
+        elif re.sub(r"[\W_]", "", text).casefold() == re.sub(r"[\W_]", "", field["value"]).casefold():
+            fields["identifier"] = outcome("unsupported", "normalized_form_not_verifiable_in_v1")
+        else:
+            fields["identifier"] = outcome("mismatch", "identifier_differs_from_span")
+    elif item["kind"] == "claim":
+        field = f["statement"]
+        text = P.text(field["span"])
+        fields["statement"] = (outcome("match", span=field["span"]) if text is not None
+                               and squash(text) == squash(field["value"]) else outcome("mismatch", "statement_differs_from_span"))
+        fields["polarity"] = outcome("unsupported", "polarity_is_semantic")
+        if f.get("qualifiers"):
+            fields["qualifiers"] = outcome("unsupported", "qualifiers_are_semantic")
+    elif item["kind"] == "annotation":
+        fields["label"] = outcome("unsupported", "annotation_judgement_is_semantic")
     return fields
 
 
@@ -236,15 +355,26 @@ def status(fields):
 
 
 def check(request):
-    """One request: every item checked against the one passage. Raises ContractError on a contract break."""
-    passage = request["passage"]
-    if passage["end"] - passage["start"] != len(passage["text"]):
-        raise ContractError("passage: end - start must equal the length of passage.text")
+    """Every item against the request's passages. Raises ContractError on a contract break."""
+    passages = request["passages"]
+    if len({p["id"] for p in passages}) != len(passages):
+        raise ContractError("passages: ids must be unique")
+    for p in passages:
+        if p["end"] - p["start"] != len(p["text"]):
+            raise ContractError(f"passages[{p['id']}]: end - start must equal the length of its text")
+    ordered = sorted(passages, key=lambda p: p["start"])
+    if any(a["end"] > b["start"] for a, b in zip(ordered, ordered[1:])):
+        raise ContractError("passages: ranges of one artifact must not overlap")
+    if sum(len(p["text"]) for p in passages) > 20000:
+        raise ContractError("passages: at most 20000 characters in all")
+    if not any(p["role"] == "primary" for p in passages):
+        raise ContractError("passages: one passage at least is the primary one")
     if len({i["id"] for i in request["items"]}) != len(request["items"]):
         raise ContractError("items: ids must be unique")
+    P = Passages(passages)
     items = []
     for item in request["items"]:
-        fields = check_item(item, passage)
+        fields = check_item(item, P)
         items.append({"id": item["id"], "kind": item["kind"], "status": status(fields), "fields": fields})
     counts = {s: sum(1 for i in items if i["status"] == s) for s in ("consistent", "inconsistent", "unchecked")}
     return {"contract_version": CONTRACT_VERSION, "checker_version": CHECKER_VERSION,

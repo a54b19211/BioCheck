@@ -1,6 +1,8 @@
-"""Extraction consistency (v3 6.2): the product corresponds to its passage or it does not; what the rules cannot
-decide stays unchecked. Texts are short real-shaped passages: an NMPA sampling-table row, a trial result
-sentence with a stated denominator, a registry identifier line."""
+"""Extraction consistency (v3 6.2): a product corresponds to its fixed passages field by field, each field at
+its own span and tied to the same quantity, or it does not; what the rules cannot prove stays unchecked.
+Texts are short real-shaped passages: an NMPA sampling table (header + row), trial result sentences."""
+import copy
+
 import pytest
 from conftest import FakeLLM
 from fastapi.testclient import TestClient
@@ -9,112 +11,165 @@ from app import extraction
 from app.service import create_app
 
 TOKEN = "test-token"
+SUBJECT = {"source_id": "nmpa", "record_id": "R1", "version_id": "v1", "raw_sha256": "a" * 64, "is_demo": True,
+           "artifact": {"processor_version": "datafabric.clean_text.v11", "text_sha256": "b" * 64}}
+HEADER = ("| 序号 | 药品品名 | 标示生产企业名称 | 药品规格 | 生产批号 | 检品来源 | 检验依据 | 检验结果 | 不合格项目 |\n"
+          "| ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- |")
 ROW = ("| 954 | 利巴韦林片 | 广东华南药业集团有限公司 | 100mg | 191003 | 广宁县医药有限公司 | "
        "《中国药典》2015年版二部 | 合格 | |")
-TRIAL = ("在入组的120例患者中，客观缓解32例（26.7%），中位随访12个月。"
-         "Of the adults enrolled, 32 of 120 responded by 2021-06-30.")
-REGISTRY = "Trial registration: ClinicalTrials.gov NCT 04165083; first posted 2019-11-18."
-SUBJECT = {"source_id": "nmpa", "record_id": "R1", "version_id": "v1", "raw_sha256": "a" * 64,
-           "artifact": {"processor_version": "datafabric.clean_text.v11", "text_sha256": "b" * 64}}
+CN = "在入组的120例患者中，客观缓解32例（26.7%），中位随访12个月。"
+AGES = "成人10人中2人有效；儿童100人中80人有效。"
 
 
-def request(text, *items, start=1000):
-    return {"subject": SUBJECT, "passage": {"start": start, "end": start + len(text), "text": text},
-            "items": list(items)}
+class Doc:
+    """Passages of one artifact at fixed offsets, and spans found by text (n-th occurrence)."""
+
+    def __init__(self, **texts):
+        self.passages, at = [], 1000
+        for i, (pid, text) in enumerate(texts.items()):
+            self.passages.append({"id": pid, "role": "primary" if i == len(texts) - 1 else "context",
+                                  "start": at, "end": at + len(text), "text": text})
+            at += len(text) + 500
+
+    def span(self, pid, piece, n=0, inside=None):
+        p = next(p for p in self.passages if p["id"] == pid)
+        at, lo = -1, 0
+        if inside:
+            lo = p["text"].index(inside)
+        for _ in range(n + 1):
+            at = p["text"].index(piece, max(lo, at + 1))
+        return {"passage": pid, "start": p["start"] + at, "end": p["start"] + at + len(piece)}
+
+    def field(self, pid, piece, n=0, value=None, inside=None):
+        return {"state": "stated", "value": value or piece, "span": self.span(pid, piece, n, inside)}
 
 
-def item(text, quote, kind="measurement", start=1000, occurrence=0, **fields):
-    at = -1
-    for _ in range(occurrence + 1):
-        at = text.index(quote, at + 1)
-    return {"id": f"i{at}", "kind": kind, "producer": {"name": "test", "version": "1"},
-            "locator": {"start": start + at, "end": start + at + len(quote)}, "quote": quote,
-            "fields": fields}
+UNKNOWN = {"state": "unknown"}
 
 
-def one(text, it):
-    out = extraction.check(request(text, it))
+def measurement(doc, pid, quote, kind="rate", **fields):
+    return {"id": "m1", "kind": "measurement", "producer": {"name": "test", "version": "1"},
+            "locator": doc.span(pid, quote), "quote": quote,
+            "fields": {"object": UNKNOWN, "metric": UNKNOWN, "unit": UNKNOWN, "period": UNKNOWN,
+                       "scope": UNKNOWN, "denominator": UNKNOWN, **fields, "measure_kind": kind}}
+
+
+def run(doc, *items):
+    out = extraction.check({"subject": SUBJECT, "passages": doc.passages, "items": list(items)})
     assert out["llm_calls"] == [] and out["checker_version"] == extraction.CHECKER_VERSION
-    return out["items"][0]
+    return out["items"]
 
 
-def test_a_correct_measurement_is_consistent_field_by_field():
-    got = one(ROW, item(ROW, "100mg", value="100", unit="mg"))
-    assert got["status"] == "consistent"
-    assert {k: v["result"] for k, v in got["fields"].items()} == {"locator": "match", "quote": "match",
-                                                                  "value": "match", "unit": "match"}
-    got = one(TRIAL, item(TRIAL, "客观缓解32例（26.7%）", value="26.7", unit="%", numerator="32", denominator="120"))
+def results(item):
+    return {k: v["result"] for k, v in item["fields"].items()}
+
+
+def test_a_percentage_tied_to_its_stated_ratio_is_consistent():
+    d = Doc(p=CN)
+    quote = "在入组的120例患者中，客观缓解32例（26.7%）"
+    m = measurement(d, "p", quote, object=d.field("p", "客观缓解"), metric=d.field("p", "客观缓解"),
+                    value=d.field("p", "26.7"), unit=d.field("p", "%"), scope=d.field("p", "患者"),
+                    denominator=d.field("p", "120"))
+    (got,) = run(d, m)
     assert got["status"] == "consistent", got
+    assert got["fields"]["denominator"]["reason"] == "percentage_of_stated_ratio"
 
 
-def test_wrong_number_unit_denominator_numerator_are_each_caught():
-    cases = [
-        (dict(value="10", unit="mg"), "value", "not_found"),
-        (dict(value="100", unit="g"), "unit", "mismatch"),             # 100 mg reported as 100 g
-        (dict(value="100", unit="mg/kg"), "unit", "mismatch"),
-    ]
-    for fields, name, expected in cases:
-        got = one(ROW, item(ROW, "100mg", **fields))
-        assert got["status"] == "inconsistent" and got["fields"][name]["result"] == expected, (fields, got)
-    got = one(TRIAL, item(TRIAL, "客观缓解32例（26.7%）", value="26.7", unit="%", denominator="100"))
-    assert got["fields"]["denominator"]["result"] == "mismatch" and got["status"] == "inconsistent"
-    got = one(TRIAL, item(TRIAL, "客观缓解32例（26.7%）", value="26.7", numerator="30"))
-    assert got["fields"]["numerator"]["result"] == "mismatch"
-    # "unknown" is only right when the source states no denominator
-    got = one(TRIAL, item(TRIAL, "32 of 120 responded", value="32", denominator="unknown"))
-    assert got["fields"]["denominator"] == {"result": "mismatch", "reason": "denominator_stated_in_source"}
-    got = one(ROW, item(ROW, "100mg", value="100", unit="mg", denominator="unknown"))
-    assert got["fields"]["denominator"]["result"] == "match" and got["status"] == "consistent"
+def test_fields_of_another_group_are_rejected_not_matched_by_the_sentence():
+    d = Doc(p=AGES)
+    wrong = measurement(d, "p", "成人10人中2人有效", kind="stock", value=d.field("p", "2"), unit=d.field("p", "人", n=2),
+                        denominator=d.field("p", "100"), scope=d.field("p", "儿童"))
+    wrong["locator"], wrong["quote"] = d.span("p", AGES.rstrip("。")), AGES.rstrip("。")
+    (got,) = run(d, wrong)
+    assert got["status"] == "inconsistent"
+    assert got["fields"]["denominator"]["reason"] == "the_value_has_another_denominator"
+    assert got["fields"]["scope"]["result"] == "unsupported"  # 儿童 is not in the value's clause
+    right = dict(wrong, fields=dict(wrong["fields"], denominator=d.field("p", "10"), scope=d.field("p", "成人")))
+    (got,) = run(d, right)
+    assert results(got)["denominator"] == results(got)["scope"] == results(got)["unit"] == "match"
+    assert got["status"] == "unchecked"  # measure_kind "stock" is beyond the rules: never "consistent"
 
 
-def test_wrong_locator_or_quote_is_caught_and_stops_the_field_checks():
-    good = item(ROW, "100mg", value="100", unit="mg")
-    shifted = dict(good, locator={"start": good["locator"]["start"] + 1, "end": good["locator"]["end"] + 1})
-    got = one(ROW, shifted)
-    assert got["status"] == "inconsistent" and got["fields"]["locator"]["result"] == "mismatch"
-    assert got["fields"]["quote"]["reason"] == "quote_elsewhere_in_passage"
-    assert got["fields"]["value"]["result"] == "unsupported"  # never read from a wrong place
-    edited = dict(good, quote="200mg")
-    got = one(ROW, edited)
-    assert got["fields"]["quote"] == {"result": "not_found", "reason": "quote_not_in_passage"}
-    outside = dict(good, locator={"start": 10, "end": 15})
-    got = one(ROW, outside)
-    assert got["fields"]["locator"]["reason"] == "locator_outside_passage" and got["status"] == "inconsistent"
+def test_a_table_value_is_tied_to_its_own_column_header():
+    d = Doc(h=HEADER, r=ROW)
+    base = dict(object=d.field("r", "利巴韦林片"), value=d.field("r", "100"), unit=d.field("r", "mg"))
+    good = measurement(d, "r", "100mg", kind="stock", metric=d.field("h", "药品规格"), **base)
+    (got,) = run(d, good)
+    assert got["fields"]["metric"] == {"result": "match", "reason": "header_of_value_column",
+                                       "span": d.span("h", "药品规格")}
+    assert got["fields"]["object"]["result"] == "match" and got["fields"]["unit"]["result"] == "match"
+    # "2015年版" in the row is a pharmacopoeia edition, not proof against an unknown period
+    assert got["fields"]["period"]["result"] == "unsupported"
+    wrong = measurement(d, "r", "100mg", kind="stock", metric=d.field("h", "生产批号"), **base)
+    (got,) = run(d, wrong)
+    assert got["fields"]["metric"]["reason"] == "header_of_another_column" and got["status"] == "inconsistent"
 
 
-def test_wrong_period_and_population_are_caught_literal_only():
-    base = item(TRIAL, "32 of 120 responded", value="32")
-    assert one(TRIAL, dict(base, fields=dict(value="32", period="2021-06-30")))["status"] == "consistent"
-    got = one(TRIAL, dict(base, fields=dict(value="32", period="2020-06-30")))
-    assert got["fields"]["period"]["result"] == "mismatch" and got["status"] == "inconsistent"
-    assert one(TRIAL, dict(base, fields=dict(value="32", population="adults")))["status"] == "consistent"
-    got = one(TRIAL, dict(base, fields=dict(value="32", population="children")))
-    assert got["fields"]["population"]["result"] == "not_found" and got["status"] == "inconsistent"
+def test_wrong_value_unit_and_unstated_unit_are_caught_exactly():
+    d = Doc(r=ROW)
+    (got,) = run(d, measurement(d, "r", "100mg", value=d.field("r", "100", value="10")))
+    assert got["fields"]["value"]["reason"] == "value_differs_from_span"
+    (got,) = run(d, measurement(d, "r", "100mg", value=d.field("r", "100", value="100.0")))
+    assert got["fields"]["value"]["result"] == "match"  # the same number, written exactly
+    (got,) = run(d, measurement(d, "r", "100mg", value=d.field("r", "100"), unit=d.field("r", "mg", value="g")))
+    assert got["fields"]["unit"]["result"] == "mismatch" and got["status"] == "inconsistent"
+    (got,) = run(d, measurement(d, "r", "100mg", value=d.field("r", "100")))  # unit said unknown
+    assert got["fields"]["unit"]["reason"] == "unit_written_at_value:mg"
+    d2 = Doc(p="首剂2 mg，之后2 mg/kg维持。")
+    (got,) = run(d2, measurement(d2, "p", "2 mg/kg", value=d2.field("p", "2", n=1), unit=d2.field("p", "mg")))
+    assert got["fields"]["unit"]["result"] == "mismatch"  # the first "mg", not the unit at this number
 
 
-def test_what_rules_cannot_decide_is_unchecked_never_consistent():
-    got = one(ROW, item(ROW, "100mg", value="100", unit="片剂规格单位"))
-    assert got["fields"]["unit"]["reason"] == "unit_not_in_table" and got["status"] == "unchecked"
-    got = one(TRIAL, item(TRIAL, "在入组的120例患者中", kind="claim", label="efficacy"))
-    assert got["fields"]["label"]["result"] == "unsupported" and got["status"] == "unchecked"
-    got = one(ROW, item(ROW, "100mg", value="约一百"))
-    assert got["status"] == "unchecked"
+def test_denominators_only_from_this_numbers_ratio():
+    d = Doc(p="Of the adults enrolled, 32 of 120 responded by 2021-06-30.")
+    (got,) = run(d, measurement(d, "p", "32 of 120 responded", value=d.field("p", "32")))
+    assert got["fields"]["denominator"]["reason"] == "the_value_has_a_stated_denominator"
+    (got,) = run(d, measurement(d, "p", "32 of 120 responded", value=d.field("p", "32"),
+                                denominator=d.field("p", "120"), period=d.field("p", "2021-06-30"),
+                                scope=d.field("p", "adults")))
+    assert results(got)["denominator"] == results(got)["period"] == results(got)["scope"] == "match"
+    d2 = Doc(p="截至2021/6/30，报告32例。")
+    (got,) = run(d2, measurement(d2, "p", "报告32例", value=d2.field("p", "32")))
+    assert got["fields"]["denominator"]["result"] == "match"  # a slash date is no ratio
+    d3 = Doc(p="每日剂量20 mg/day，连续给药。")
+    (got,) = run(d3, measurement(d3, "p", "20 mg/day", value=d3.field("p", "20"), unit=d3.field("p", "mg/day")))
+    assert results(got)["unit"] == results(got)["denominator"] == "match"  # mg/day is a unit, not a ratio
 
 
-def test_identifier_raw_and_normalized_value_are_compared_not_reparsed():
-    good = item(REGISTRY, "NCT 04165083", kind="identifier",
-                identifier={"scheme": "nct", "raw": "NCT 04165083", "value": "NCT04165083"})
-    assert one(REGISTRY, good)["status"] == "consistent"
-    wrong = dict(good, fields={"identifier": {"scheme": "nct", "raw": "NCT 04165083", "value": "NCT04165038"}})
-    got = one(REGISTRY, wrong)
-    assert got["fields"]["identifier"]["reason"] == "identifier_value_differs_from_source"
+def test_a_wrong_locator_or_edited_quote_reads_no_field():
+    d = Doc(r=ROW)
+    good = measurement(d, "r", "100mg", value=d.field("r", "100"), unit=d.field("r", "mg"))
+    shifted = copy.deepcopy(good)
+    shifted["locator"]["start"] += 1
+    shifted["locator"]["end"] += 1
+    (got,) = run(d, shifted)
+    assert got["fields"]["locator"]["reason"] == "quote_elsewhere_in_passages" and got["status"] == "inconsistent"
+    assert got["fields"]["value"]["result"] == "unsupported"
+    (got,) = run(d, dict(good, quote="200mg"))
+    assert got["fields"]["locator"]["reason"] == "quote_not_in_passages"
 
 
-def test_a_slash_date_is_not_a_denominator():
-    text = "截至2021/6/30，共报告病例32例。"
-    got = one(text, item(text, "共报告病例32例", value="32", denominator="unknown"))
-    # "共" states a total only with a number right after it; the date must not count as n/N
-    assert got["fields"]["denominator"]["result"] == "match", got
+def test_identifiers_only_as_written_claims_and_annotations_stay_unchecked():
+    d = Doc(p="Trial registration: ClinicalTrials.gov NCT 04165083; first posted 2019-11-18.")
+    ident = {"id": "i1", "kind": "identifier", "producer": {"name": "identifiers", "version": "v2"},
+             "locator": d.span("p", "NCT 04165083"), "quote": "NCT 04165083",
+             "fields": {"scheme": "nct", "identifier": d.field("p", "NCT 04165083")}}
+    normalized = copy.deepcopy(ident)
+    normalized["fields"]["identifier"]["value"] = "NCT04165083"
+    wrong = copy.deepcopy(ident)
+    wrong["fields"]["identifier"]["value"] = "NCT 04165038"
+    claim = {"id": "c1", "kind": "claim", "producer": {"name": "x", "version": "1"},
+             "locator": d.span("p", "first posted 2019-11-18"), "quote": "first posted 2019-11-18",
+             "fields": {"statement": d.field("p", "first posted 2019-11-18"), "polarity": "affirmed"}}
+    note = {"id": "a1", "kind": "annotation", "producer": {"name": "profile", "version": "v5"},
+            "locator": d.span("p", "Trial registration"), "quote": "Trial registration",
+            "fields": {"label": "human"}}
+    got = {i["id"]: i for i in run(d, ident, dict(normalized, id="i2"), dict(wrong, id="i3"), claim, note)}
+    assert got["i1"]["status"] == "consistent"
+    assert got["i2"]["fields"]["identifier"]["reason"] == "normalized_form_not_verifiable_in_v1"
+    assert got["i2"]["status"] == "unchecked" and got["i3"]["status"] == "inconsistent"
+    assert got["c1"]["status"] == "unchecked" and got["c1"]["fields"]["polarity"]["result"] == "unsupported"
+    assert got["a1"]["status"] == "unchecked"
 
 
 @pytest.fixture
@@ -124,24 +179,36 @@ def http(monkeypatch):
     return TestClient(create_app(llm)), llm
 
 
-def auth():
-    return {"Authorization": "Bearer " + TOKEN}
-
-
 def test_http_contract_is_strict_and_calls_no_model(http):
     client, llm = http
-    body = request(ROW, item(ROW, "100mg", value="100", unit="mg"))
-    response = client.post("/v1/extraction-consistency", json=body, headers=auth())
-    assert response.status_code == 200 and response.json()["items"][0]["status"] == "consistent"
-    assert response.json()["contract_version"] == "extraction_consistency.v1" and llm.payloads == []
-    for broken in (
-        dict(body, extra_field=1),                                              # unknown top-level field
-        dict(body, items=[dict(body["items"][0], fields={"value": "100", "dose": "x"})]),  # unknown field
-        dict(body, items=[dict(body["items"][0], kind="identifier")]),          # identifier without it
-        dict(body, items=[dict(body["items"][0], kind="annotation")]),          # fields not allowed for kind
-        dict(body, passage=dict(body["passage"], end=body["passage"]["end"] + 1)),  # range != text
-        dict(body, items=[]),
+    auth = {"Authorization": "Bearer " + TOKEN}
+    d = Doc(h=HEADER, r=ROW)
+    item = measurement(d, "r", "100mg", kind="stock", object=d.field("r", "利巴韦林片"),
+                       metric=d.field("h", "药品规格"), value=d.field("r", "100"), unit=d.field("r", "mg"))
+    body = {"subject": SUBJECT, "passages": d.passages, "items": [item]}
+    response = client.post("/v1/extraction-consistency", json=body, headers=auth)
+    assert response.status_code == 200 and llm.payloads == []
+    assert response.json()["contract_version"] == "extraction_consistency.v1"
+
+    def broken(change):
+        b = copy.deepcopy(body)
+        change(b)
+        return b
+
+    for b in (
+        broken(lambda b: b.update(extra=1)),
+        broken(lambda b: b["subject"].pop("is_demo")),
+        broken(lambda b: b["items"][0]["fields"].pop("scope")),                          # a dimension left out
+        broken(lambda b: b["items"][0]["fields"].update(dose={"state": "unknown"})),      # unknown field
+        broken(lambda b: b["items"][0]["fields"]["unit"].pop("span")),                    # stated without span
+        broken(lambda b: b["items"][0]["fields"].update(scope={"state": "unknown", "value": "x"})),
+        broken(lambda b: b["items"][0].update(kind="identifier")),                        # fields of another kind
+        broken(lambda b: b["passages"][0].update(end=b["passages"][0]["end"] + 1)),       # range != text
+        broken(lambda b: b["passages"][1].update(start=b["passages"][0]["start"] + 5,
+                                                 end=b["passages"][0]["start"] + 5 + len(ROW))),  # overlap
+        broken(lambda b: b["items"][0]["fields"]["value"]["span"].update(passage="zz")),  # no such passage
+        broken(lambda b: b.update(items=[])),
     ):
-        response = client.post("/v1/extraction-consistency", json=broken, headers=auth())
-        assert response.status_code == 400 and response.json()["error_code"] == "invalid_request", broken
+        response = client.post("/v1/extraction-consistency", json=b, headers=auth)
+        assert response.status_code == 400 and response.json()["error_code"] == "invalid_request", b
     assert client.post("/v1/extraction-consistency", json=body).status_code == 401
