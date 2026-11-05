@@ -19,7 +19,10 @@ CONTRACT_VERSION = "extraction_consistency.v2"
 # v5 (Codex r135): exactness needs positive evidence; only the nearest effective heading may supply a field and
 # any effective heading may restrict an object total; kind evidence, ratios and units belong to the value's own
 # group; a unit span must be the whole recognized unit and "no unit" needs nothing but punctuation after it.
-CHECKER_VERSION = "biocheck.extraction_rules.v5"
+# v6 (Codex r136): the value's group is covered by the item's own fields (no qualifier left outside the metric);
+# prefixes, suffixes and "no unit" are read over the bounded sentence, never a fixed short window; comparators are
+# whole phrases with their negation; a percentage takes only a ratio written right next to it.
+CHECKER_VERSION = "biocheck.extraction_rules.v6"
 FIELDS = ("object", "metric", "value", "unit", "period", "scope", "denominator", "measure_kind", "qualifier",
           "modality")
 CANONICAL_DECIMAL = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?")
@@ -44,18 +47,21 @@ RESTRICTION = re.compile(r"其中|包括|除|以外|不含|部分|省|市|地区
 DEICTIC = re.compile(r"^(?:我国|本国|本省|本市|本院|我院|该|此|这|our\b|this\b|these\b|the country\b)", re.IGNORECASE)
 CHANGE = re.compile(r"(?:下降|增长|上升|减少|提高|降低|增加|同比|环比|\bincreased?\b|\bdecreased?\b|\brose\b|\bfell\b|"
                     r"\bup\b|\bdown\b)\s*(?:了|by)?\s*$", re.IGNORECASE)
-APPROX_BEFORE = re.compile(r"(?:约|近|逾|超过|不少于|至少|小于|少于|低于|不到|不足|未满|大于|多于|高于|≤|＜|<|≥|＞|>|"
-                           r"\b(?:approximately|about|nearly|over|more than|at least|up to|less than|fewer than|"
-                           r"under|below|greater than|above)\b)\s*$", re.IGNORECASE)
 # exactness is proven, not presumed: what may stand right before an exact value (besides the start of its group
 # or the end of one of the item's own field spans) - a closed list of neutral connectors
 CN_CONNECT = set("共为是有达计了：:，,、（( |")
 EN_CONNECT = {"of", "total", "is", "was", "were", "are", "reached", "reported", "recorded", "had", "has", "have",
               "been", "with", "at", "in", "from", "and", "were", "registered", "confirmed", "notified"}
-# suffix forms that bound or round a value (a closed grammatical class)
-BOUND_AFTER = re.compile(r"^\s*(?:余|多|左右|上下|以上|以下|以内|之多|不等|\+|or more\b|or fewer\b|or less\b|plus\b)",
-                         re.IGNORECASE)
+# "no unit" is proven only by punctuation or the end of the sentence after the number (whitespace skipped)
 NO_UNIT_AFTER = re.compile(r"^\s*(?:$|[，。；;,.!?！？)）\]】|/])")
+# the quantity's own phrase must be covered by the item's fields (versioned word lists):
+# - English: from the value (its unit) to the first auxiliary verb - prepositions and articles may join the
+#   fields, an event verb only after the metric (a predicate, not a case definition between value and metric);
+# - Chinese: the whole value group, only these function characters outside the fields.
+GLUE = {"of", "in", "at", "on", "the", "a", "an", "and", "from", "with", "among", "for", "to", "by"}
+AUX = re.compile(r"\b(?:had|has|have|was|were|is|are|been|be)\b", re.IGNORECASE)
+CN_FUNCTION = set("共有为是达计了的已被中")
+CJK = re.compile(r"[一-鿿]")
 QUALIFIER_OF = {"约": "approximate", "近": "approximate", "左右": "approximate", "approximately": "approximate",
                 "about": "approximate", "nearly": "approximate", "逾": "more_than", "超过": "more_than",
                 "over": "more_than", "more than": "more_than", "余": "more_than", "多": "more_than",
@@ -67,7 +73,28 @@ QUALIFIER_OF = {"约": "approximate", "近": "approximate", "左右": "approxima
                 "greater than": "more_than", "above": "more_than", "≥": "at_least",
                 "以上": "at_least", "以下": "at_most", "以内": "at_most", "上下": "approximate", "之多": "more_than",
                 "不等": "approximate", "+": "at_least", "or more": "at_least", "or fewer": "at_most",
-                "or less": "at_most", "plus": "at_least"}
+                "or less": "at_most", "plus": "at_least",
+                # negated comparators are whole phrases of their own (不超过 is an upper bound, not 超过)
+                "不超过": "at_most", "未超过": "at_most", "不多于": "at_most", "不高于": "at_most", "不大于": "at_most",
+                "不低于": "at_least", "不小于": "at_least", "not more than": "at_most", "no more than": "at_most",
+                "not exceeding": "at_most", "not less than": "at_least", "no less than": "at_least",
+                "not fewer than": "at_least", "no fewer than": "at_least"}
+AFTER_MARKERS = ("余", "多", "左右", "上下", "以上", "以下", "以内", "之多", "不等", "+", "or more", "or fewer",
+                 "or less", "plus")
+
+
+def _phrases(words):
+    """An alternation of whole phrases, longest first, ASCII words bounded."""
+    out = []
+    for w in sorted(words, key=len, reverse=True):
+        e = re.escape(w)
+        out.append(rf"\b{e}\b" if re.fullmatch(r"[A-Za-z ]+", w) else e)
+    return "|".join(out)
+
+
+BEFORE = re.compile(r"(?:" + _phrases([k for k in QUALIFIER_OF if k not in AFTER_MARKERS]) + r")$", re.IGNORECASE)
+NEGATION = re.compile(r"(?:不|未|没|非|\bnot|\bno|\bnever)\s*$", re.IGNORECASE)
+ADJACENT = set(" （）()[]【】%％")  # all that may stand between a percentage and the ratio it states
 PLANNED = re.compile(r"计划|拟|目标|将|\b(?:plan(?:ned|s)?|target(?:ed)?)\b", re.IGNORECASE)
 PROJECTED = re.compile(r"预计|预测|预期|\b(?:expected|projected|forecast)\b", re.IGNORECASE)
 LIST_SEPARATOR = re.compile(r"、|,|，|\band\b|/|&")
@@ -281,6 +308,14 @@ def unit_after(text, pos):
     return None
 
 
+def next_to(ptext, pbase, ratio, vspan):
+    """The ratio is written right next to the percentage - 26% (5/19), 23 of 26 (88%) - with nothing but
+    spaces, brackets or the percent sign in between: a ratio elsewhere in the group may be another population's."""
+    a, b = min(ratio[0], ratio[3]), max(ratio[1], ratio[4])
+    between = ptext[b - pbase:vspan["start"] - pbase] if b <= vspan["start"] else ptext[vspan["end"] - pbase:a - pbase]
+    return set(between) <= ADJACENT
+
+
 def own_place(L, P, span, vspan, partners, exclude):
     """Where a field span stands to the value: "group" (its group, no other quantity), "before" (same sentence,
     before the value, no other quantity in between), "heading" (an effective ancestor heading), or why not."""
@@ -350,7 +385,7 @@ def check_v4(item, P):
     else:
         if at_value:
             fields["unit"] = outcome("mismatch", "unit_written_at_value:" + at_value[0])
-        elif NO_UNIT_AFTER.match(ptext[after:after + 3]):
+        elif NO_UNIT_AFTER.match(ptext[after:L.end - pbase]):  # the rest of the sentence, whitespace skipped
             fields["unit"] = outcome("match", "no_unit_at_value")  # only punctuation follows the number
         else:
             fields["unit"] = outcome("unsupported", "unrecognized_text_after_value")  # not proven unitless
@@ -367,7 +402,8 @@ def check_v4(item, P):
         if dtext is None or v3.number(dtext) is None or v3.number(dtext) != Decimal(den["value"]):
             fields["denominator"] = outcome("mismatch", "denominator_differs_from_span")
         elif any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in mine) or (
-                percent_written and any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in own_ratios)):
+                percent_written and any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"])
+                                        and next_to(ptext, pbase, r, vspan) for r in own_ratios)):
             fields["denominator"] = outcome("match", span=den["span"])
             for r in own_ratios:
                 if (r[3], r[4]) == (den["span"]["start"], den["span"]["end"]):
@@ -477,6 +513,45 @@ def check_v4(item, P):
                                       {"passage": L.pid, "start": L.g_start + total.start(), "end": L.g_start + total.end()})
     else:
         fields["scope"] = outcome("unsupported", "scope_not_determined")
+    # the quantity's own phrase is covered by the item's fields: a qualifier left out of the metric
+    # (suspected, in humans, 批准注册) changes what is counted, so the metric does not hold
+    if fields["metric"]["result"] == "match":
+        cover = [vspan] + [x["span"] for x in (f["object"], f["metric"], f["scope"], f["unit"]) if v3.stated(x)]
+        cover += ([pf["span"]] if v3.stated(pf) else []) + ([den["span"]] if v3.stated(den) else []) + partners
+        # words whose meaning a checked field carries count as covered: the cumulative marker of a claimed
+        # cumulative, the plan / forecast word of a claimed modality, the comparator of a claimed qualifier
+        # (a wrong claim fails that field); event verbs never do - they belong in the metric
+        markers = []
+        if f["measure_kind"] == "cumulative":
+            markers.append(CUMULATIVE)
+        if f["modality"] != "actual":
+            markers += [PLANNED, PROJECTED]
+        if f["qualifier"] != "exact":
+            markers.append(re.compile(_phrases(list(QUALIFIER_OF)), re.IGNORECASE))
+        for pattern in markers:
+            for m in pattern.finditer(ptext, L.g_start - pbase, L.g_end - pbase):
+                cover.append({"start": pbase + m.start(), "end": pbase + m.end()})
+
+        def covered(pos):
+            return any(c["start"] <= pos < c["end"] for c in cover)
+
+        gtext = ptext[L.g_start - pbase:L.g_end - pbase]
+        left_out = []
+        if CJK.search(gtext):
+            left_out = [ch for i, ch in enumerate(gtext)
+                        if CJK.match(ch) and ch not in CN_FUNCTION and not covered(L.g_start + i)]
+        else:
+            aux = AUX.search(ptext, vspan["end"] - pbase, L.g_end - pbase)
+            zone_end = pbase + aux.start() if aux else L.g_end
+            metric_end = f["metric"]["span"]["end"]
+            for w in re.finditer(r"[A-Za-z][A-Za-z-]*", ptext[vspan["end"] - pbase:zone_end - pbase]):
+                pos = vspan["end"] + w.start()
+                word = w.group(0).lower()
+                if covered(pos) or word in GLUE or (pos >= metric_end and EVENT.fullmatch(word)):
+                    continue
+                left_out.append(w.group(0))
+        if left_out:
+            fields["metric"] = outcome("unsupported", "quantity_words_outside_the_fields:" + " ".join(left_out)[:60])
     # measure kind
     kind = f["measure_kind"]
     sentence, vgroup = L.text(), L.text(L.g_start, L.g_end)
@@ -521,18 +596,22 @@ def check_v4(item, P):
     # what stands right before the value is the start of its group, the end of one of the item's own field spans
     # or a neutral connector, and no bounding suffix follows it
     rel = vspan["start"] - pbase
-    left = ptext[max(0, rel - 16):rel]
+    left = ptext[L.g_start - pbase:rel].rstrip()  # from the group's start, whitespace before the value skipped
     right_at = at_value[2] if at_value else after
-    right = ptext[right_at:right_at + 8]
-    marks = []
-    m = APPROX_BEFORE.search(left)
+    right = ptext[right_at:L.end - pbase].lstrip()  # to the sentence's end, whitespace after the value skipped
+    marks, negated = [], False
+    m = BEFORE.search(left)
     if m:
         marks.append(QUALIFIER_OF[squash(m.group(0)).lower()])
-    m = BOUND_AFTER.match(right)
-    if m:
-        marks.append(QUALIFIER_OF[squash(m.group(0)).lower()])
+        negated = bool(NEGATION.search(left[:m.start()]))  # 不 / not before a phrase this list does not hold
+    for marker in sorted(AFTER_MARKERS, key=len, reverse=True):
+        if right.lower().startswith(marker):
+            marks.append(QUALIFIER_OF[marker])
+            break
     want = f["qualifier"]
-    if marks:
+    if negated:
+        fields["qualifier"] = outcome("unsupported", "negated_comparator_not_supported")
+    elif marks:
         fields["qualifier"] = (outcome("match", "qualifier_marker") if want in marks
                                else outcome("mismatch", "value_is_qualified:" + marks[0]))
     elif want != "exact":

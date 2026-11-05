@@ -260,9 +260,13 @@ def test_a_total_word_alone_is_not_cumulation(client):
 
 def test_table_header_of_the_value_column(client):
     text = ("2026年4月医疗器械批准情况\n| 类别 | 批准注册产品数 |\n| --- | --- |\n| 境内第三类 | 318 |\n")
-    f = fields_for(text, "318", "", "", None, metric="批准注册产品数")
+    f = fields_for(text, "318", "", "", None, metric="批准注册产品数", scope="境内第三类")
     item = answer(client, synthetic(text, "318", f))
     assert item["fields"]["metric"]["reason"] == "header_of_value_column"
+    # the row's category left out of every field is a qualifier the item would lose
+    bare = fields_for(text, "318", "", "", None, metric="批准注册产品数")
+    assert answer(client, synthetic(text, "318", bare))["fields"]["metric"]["reason"].startswith(
+        "quantity_words_outside_the_fields")
     two = text + "\n| 类别 | 注销产品数 |\n| --- | --- |\n| 境内第三类 | 9 |\n"
     g = fields_for(two, "9", "", "", None, metric="批准注册产品数")
     assert answer(client, synthetic(two, "9 |", g))["fields"]["metric"]["result"] == "mismatch"
@@ -340,7 +344,11 @@ def test_a_heading_may_restrict_an_object_total(client, heading):
 
 def test_a_heading_naming_the_object_does_not_restrict_its_total(client):
     text = "# 国家药监局\n\n2026年4月，国家药监局共批准注册医疗器械产品318个。\n"
-    assert answer(client, cn(text))["status"] == "consistent"
+    body = cn(text)
+    body["items"][0]["fields"]["object"]["span"] = at(text, "国家药监局", 1)  # the body's object, not the heading's
+    assert answer(client, body)["status"] == "consistent"
+    # the heading's occurrence as the object leaves the body's 国家药监局 outside every field
+    assert answer(client, cn(text))["fields"]["metric"]["reason"].startswith("quantity_words_outside_the_fields")
 
 
 def test_an_event_said_of_another_object_proves_no_flow(client):
@@ -382,3 +390,72 @@ def test_unrecognized_words_after_a_value_prove_no_unitlessness(client):
     f = fields_for(text, "42", "", "September 2022 to January 2023", period, obj="WHO", metric="EVD cases", scope="Beni")
     item = answer(client, synthetic(text, text, f))
     assert item["fields"]["unit"]["result"] != "match" and item["status"] != "consistent"
+
+
+# ---- Codex r136 (checker v6): the quantity phrase is covered, comparators are whole, ratios adjacent -------------
+
+@pytest.mark.parametrize("metric", ["cases of anthrax in humans", "suspected cases of anthrax", "cases"])
+def test_s19_metric_must_keep_every_qualifier(client, metric):
+    body = request_of(ROWS["S19"])
+    passage = body["passages"][0]
+    pos = passage["text"].index(metric, passage["text"].index("42 suspected"))
+    body["items"][0]["fields"]["metric"] = {"state": "stated", "value": metric,
+                                            "span": {"passage": "p1", "start": passage["start"] + pos,
+                                                     "end": passage["start"] + pos + len(metric)}}
+    item = answer(client, body)
+    assert item["status"] != "consistent" and item["fields"]["metric"]["result"] == "unsupported"
+
+
+def test_chinese_metric_must_keep_its_verbs(client):
+    text = "2026年4月，国家药监局共批准注册医疗器械产品318个。"
+    item = answer(client, cn(text, metric="医疗器械产品"))
+    assert item["fields"]["metric"]["reason"].startswith("quantity_words_outside_the_fields")
+
+
+@pytest.mark.parametrize("gap", ["    ", "　　"])
+def test_whitespace_never_hides_what_follows_a_value(client, gap):
+    text = f"2026年4月，国家药监局共批准注册医疗器械产品318个{gap}以下。"
+    assert answer(client, cn(text))["fields"]["qualifier"]["result"] == "mismatch"
+    en = f"From September 2022 to January 2023, WHO reported 42{gap}EVD cases in Beni."
+    period = {"type": "interval", "precision": "month", "start": "2022-09", "end": "2023-01"}
+    f = fields_for(en, "42", "", "September 2022 to January 2023", period, obj="WHO", metric="EVD cases", scope="Beni")
+    assert answer(client, synthetic(en, en, f))["fields"]["unit"]["result"] != "match"
+
+
+@pytest.mark.parametrize("phrase,qualifier", [("不超过", "at_most"), ("不少于", "at_least"), ("不低于", "at_least"),
+                                              ("未超过", "at_most")])
+def test_a_negated_comparator_is_one_phrase(client, phrase, qualifier):
+    text = f"2026年4月，国家药监局共批准注册医疗器械产品{phrase}318个。"
+    right = cn(text)
+    right["items"][0]["fields"]["qualifier"] = qualifier
+    assert answer(client, right)["fields"]["qualifier"]["result"] == "match"
+    wrong = cn(text)
+    wrong["items"][0]["fields"]["qualifier"] = "more_than" if qualifier == "at_most" else "less_than"
+    assert answer(client, wrong)["fields"]["qualifier"]["result"] == "mismatch"
+
+
+def test_a_negation_before_an_unlisted_comparator_is_unsupported(client):
+    text = "2026年4月，国家药监局共批准注册医疗器械产品并非超过318个。"
+    body = cn(text)
+    body["items"][0]["fields"]["qualifier"] = "more_than"
+    assert answer(client, body)["fields"]["qualifier"]["reason"] == "negated_comparator_not_supported"
+
+
+def test_a_ratio_of_another_population_in_the_same_group_is_no_denominator(client):
+    text = "2026年4月，WHO报告甲组2/10而儿童阳性比例80%。"
+    body = cn(text, value="80", unit="%", obj="WHO", metric="阳性比例", scope="儿童", kind="rate")
+    body["items"][0]["fields"]["denominator"] = {"state": "stated", "value": "10", "span": at(text, "10")}
+    assert answer(client, body)["fields"]["denominator"]["result"] != "match"
+
+
+def test_a_marker_of_a_claimed_kind_is_covered_but_an_event_verb_is_not(client):
+    text = "截至2020年12月31日，药审中心累计发布药品审评技术指导原则272个。"
+    period = {"type": "point", "precision": "day", "value": "2020-12-31"}
+    f = fields_for(text, "272", "个", "截至2020年12月31日", period, kind="cumulative", obj="药审中心",
+                   metric="发布药品审评技术指导原则", mode="unknown")
+    item = answer(client, synthetic(text, "药审中心累计发布药品审评技术指导原则272个", f))
+    assert item["fields"]["metric"]["result"] == "match" and item["fields"]["measure_kind"]["result"] == "match"
+    g = fields_for(text, "272", "个", "截至2020年12月31日", period, kind="cumulative", obj="药审中心",
+                   metric="药品审评技术指导原则", mode="unknown")
+    item = answer(client, synthetic(text, "药审中心累计发布药品审评技术指导原则272个", g))
+    assert item["fields"]["metric"]["reason"].startswith("quantity_words_outside_the_fields")
