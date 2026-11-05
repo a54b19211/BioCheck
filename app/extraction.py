@@ -10,13 +10,13 @@ clause), and a table metric's header must head the value's column. Whatever the 
 "unsupported", which makes the item "unchecked", never "consistent"."""
 
 import re
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 
 from .claims import DATE, TIMESTAMP
 
 CONTRACT_VERSION = "extraction_consistency.v1"
 # Bump whenever a rule, the unit table, the number conversions or the clause rule below changes.
-CHECKER_VERSION = "biocheck.extraction_rules.v2"  # v2: whole numbers, same table, groups, rate evidence
+CHECKER_VERSION = "biocheck.extraction_rules.v3"  # v3: numbers bounded to MAX_DIGITS (Codex r107)
 
 # Units the rules know, canonical -> spellings. The longest spelling wins at a position ("mg/kg" is never "mg",
 # "mg/day" is no ratio). A unit not listed here is "unsupported", never guessed.
@@ -84,11 +84,16 @@ def outcome(kind, reason="", span=None):
     return out
 
 
+MAX_DIGITS = 18  # numbers with more significant digits are beyond these rules: unsupported, never approximated
+
+
 def number(text):
     """A written number as a Decimal: only full-width digits and thousands separators are converted
-    (versioned with CHECKER_VERSION); anything else is not a number here."""
+    (versioned with CHECKER_VERSION); anything else, or more than MAX_DIGITS digits, is not a number here."""
     t = squash(text).translate(FULLWIDTH).replace("−", "-")
     if not re.fullmatch(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?", t):
+        return None
+    if sum(c.isdigit() for c in t) > MAX_DIGITS:
         return None
     try:
         return Decimal(t.replace(",", ""))
@@ -241,7 +246,9 @@ def check_measurement(item, P, fields):
     if stated(den):
         dtext = P.text(den["span"])
         wanted = number(den["value"])
-        if dtext is None or wanted is None or number(dtext) != wanted:
+        if dtext is not None and (wanted is None or number(dtext) is None):
+            fields["denominator"] = outcome("unsupported", "denominator_not_a_supported_number")
+        elif dtext is None or number(dtext) != wanted:
             fields["denominator"] = outcome("mismatch", "denominator_differs_from_span")
         elif any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in mine):
             fields["denominator"] = outcome("match", span=den["span"])
@@ -251,8 +258,12 @@ def check_measurement(item, P, fields):
             # a percentage of a ratio stated in the same clause: n/N*100 rounded to the digits shown
             shown = number(vtext)
             places = max(0, -shown.as_tuple().exponent)
-            fits = [r for r in ratios if (r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) and r[5]
-                    and (r[2] / r[5] * 100).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP) == shown]
+            # numbers are bounded by MAX_DIGITS, so a 60-digit context computes n/N*100 exactly enough
+            with localcontext() as ctx:
+                ctx.prec = 60
+                fits = [r for r in ratios if (r[3], r[4]) == (den["span"]["start"], den["span"]["end"])
+                        and r[2] is not None and r[5]
+                        and (r[2] / r[5] * 100).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP) == shown]
             fields["denominator"] = (outcome("match", "percentage_of_stated_ratio", den["span"]) if fits
                                      else outcome("mismatch", "percentage_does_not_follow_from_ratio")
                                      if any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in ratios)

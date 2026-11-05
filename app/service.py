@@ -200,13 +200,25 @@ class MeasurementFields(Strict):
 
 class IdentifierFields(Strict):
     scheme: str = Field(min_length=1, max_length=40)
-    identifier: FieldValue
+    identifier: FieldValue  # must be stated: an identifier item without its identifier checks nothing
+
+    @model_validator(mode="after")
+    def identifier_is_stated(self):
+        if self.identifier.state != "stated":
+            raise ValueError("an identifier item states its identifier (value and span)")
+        return self
 
 
 class ClaimFields(Strict):
-    statement: FieldValue
+    statement: FieldValue  # must be stated, as above
     polarity: Literal["affirmed", "negated", "uncertain"]
     qualifiers: list[str] = Field([], max_length=10)
+
+    @model_validator(mode="after")
+    def statement_is_stated(self):
+        if self.statement.state != "stated":
+            raise ValueError("a claim item states its statement (value and span)")
+        return self
 
 
 class AnnotationFields(Strict):

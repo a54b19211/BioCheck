@@ -139,12 +139,13 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
   - `not_found`：原文里找不到；
   - `unsupported`：规则证明不了。
 - 条目状态：所有字段都是 `match` 才算 `consistent`；只要有 `mismatch` 或 `not_found`，就是 `inconsistent`；其余（含任何 `unsupported`）都是 `unchecked`。`unchecked` 不能当作已检查通过。
+- 数字最多支持 18 位有效数字，超出的记 `unsupported`，不做近似。
 - 改动任何规则、单位表或转换时，必须同时提升 `checker_version`。
 
 返回：
 
 ```json
-{"contract_version": "extraction_consistency.v1", "checker_version": "biocheck.extraction_rules.v2",
+{"contract_version": "extraction_consistency.v1", "checker_version": "biocheck.extraction_rules.v3",
  "subject": {…},
  "items": [{"id": "m1", "kind": "measurement", "status": "unchecked",
             "fields": {"locator": {"result": "match", "span": {…}},
