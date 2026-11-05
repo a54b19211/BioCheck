@@ -116,7 +116,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
                        "denominator": {"state": "not_applicable"}, "measure_kind": "stock"}}]}
 ```
 
-- `passages`：同一份固定产物里有界的几段原文（最多 8 段，合计不超过 2 万字），各自用产物的绝对偏移。不能把不连续的几段拼接成一个伪造的连续区间。表头和数据行分在两段时，证明不了是同一张表，列名会记 `unsupported`；要核对列名，需要把表头和这一行放进同一段（各段合计仍不超过 2 万字）。原文由调用方从固定产物回读得到，这里只核对给出的这几段，不代表已经核验了来源原件。
+- `passages`：同一份固定产物里有界的几段原文（最多 8 段，合计不超过 2 万字），各自用产物的绝对偏移。不能把不连续的几段拼接成一个伪造的连续区间。表头和数据行分在两段时，证明不了是同一张表，列名会记 `unsupported`；要核对列名，表头和这一行必须同在一段**真实连续**的原文里：从固定产物中原样切出的一个区间 [start, end)，仍受 2 万字上限约束。不能把不连续的切片拼起来当作连续区间。表头离得太远、装不进一段时，就证明不了是同一张表，结果保持 `unsupported`。调用方（Fabric）回读时按同样的标准核对，不能因为这条边界而放宽回读规则。原文由调用方从固定产物回读得到，这里只核对给出的这几段，不代表已经核验了来源原件。
 - 每个字段写成 `{"value": …, "span": {"passage", "start", "end"}}`，或者 `{"state": "unknown" | "not_applicable"}`（来源没写）。各类条目的必填维度：
   - `measurement`（语义同 Fabric `Measurement`）：object、metric、value、unit、period、scope、denominator，以及 measure_kind；
   - `identifier`：scheme 和 identifier；
