@@ -284,3 +284,101 @@ def test_decimal_strings_on_the_wire(client, value, ok):
 def test_v1_is_unchanged(client):
     r = client.post("/v1/extraction-consistency", json={"subject": {}}, headers={"Authorization": f"Bearer {TOKEN}"})
     assert r.status_code in (400, 422)
+
+
+# ---- Codex r135 root causes (checker v5) ------------------------------------------------------------------------
+
+MONTH = {"type": "interval", "precision": "month", "value": "2026-04"}
+
+
+def cn(text, value="318", unit="个", obj="国家药监局", metric="批准注册医疗器械产品", scope=None, kind="flow"):
+    f = fields_for(text, value, unit, "2026年4月", MONTH, obj=obj, metric=metric, scope=scope,
+                   mode="object_metric_total", kind=kind)
+    return synthetic(text, text, f)
+
+
+@pytest.mark.parametrize("auth,status", [("missing", 401), ("wrong", 401), ("unconfigured", 503)])
+def test_v2_is_behind_the_same_token_as_v1(client, monkeypatch, auth, status):
+    headers = {} if auth == "missing" else {"Authorization": "Bearer " + ("wrong" if auth == "wrong" else TOKEN)}
+    if auth == "unconfigured":
+        monkeypatch.delenv("SERVICE_TOKEN", raising=False)
+    r = client.post("/v2/extraction-consistency", json=request_of(ROWS["S01"]), headers=headers)
+    assert r.status_code == status, r.text
+
+
+@pytest.mark.parametrize("bound", ["小于", "不到", "≤", "低于", "不足"])
+def test_a_bounded_value_is_never_exact(client, bound):
+    item = answer(client, cn(f"2026年4月，国家药监局共批准注册医疗器械产品{bound}318个。"))
+    assert item["fields"]["qualifier"]["result"] != "match" and item["status"] != "consistent"
+
+
+@pytest.mark.parametrize("suffix", ["余", "多", "以上", "左右"])
+def test_a_bounding_suffix_is_never_exact(client, suffix):
+    text = f"2026年4月，国家药监局共批准注册医疗器械产品318个{suffix}。"
+    item = answer(client, cn(text))
+    assert item["status"] != "consistent", item["fields"]["qualifier"]
+
+
+def test_exactness_needs_positive_evidence(client):
+    text = "2026年4月，国家药监局共批准注册医疗器械产品大概318个。"
+    item = answer(client, cn(text))
+    assert item["fields"]["qualifier"]["reason"] == "exactness_not_provable"
+
+
+def test_the_nearest_heading_wins_over_a_broader_one(client):
+    text = "# 中国\n\n## 湖北省\n\n2026年4月，国家药监局共批准注册医疗器械产品318个。\n"
+    assert answer(client, cn(text, scope="中国"))["fields"]["scope"]["result"] != "match"
+    assert answer(client, cn(text, scope="湖北省"))["status"] == "consistent"
+
+
+@pytest.mark.parametrize("heading", ["# 湖北省内", "# 中国"])
+def test_a_heading_may_restrict_an_object_total(client, heading):
+    text = heading + "\n\n2026年4月，国家药监局共批准注册医疗器械产品318个。\n"
+    item = answer(client, cn(text))
+    assert item["fields"]["scope"]["reason"] == "heading_may_restrict_the_total"
+
+
+def test_a_heading_naming_the_object_does_not_restrict_its_total(client):
+    text = "# 国家药监局\n\n2026年4月，国家药监局共批准注册医疗器械产品318个。\n"
+    assert answer(client, cn(text))["status"] == "consistent"
+
+
+def test_an_event_said_of_another_object_proves_no_flow(client):
+    text = "2026年4月，甲公司公布批准情况，乙公司现有药品共5个。"
+    item = answer(client, cn(text, value="5", obj="乙公司", metric="现有药品"))
+    assert item["fields"]["measure_kind"]["result"] != "match" and item["status"] != "consistent"
+
+
+def test_a_cumulative_word_said_of_another_object_proves_no_cumulation(client):
+    text = "甲公司公布累计数据，2026年4月，乙公司共批准药物5个。"
+    item = answer(client, cn(text, value="5", obj="乙公司", metric="批准药物", kind="cumulative"))
+    assert item["fields"]["measure_kind"]["result"] != "match" and item["status"] != "consistent"
+
+
+def test_a_percentage_never_borrows_another_groups_ratio(client):
+    text = "甲组测得2/10，2026年4月，儿童中WHO报告阳性比例80%。"
+    body = cn(text, value="80", unit="%", obj="WHO", metric="报告阳性比例", scope="儿童", kind="rate")
+    body["items"][0]["fields"]["denominator"] = {"state": "stated", "value": "10", "span": at(text, "10")}
+    item = answer(client, body)
+    assert item["fields"]["denominator"]["result"] != "match" and item["status"] != "consistent"
+
+
+def test_the_own_groups_ratio_still_counts(client):
+    text = "2026年4月，儿童中WHO报告阳性比例80%（8/10）。"
+    body = cn(text, value="80", unit="%", obj="WHO", metric="报告阳性比例", scope="儿童", kind="rate")
+    body["items"][0]["fields"]["denominator"] = {"state": "stated", "value": "10", "span": at(text, "10")}
+    assert answer(client, body)["fields"]["denominator"]["result"] == "match"
+
+
+def test_a_unit_span_is_the_whole_unit_and_nothing_more(client):
+    text = "2026年4月，国家药监局共批准注册医疗器械产品318个。"
+    item = answer(client, cn(text, unit="个。"))
+    assert item["fields"]["unit"]["result"] != "match" and item["status"] != "consistent"
+
+
+def test_unrecognized_words_after_a_value_prove_no_unitlessness(client):
+    text = "From September 2022 to January 2023, WHO reported 42 EVD cases in Beni."
+    period = {"type": "interval", "precision": "month", "start": "2022-09", "end": "2023-01"}
+    f = fields_for(text, "42", "", "September 2022 to January 2023", period, obj="WHO", metric="EVD cases", scope="Beni")
+    item = answer(client, synthetic(text, text, f))
+    assert item["fields"]["unit"]["result"] != "match" and item["status"] != "consistent"

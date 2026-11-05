@@ -154,9 +154,9 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
  "counts": {"consistent": 0, "inconsistent": 0, "unchecked": 1}, "llm_calls": []}
 ```
 
-## 抽取一致性接口 v2（测量，checker v4，T-29 P3）
+## 抽取一致性接口 v2（测量，checker v5，T-29 P3）
 
-**POST /v2/extraction-consistency**（契约 `extraction_consistency.v2`，checker `biocheck.extraction_rules.v4`）
+**POST /v2/extraction-consistency**（契约 `extraction_consistency.v2`，checker `biocheck.extraction_rules.v5`）
 
 - **范围**：只接受 measurement 条目，请求里必须写 `"contract_version": "extraction_consistency.v2"`。/v1（v3）的请求、回执和规则都不变；v1 不会被默认升到 v4。
 - **数值**：value 和 denominator 用规范十进制字符串传输（`318`、`21.3`、`-3`），最多 18 位数字、6 位小数，不用 JSON 数字，全程不经过 float。不规范或超出上限的返回 422。
@@ -172,7 +172,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
   - `qualifier`：exact / approximate / at_least / at_most / more_than / less_than；
   - `modality`：actual / planned / projected。
 - **回执字段**：每个条目回执 11 个字段结果：locator 加上 object、metric、value、unit、period、scope、denominator、measure_kind、qualifier、modality。定位失败时同样是这 11 个，除 locator 外全部 unsupported。
-- **v4 在 v3 上新增的规则**（证明不了的一律 unsupported）：
+- **v5（v4 经 r135 修正）在 v3 上新增的规则**（证明不了的一律 unsupported）：
   - **局部句**：值的上下文是它所在的局部句，即 v3 的子句再按英文句末切开；同一段里其他句子的数字、日期和事件词，既不能支持、也不会干扰当前的量。
   - **flow**：period 是区间，同时有事件词。
   - **cumulative**：要有明确的累计语义（累计、cumulative、前N月……）；单纯的 from…to 时间范围、「a total of」或「共」都不算。

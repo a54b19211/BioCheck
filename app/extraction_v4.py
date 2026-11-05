@@ -16,7 +16,10 @@ from .extraction import ContractError, outcome, squash
 
 CONTRACT_VERSION = "extraction_consistency.v2"
 # Bump whenever a rule, a word list, the unit table or canonical_period changes.
-CHECKER_VERSION = "biocheck.extraction_rules.v4"
+# v5 (Codex r135): exactness needs positive evidence; only the nearest effective heading may supply a field and
+# any effective heading may restrict an object total; kind evidence, ratios and units belong to the value's own
+# group; a unit span must be the whole recognized unit and "no unit" needs nothing but punctuation after it.
+CHECKER_VERSION = "biocheck.extraction_rules.v5"
 FIELDS = ("object", "metric", "value", "unit", "period", "scope", "denominator", "measure_kind", "qualifier",
           "modality")
 CANONICAL_DECIMAL = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?")
@@ -41,13 +44,30 @@ RESTRICTION = re.compile(r"其中|包括|除|以外|不含|部分|省|市|地区
 DEICTIC = re.compile(r"^(?:我国|本国|本省|本市|本院|我院|该|此|这|our\b|this\b|these\b|the country\b)", re.IGNORECASE)
 CHANGE = re.compile(r"(?:下降|增长|上升|减少|提高|降低|增加|同比|环比|\bincreased?\b|\bdecreased?\b|\brose\b|\bfell\b|"
                     r"\bup\b|\bdown\b)\s*(?:了|by)?\s*$", re.IGNORECASE)
-APPROX_BEFORE = re.compile(r"(?:约|近|逾|超过|不少于|至少|\b(?:approximately|about|nearly|over|more than|at least|up to)\b)\s*$",
-                           re.IGNORECASE)
-APPROX_AFTER = re.compile(r"^\s*(?:余|多|左右)")
+APPROX_BEFORE = re.compile(r"(?:约|近|逾|超过|不少于|至少|小于|少于|低于|不到|不足|未满|大于|多于|高于|≤|＜|<|≥|＞|>|"
+                           r"\b(?:approximately|about|nearly|over|more than|at least|up to|less than|fewer than|"
+                           r"under|below|greater than|above)\b)\s*$", re.IGNORECASE)
+# exactness is proven, not presumed: what may stand right before an exact value (besides the start of its group
+# or the end of one of the item's own field spans) - a closed list of neutral connectors
+CN_CONNECT = set("共为是有达计了：:，,、（( |")
+EN_CONNECT = {"of", "total", "is", "was", "were", "are", "reached", "reported", "recorded", "had", "has", "have",
+              "been", "with", "at", "in", "from", "and", "were", "registered", "confirmed", "notified"}
+# suffix forms that bound or round a value (a closed grammatical class)
+BOUND_AFTER = re.compile(r"^\s*(?:余|多|左右|上下|以上|以下|以内|之多|不等|\+|or more\b|or fewer\b|or less\b|plus\b)",
+                         re.IGNORECASE)
+NO_UNIT_AFTER = re.compile(r"^\s*(?:$|[，。；;,.!?！？)）\]】|/])")
 QUALIFIER_OF = {"约": "approximate", "近": "approximate", "左右": "approximate", "approximately": "approximate",
                 "about": "approximate", "nearly": "approximate", "逾": "more_than", "超过": "more_than",
                 "over": "more_than", "more than": "more_than", "余": "more_than", "多": "more_than",
-                "不少于": "at_least", "至少": "at_least", "at least": "at_least", "up to": "at_most"}
+                "不少于": "at_least", "至少": "at_least", "at least": "at_least", "up to": "at_most",
+                "小于": "less_than", "少于": "less_than", "低于": "less_than", "不到": "less_than", "不足": "less_than",
+                "未满": "less_than", "<": "less_than", "＜": "less_than", "less than": "less_than",
+                "fewer than": "less_than", "under": "less_than", "below": "less_than", "≤": "at_most",
+                "大于": "more_than", "多于": "more_than", "高于": "more_than", ">": "more_than", "＞": "more_than",
+                "greater than": "more_than", "above": "more_than", "≥": "at_least",
+                "以上": "at_least", "以下": "at_most", "以内": "at_most", "上下": "approximate", "之多": "more_than",
+                "不等": "approximate", "+": "at_least", "or more": "at_least", "or fewer": "at_most",
+                "or less": "at_most", "plus": "at_least"}
 PLANNED = re.compile(r"计划|拟|目标|将|\b(?:plan(?:ned|s)?|target(?:ed)?)\b", re.IGNORECASE)
 PROJECTED = re.compile(r"预计|预测|预期|\b(?:expected|projected|forecast)\b", re.IGNORECASE)
 LIST_SEPARATOR = re.compile(r"、|,|，|\band\b|/|&")
@@ -192,17 +212,35 @@ def heading_ancestor(P, span, vspan):
     return not LIST_SEPARATOR.search(line[m.end():])
 
 
-def headings_over(P, vspan):
-    """The text of the value's effective ancestor headings (nearest first), within its passage."""
+def ancestor_headings(P, vspan):
+    """The value's effective ancestor headings within its passage, nearest first: [(start, end, text)] in
+    artifact offsets of each heading line's text (after the #s)."""
     p = P.by_id[vspan["passage"]]
     text = p["text"][:vspan["start"] - p["start"]]
-    out, level = [], 7
-    for line in reversed(text.split("\n")[:-1]):
+    out, level, pos = [], 7, 0
+    lines = []
+    for line in text.split("\n")[:-1]:
+        lines.append((pos, line))
+        pos += len(line) + 1
+    for at, line in reversed(lines):
         m = re.match(r"(#{1,6})\s+(.*)", line)
         if m and len(m.group(1)) < level:
-            out.append(m.group(2))
+            out.append((p["start"] + at + m.start(2), p["start"] + at + m.end(2), m.group(2)))
             level = len(m.group(1))
     return out
+
+
+def headings_over(P, vspan):
+    """The text of the value's effective ancestor headings (nearest first), within its passage."""
+    return [t for _, _, t in ancestor_headings(P, vspan)]
+
+
+def in_nearest_heading(P, span, vspan):
+    """The span lies in the nearest effective ancestor heading: a more specific heading below a broader one
+    always wins, so a field taken from the broader one is not proven."""
+    heads = ancestor_headings(P, vspan)
+    return bool(heads) and heads[0][0] <= span["start"] and span["end"] <= heads[0][1] \
+        and heading_ancestor(P, span, vspan)
 
 
 def table_caption(P, vspan):
@@ -251,7 +289,7 @@ def own_place(L, P, span, vspan, partners, exclude):
         return "several" if others else "group"
     if L.inside(span) and span["end"] <= vspan["start"]:
         return "several" if L.numbers(span["end"], vspan["start"], exclude + partners) else "before"
-    if heading_ancestor(P, span, vspan):
+    if in_nearest_heading(P, span, vspan):
         return "heading"
     return "outside"
 
@@ -302,18 +340,25 @@ def check_v4(item, P):
         utext = P.text(unit["span"])
         if utext is None or squash(utext).casefold() != squash(unit["value"]).casefold():
             fields["unit"] = outcome("mismatch", "unit_differs_from_span")
-        elif at_value and (unit["span"]["passage"], unit["span"]["start"]) == (L.pid, pbase + at_value[1]):
-            fields["unit"] = outcome("match", "unit_at_value", unit["span"])
+        elif at_value and (unit["span"]["passage"], unit["span"]["start"], unit["span"]["end"]) == (
+                L.pid, pbase + at_value[1], pbase + at_value[2]):
+            fields["unit"] = outcome("match", "unit_at_value", unit["span"])  # the whole recognized unit, exactly
         elif at_value:
-            fields["unit"] = outcome("mismatch", "another_unit_at_value:" + at_value[0])
+            fields["unit"] = outcome("mismatch", "unit_span_is_not_the_unit_at_value:" + at_value[0])
         else:
             fields["unit"] = outcome("unsupported", "unit_not_at_value_or_not_in_table")
     else:
-        fields["unit"] = (outcome("mismatch", "unit_written_at_value:" + at_value[0]) if at_value
-                          else outcome("match", "no_unit_at_value"))
-    # denominator: v3's rule over the local sentence
+        if at_value:
+            fields["unit"] = outcome("mismatch", "unit_written_at_value:" + at_value[0])
+        elif NO_UNIT_AFTER.match(ptext[after:after + 3]):
+            fields["unit"] = outcome("match", "no_unit_at_value")  # only punctuation follows the number
+        else:
+            fields["unit"] = outcome("unsupported", "unrecognized_text_after_value")  # not proven unitless
+    # denominator: a ratio of the value's own group (a percentage never borrows another population's ratio);
+    # any ratio of the sentence still keeps "no denominator" from being proven
     ratios = v3.ratios_in(L.text(), L.start)
-    mine = [r for r in ratios if (r[0], r[1]) == (vspan["start"], vspan["end"])]
+    own_ratios = [r for r in ratios if L.g_start <= min(r[0], r[3]) and max(r[1], r[4]) <= L.g_end]
+    mine = [r for r in own_ratios if (r[0], r[1]) == (vspan["start"], vspan["end"])]
     den = f["denominator"]
     partners = []
     percent_written = ptext[after:after + 1] in ("%", "％")
@@ -322,9 +367,9 @@ def check_v4(item, P):
         if dtext is None or v3.number(dtext) is None or v3.number(dtext) != Decimal(den["value"]):
             fields["denominator"] = outcome("mismatch", "denominator_differs_from_span")
         elif any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in mine) or (
-                percent_written and any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in ratios)):
+                percent_written and any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in own_ratios)):
             fields["denominator"] = outcome("match", span=den["span"])
-            for r in ratios:
+            for r in own_ratios:
                 if (r[3], r[4]) == (den["span"]["start"], den["span"]["end"]):
                     partners += [{"start": r[0], "end": r[1]}, {"start": r[3], "end": r[4]}]
         else:
@@ -415,12 +460,18 @@ def check_v4(item, P):
         lead_rest = "".join(" " if any(c["start"] <= L.start + i < c["end"] for c in covered) else ch
                             for i, ch in enumerate(lead))
         total = TOTAL_WORD.search(rest)
+        # an effective heading over the value may narrow it (# 湖北省内): a total is proven only under headings
+        # that name the object itself and carry no restriction
+        heads = [t for _, _, t in ancestor_headings(P, vspan)]
+        obj = squash(f["object"]["value"]) if v3.stated(f["object"]) else ""
         if fields["object"]["result"] != "match" or fields["metric"]["result"] != "match":
             fields["scope"] = outcome("unsupported", "object_metric_total_needs_checked_object_and_metric")
         elif not total:
             fields["scope"] = outcome("unsupported", "no_total_word_in_value_group")
         elif RESTRICTION.search(rest) or RESTRICTION.search(lead_rest):
             fields["scope"] = outcome("unsupported", "restriction_outside_the_fields")
+        elif any(obj not in squash(h) or RESTRICTION.search(h.replace(obj, " ")) for h in heads):
+            fields["scope"] = outcome("unsupported", "heading_may_restrict_the_total")
         else:
             fields["scope"] = outcome("match", "object_metric_total",
                                       {"passage": L.pid, "start": L.g_start + total.start(), "end": L.g_start + total.end()})
@@ -429,7 +480,11 @@ def check_v4(item, P):
     # measure kind
     kind = f["measure_kind"]
     sentence, vgroup = L.text(), L.text(L.g_start, L.g_end)
-    cumulative = CUMULATIVE.search(sentence)
+    # positive evidence of the kind belongs to the value's own group and its own period - never a word said of
+    # another object elsewhere in the sentence; such a word anywhere still vetoes the simpler reading (flow)
+    own = vgroup + " " + ((P.text(pf["span"]) or "") if v3.stated(pf) else "")
+    cumulative = CUMULATIVE.search(own)
+    cumulative_anywhere = CUMULATIVE.search(sentence)
     if kind == "rate":
         before = ptext[max(0, vspan["start"] - pbase - 12):vspan["start"] - pbase]
         if CHANGE.search(before):
@@ -444,9 +499,9 @@ def check_v4(item, P):
     elif kind == "flow":
         if period["type"] == "point":
             fields["measure_kind"] = outcome("mismatch", "flow_needs_an_interval")
-        elif cumulative or AS_OF.search(sentence):
+        elif cumulative_anywhere or AS_OF.search(sentence):
             fields["measure_kind"] = outcome("unsupported", "cumulative_or_as_of_wording")
-        elif EVENT.search(vgroup) or EVENT.search(sentence[max(0, vspan["start"] - L.start - 40):]):
+        elif EVENT.search(vgroup):
             fields["measure_kind"] = outcome("match", "event_in_interval")
         else:
             fields["measure_kind"] = outcome("unsupported", "no_event_wording")
@@ -456,30 +511,43 @@ def check_v4(item, P):
     elif kind == "stock":
         if period["type"] != "point":
             fields["measure_kind"] = outcome("mismatch", "stock_needs_a_point")
-        elif cumulative or EVENT.search(vgroup):
+        elif cumulative_anywhere or EVENT.search(vgroup):
             fields["measure_kind"] = outcome("unsupported", "event_or_cumulative_wording")
-        elif AS_OF.search(P.text(pf["span"]) or "") and STATE.search(sentence):
+        elif AS_OF.search(P.text(pf["span"]) or "") and STATE.search(vgroup):
             fields["measure_kind"] = outcome("match", "as_of_with_state_word")
         else:
             fields["measure_kind"] = outcome("unsupported", "no_state_wording")
-    # qualifier
-    left = ptext[max(0, vspan["start"] - pbase - 16):vspan["start"] - pbase]
+    # qualifier: a marker at the value must agree with the stated qualifier; "exact" is proven, not presumed -
+    # what stands right before the value is the start of its group, the end of one of the item's own field spans
+    # or a neutral connector, and no bounding suffix follows it
+    rel = vspan["start"] - pbase
+    left = ptext[max(0, rel - 16):rel]
     right_at = at_value[2] if at_value else after
-    right = ptext[right_at:right_at + 4]
+    right = ptext[right_at:right_at + 8]
     marks = []
     m = APPROX_BEFORE.search(left)
     if m:
         marks.append(QUALIFIER_OF[squash(m.group(0)).lower()])
-    m = APPROX_AFTER.match(right)
+    m = BOUND_AFTER.match(right)
     if m:
-        marks.append(QUALIFIER_OF[m.group(0).strip()])
+        marks.append(QUALIFIER_OF[squash(m.group(0)).lower()])
     want = f["qualifier"]
     if marks:
         fields["qualifier"] = (outcome("match", "qualifier_marker") if want in marks
                                else outcome("mismatch", "value_is_qualified:" + marks[0]))
+    elif want != "exact":
+        fields["qualifier"] = outcome("mismatch", "no_qualifier_marker")
     else:
-        fields["qualifier"] = (outcome("match", "no_qualifier_marker") if want == "exact"
-                               else outcome("mismatch", "no_qualifier_marker"))
+        gap = ptext[L.g_start - pbase:rel].rstrip()
+        field_ends = {x["span"]["end"] for x in (f["object"], f["metric"], f["scope"]) if v3.stated(x)}
+        if v3.stated(pf):
+            field_ends.add(pf["span"]["end"])
+        word = re.search(r"([A-Za-z-]+)$", gap)
+        if not gap.strip(" ，,、（(|") or L.g_start + len(gap) in field_ends or gap[-1] in CN_CONNECT \
+                or (word and word.group(1).lower() in EN_CONNECT):
+            fields["qualifier"] = outcome("match", "exact_by_position")
+        else:
+            fields["qualifier"] = outcome("unsupported", "exactness_not_provable")
     # modality: the sentence, the effective headings and the table caption
     context = " ".join([sentence] + headings_over(P, vspan) + [table_caption(P, vspan)])
     found = "projected" if PROJECTED.search(context) else "planned" if PLANNED.search(context) else "actual"

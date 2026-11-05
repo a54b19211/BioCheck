@@ -1,6 +1,7 @@
 """HTTP service: uvicorn app.service:app --port 18562  (see README for environment variables)."""
 import hmac
 import os
+import re
 from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, Request
@@ -358,7 +359,7 @@ def create_app(llm=chat_json):
 
     @app.middleware("http")
     async def bearer_token(request: Request, call_next):
-        if request.url.path.startswith("/v1/"):
+        if re.match(r"^/v[0-9]+/", request.url.path):  # every versioned endpoint (v1, v2), one token
             token = os.environ.get("SERVICE_TOKEN", "")
             supplied = request.headers.get("Authorization", "")
             if not token:
