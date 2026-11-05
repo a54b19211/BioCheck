@@ -22,7 +22,8 @@ CONTRACT_VERSION = "extraction_consistency.v2"
 # v6 (Codex r136): the value's group is covered by the item's own fields (no qualifier left outside the metric);
 # prefixes, suffixes and "no unit" are read over the bounded sentence, never a fixed short window; comparators are
 # whole phrases with their negation; a percentage takes only a ratio written right next to it.
-CHECKER_VERSION = "biocheck.extraction_rules.v6"
+# v7 (Codex r137): a negation of the quantity's predicate outside the item's fields leaves the kind unproven.
+CHECKER_VERSION = "biocheck.extraction_rules.v7"
 FIELDS = ("object", "metric", "value", "unit", "period", "scope", "denominator", "measure_kind", "qualifier",
           "modality")
 CANONICAL_DECIMAL = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?")
@@ -61,6 +62,7 @@ NO_UNIT_AFTER = re.compile(r"^\s*(?:$|[，。；;,.!?！？)）\]】|/])")
 GLUE = {"of", "in", "at", "on", "the", "a", "an", "and", "from", "with", "among", "for", "to", "by"}
 AUX = re.compile(r"\b(?:had|has|have|was|were|is|are|been|be)\b", re.IGNORECASE)
 CN_FUNCTION = set("共有为是达计了的已被中")
+NEGATED = re.compile(r"\b(?:not|no|never|neither|nor|without|none)\b|n't|尚未|未|没有|没|无|不", re.IGNORECASE)
 CJK = re.compile(r"[一-鿿]")
 QUALIFIER_OF = {"约": "approximate", "近": "approximate", "左右": "approximate", "approximately": "approximate",
                 "about": "approximate", "nearly": "approximate", "逾": "more_than", "超过": "more_than",
@@ -308,6 +310,26 @@ def unit_after(text, pos):
     return None
 
 
+def cover_of(f, vspan, partners, ptext, pbase, L):
+    """The spans of the value's group that the item's own fields account for: every stated field span, the
+    ratio partners, and the words whose meaning a checked field carries - the cumulative marker of a claimed
+    cumulative, the plan / forecast word of a claimed modality, the comparator of a claimed qualifier (a wrong
+    claim fails that field). Event verbs never do: they belong in the metric."""
+    cover = [vspan] + [x["span"] for x in (f["object"], f["metric"], f["scope"], f["unit"]) if v3.stated(x)]
+    cover += [x["span"] for x in (f["period"], f["denominator"]) if v3.stated(x)] + list(partners)
+    markers = []
+    if f["measure_kind"] == "cumulative":
+        markers.append(CUMULATIVE)
+    if f["modality"] != "actual":
+        markers += [PLANNED, PROJECTED]
+    if f["qualifier"] != "exact":
+        markers.append(re.compile(_phrases(list(QUALIFIER_OF)), re.IGNORECASE))
+    for pattern in markers:
+        for m in pattern.finditer(ptext, L.g_start - pbase, L.g_end - pbase):
+            cover.append({"start": pbase + m.start(), "end": pbase + m.end()})
+    return cover
+
+
 def next_to(ptext, pbase, ratio, vspan):
     """The ratio is written right next to the percentage - 26% (5/19), 23 of 26 (88%) - with nothing but
     spaces, brackets or the percent sign in between: a ratio elsewhere in the group may be another population's."""
@@ -515,26 +537,16 @@ def check_v4(item, P):
         fields["scope"] = outcome("unsupported", "scope_not_determined")
     # the quantity's own phrase is covered by the item's fields: a qualifier left out of the metric
     # (suspected, in humans, 批准注册) changes what is counted, so the metric does not hold
+    cover = cover_of(f, vspan, partners, ptext, pbase, L)
+
+    def covered(pos):
+        return any(c["start"] <= pos < c["end"] for c in cover)
+
+    # a negated predicate of the quantity (had not been recorded, 未报告) is no affirmative event: whatever
+    # negation stands in the value's group outside the item's own fields leaves the kind unproven
+    negation = [m.group(0) for m in NEGATED.finditer(ptext, L.g_start - pbase, L.g_end - pbase)
+                if not covered(pbase + m.start())]
     if fields["metric"]["result"] == "match":
-        cover = [vspan] + [x["span"] for x in (f["object"], f["metric"], f["scope"], f["unit"]) if v3.stated(x)]
-        cover += ([pf["span"]] if v3.stated(pf) else []) + ([den["span"]] if v3.stated(den) else []) + partners
-        # words whose meaning a checked field carries count as covered: the cumulative marker of a claimed
-        # cumulative, the plan / forecast word of a claimed modality, the comparator of a claimed qualifier
-        # (a wrong claim fails that field); event verbs never do - they belong in the metric
-        markers = []
-        if f["measure_kind"] == "cumulative":
-            markers.append(CUMULATIVE)
-        if f["modality"] != "actual":
-            markers += [PLANNED, PROJECTED]
-        if f["qualifier"] != "exact":
-            markers.append(re.compile(_phrases(list(QUALIFIER_OF)), re.IGNORECASE))
-        for pattern in markers:
-            for m in pattern.finditer(ptext, L.g_start - pbase, L.g_end - pbase):
-                cover.append({"start": pbase + m.start(), "end": pbase + m.end()})
-
-        def covered(pos):
-            return any(c["start"] <= pos < c["end"] for c in cover)
-
         gtext = ptext[L.g_start - pbase:L.g_end - pbase]
         left_out = []
         if CJK.search(gtext):
@@ -560,7 +572,9 @@ def check_v4(item, P):
     own = vgroup + " " + ((P.text(pf["span"]) or "") if v3.stated(pf) else "")
     cumulative = CUMULATIVE.search(own)
     cumulative_anywhere = CUMULATIVE.search(sentence)
-    if kind == "rate":
+    if negation:
+        fields["measure_kind"] = outcome("unsupported", "negated_predicate:" + negation[0])
+    elif kind == "rate":
         before = ptext[max(0, vspan["start"] - pbase - 12):vspan["start"] - pbase]
         if CHANGE.search(before):
             fields["measure_kind"] = outcome("unsupported", "percent_change")

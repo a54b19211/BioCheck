@@ -154,9 +154,9 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
  "counts": {"consistent": 0, "inconsistent": 0, "unchecked": 1}, "llm_calls": []}
 ```
 
-## 抽取一致性接口 v2（测量，checker v6，T-29 P3）
+## 抽取一致性接口 v2（测量，checker v7，T-29 P3）
 
-**POST /v2/extraction-consistency**（契约 `extraction_consistency.v2`，checker `biocheck.extraction_rules.v6`）
+**POST /v2/extraction-consistency**（契约 `extraction_consistency.v2`，checker `biocheck.extraction_rules.v7`）
 
 - **范围**：只接受 measurement 条目，请求里必须写 `"contract_version": "extraction_consistency.v2"`。/v1（v3）的请求、回执和规则都不变；v1 不会被默认升到 v4。
 - **数值**：value 和 denominator 用规范十进制字符串传输（`318`、`21.3`、`-3`），最多 18 位数字、6 位小数，不用 JSON 数字，全程不经过 float。不规范或超出上限的返回 422。
@@ -172,7 +172,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
   - `qualifier`：exact / approximate / at_least / at_most / more_than / less_than；
   - `modality`：actual / planned / projected。
 - **回执字段**：每个条目回执 11 个字段结果：locator 加上 object、metric、value、unit、period、scope、denominator、measure_kind、qualifier、modality。定位失败时同样是这 11 个，除 locator 外全部 unsupported。
-- **v6（v4 经 r135、r136 修正）在 v3 上新增的规则**（证明不了的一律 unsupported）：
+- **v7（v4 经 r135、r136、r137 修正）在 v3 上新增的规则**（证明不了的一律 unsupported）：
   - **局部句**：值的上下文是它所在的局部句，即 v3 的子句再按英文句末切开；同一段里其他句子的数字、日期和事件词，既不能支持、也不会干扰当前的量。
   - **flow**：period 是区间，同时有事件词。
   - **cumulative**：要有明确的累计语义（累计、cumulative、前N月……）；单纯的 from…to 时间范围、「a total of」或「共」都不算。
@@ -185,6 +185,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
   - **单位**：中文量词、英文计数名词（之前最多两个白名单修饰词）、%、金额，外加 v3 的单位表；空格分隔的千分位不支持。
 - **数量短语完整**（v6）：值所在组里，数量自己的短语必须被本条目的字段覆盖。英文从值到第一个助动词；中文是整组，只允许列出的虚词留在字段外。介词和冠词可以连接字段；事件动词只有在 metric 之后（作谓语）才不需要字段。已核字段所对应的标记词（声明 cumulative 时的「累计」、声明 planned 时的「计划」、声明非 exact 时的比较词）算作已覆盖。漏掉的限定语（suspected、in humans、批准注册、表格行的类别）会让 metric 给 unsupported。
 - **比较短语**（v6）：比较词按整个短语、从长到短匹配，包括否定形式（不超过是上限）；清单里没有的否定写法给 unsupported。值前后的限定和「无单位」都在有边界的局部句里判断，会跳过空白。百分数只能用紧贴它写出的比例。
+- **谓语否定**（v7）：值所在组里，如果字段之外出现否定词（not、never、without、n't、未、没有、尚未、无、不），measure_kind 给 unsupported（negated_predicate）。否定句里的事件词不算肯定的事件依据。字段内部的否定（如 metric 里的「不合格」、已声明的「不超过」）属于该字段本身，不受影响。
 - **字段 span**：可以重叠，例如 object 落在 metric 之内；passages 仍然不能重叠。
 - **测试**：`tests/test_extraction_v4.py` 用 `tests/fixtures/p3_matrix.json`（extraction-contract 样本矩阵 v2：固定 clean_text.v11 产物的真实子句、真实偏移和逐字段原文位置），每一行都走真实 HTTP。`tests/explain_v4.py` 逐行打印状态和非 match 字段的原因，用于审查。
 

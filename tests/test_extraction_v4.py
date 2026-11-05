@@ -459,3 +459,27 @@ def test_a_marker_of_a_claimed_kind_is_covered_but_an_event_verb_is_not(client):
                    metric="药品审评技术指导原则", mode="unknown")
     item = answer(client, synthetic(text, "药审中心累计发布药品审评技术指导原则272个", g))
     assert item["fields"]["metric"]["reason"].startswith("quantity_words_outside_the_fields")
+
+
+# ---- Codex r137 (checker v7): a negated predicate proves no event ---------------------------------------------
+
+@pytest.mark.parametrize("predicate,ok", [("had been recorded", True), ("had not been recorded", False),
+                                          ("had never been recorded", False), ("were not reported", False)])
+def test_a_negated_predicate_is_no_event(client, predicate, ok):
+    period = {"type": "interval", "precision": "month", "start": "2022-09", "end": "2023-01"}
+    text = f"From September 2022 to January 2023, 42 suspected cases of anthrax in humans {predicate} at the Dengeza Health Post."
+    f = fields_for(text, "42", "cases", "September 2022 to January 2023", period, obj="anthrax",
+                   metric="suspected cases of anthrax in humans", scope="Dengeza Health Post")
+    item = answer(client, synthetic(text, text, f))
+    assert (item["status"] == "consistent") == ok, item["fields"]["measure_kind"]
+
+
+def test_a_chinese_negated_predicate_is_no_event(client):
+    text = "2026年4月，国家药监局未批准注册医疗器械产品318个。"
+    assert answer(client, cn(text, metric="批准注册医疗器械产品"))["fields"]["measure_kind"]["reason"].startswith("negated_predicate")
+
+
+def test_a_negation_inside_a_field_is_part_of_that_field(client):
+    text = "2026年4月，国家药监局共报告不合格药品318批。"
+    item = answer(client, cn(text, unit="批", metric="报告不合格药品"))
+    assert item["status"] == "consistent", {k: v for k, v in item["fields"].items() if v["result"] != "match"}
