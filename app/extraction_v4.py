@@ -11,6 +11,8 @@ import re
 from datetime import date
 from decimal import Decimal
 
+from extraction_contract import normalize as norm
+
 from . import extraction as v3
 from .extraction import ContractError, outcome, squash
 
@@ -23,7 +25,10 @@ CONTRACT_VERSION = "extraction_consistency.v2"
 # prefixes, suffixes and "no unit" are read over the bounded sentence, never a fixed short window; comparators are
 # whole phrases with their negation; a percentage takes only a ratio written right next to it.
 # v7 (Codex r137): a negation of the quantity's predicate outside the item's fields leaves the kind unproven.
-CHECKER_VERSION = "biocheck.extraction_rules.v7"
+# v8: v7 + extraction_normalize.v1 (numbers grouped by space / NBSP / NNBSP, English single years, the unit in
+# the metric phrase bound to the value); v7 stays the frozen baseline on its own commit (45600af)
+CHECKER_VERSION = "biocheck.extraction_rules.v8"
+NORMALIZE_VERSION = norm.NORMALIZE_VERSION
 FIELDS = ("object", "metric", "value", "unit", "period", "scope", "denominator", "measure_kind", "qualifier",
           "modality")
 CANONICAL_DECIMAL = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?")
@@ -169,6 +174,9 @@ def canonical_period(text):
         if start > end:
             return None, "range_ends_before_it_starts"
         return {"type": "interval", "precision": precision, "start": start, "end": end}, None
+    year = norm.english_year(t)
+    if year:
+        return year, None
     if re.search(r"近\d+年|今年|去年|上月|本月|上半年|下半年|\bpast\b|\blast\b|\bthis year\b|\brecent", t) and not re.search(r"\d{4}", t):
         return None, "relative_period"
     if re.search(MONTH_RE, t) and not re.search(r"\d{4}", t):
@@ -214,11 +222,54 @@ class Local:
         blank = lambda m: " " * len(m.group())  # noqa: E731
         text = EN_DATE.sub(blank, v3.DATE.sub(blank, v3.TIMESTAMP.sub(blank, text)))
         out = []
-        for m in v3.NUMBER.finditer(text.translate(v3.FULLWIDTH)):
-            s, e = a + m.start(), a + m.end()
+        for ms, me in norm.number_tokens(text):
+            s, e = a + ms, a + me
             if not any(x["start"] <= s and e <= x["end"] for x in exclude):
                 out.append((s, e))
         return out
+
+
+# v3's ratio and total patterns with the shared number form (comma or space / NBSP / NNBSP groups of three)
+_N = r"(\d{1,3}(?:,\d{3})+|\d{1,3}(?:[ \u00a0\u202f]\d{3})+|\d+)(?![\d,])"
+RATIOS = (
+    (re.compile(_N + r"\s*/\s*" + _N), 1, 2),
+    (re.compile(_N + r"\s*(?:例|人|名)?\s*(?:of|out of)\s+" + _N, re.IGNORECASE), 1, 2),
+    (re.compile(_N + r"\s*(?:例|人|名)(?:患者|受试者|病例)?中[^0-9；;。]{0,12}?" + _N), 2, 1),
+)
+TOTAL = re.compile(r"(?:\b[Nn]\s*=\s*|共\s*|总计\s*|合计\s*)" + _N)
+
+
+def ratios_in(clause_text, offset):
+    """v3.ratios_in with the shared number form: [(num_start, num_end, num, den_start, den_end, den)]."""
+    text = v3.DATE.sub(lambda m: " " * len(m.group()), v3.TIMESTAMP.sub(lambda m: " " * len(m.group()), clause_text))
+    out = []
+    for pattern, n, d in RATIOS:
+        for m in pattern.finditer(text):
+            num, den = norm.decimal_text(m.group(n)), norm.decimal_text(m.group(d))
+            out.append((offset + m.start(n), offset + m.end(n), Decimal(num) if num else None,
+                        offset + m.start(d), offset + m.end(d), Decimal(den) if den else None))
+    return out
+
+
+def whole_number(P, span):
+    """The span is exactly one written number of its passage - a space-grouped number is one (v8)."""
+    p = P.by_id[span["passage"]]
+    return norm.is_whole_number(p["text"], span["start"] - p["start"], span["end"] - p["start"])
+
+
+def bound_unit(P, f, unit, vspan):
+    """The stated unit is a word of the stated metric phrase that starts right after the value, nothing between
+    the value and the unit but words (extraction_normalize.v1 unit_bound); the metric span must hold its value."""
+    metric = f["metric"]
+    if not v3.stated(metric) or len({vspan["passage"], unit["span"]["passage"], metric["span"]["passage"]}) != 1:
+        return False
+    mtext = P.text(metric["span"])
+    if mtext is None or squash(mtext).casefold() != squash(metric["value"]).casefold():
+        return False
+    p = P.by_id[vspan["passage"]]
+    b = p["start"]
+    return norm.unit_bound(p["text"], vspan["end"] - b, unit["span"]["start"] - b, unit["span"]["end"] - b,
+                           metric["span"]["start"] - b, metric["span"]["end"] - b)
 
 
 def heading_ancestor(P, span, vspan):
@@ -377,13 +428,11 @@ def check_v4(item, P):
         return fields
     if not P.inside(vspan, item["locator"]):
         fields["value"] = outcome("mismatch", "value_outside_quote")
-    elif re.fullmatch(r"\d{1,3}(?:[   ]\d{3})+(?:\.\d+)?", vtext):
-        fields["value"] = outcome("unsupported", "space_separated_thousands")  # 1 895 122: a form the rules do not read
-    elif not P.whole_number(vspan):
+    elif not whole_number(P, vspan):
         fields["value"] = outcome("mismatch", "value_span_not_a_whole_number")
-    elif v3.number(vtext) is None:
+    elif norm.decimal_text(vtext) is None:
         fields["value"] = outcome("unsupported", "value_not_a_plain_number")
-    elif v3.number(vtext) != Decimal(vf["value"]):
+    elif Decimal(norm.decimal_text(vtext)) != Decimal(vf["value"]):
         fields["value"] = outcome("mismatch", "value_differs_from_span")
     else:
         fields["value"] = outcome("match", span=vspan)
@@ -402,6 +451,8 @@ def check_v4(item, P):
             fields["unit"] = outcome("match", "unit_at_value", unit["span"])  # the whole recognized unit, exactly
         elif at_value:
             fields["unit"] = outcome("mismatch", "unit_span_is_not_the_unit_at_value:" + at_value[0])
+        elif bound_unit(P, f, unit, vspan):
+            fields["unit"] = outcome("match", "unit_in_bound_metric", unit["span"])
         else:
             fields["unit"] = outcome("unsupported", "unit_not_at_value_or_not_in_table")
     else:
@@ -413,7 +464,7 @@ def check_v4(item, P):
             fields["unit"] = outcome("unsupported", "unrecognized_text_after_value")  # not proven unitless
     # denominator: a ratio of the value's own group (a percentage never borrows another population's ratio);
     # any ratio of the sentence still keeps "no denominator" from being proven
-    ratios = v3.ratios_in(L.text(), L.start)
+    ratios = ratios_in(L.text(), L.start)
     own_ratios = [r for r in ratios if L.g_start <= min(r[0], r[3]) and max(r[1], r[4]) <= L.g_end]
     mine = [r for r in own_ratios if (r[0], r[1]) == (vspan["start"], vspan["end"])]
     den = f["denominator"]
@@ -421,7 +472,8 @@ def check_v4(item, P):
     percent_written = ptext[after:after + 1] in ("%", "％")
     if v3.stated(den):
         dtext = P.text(den["span"])
-        if dtext is None or v3.number(dtext) is None or v3.number(dtext) != Decimal(den["value"]):
+        if dtext is None or norm.decimal_text(dtext) is None or Decimal(norm.decimal_text(dtext)) != Decimal(
+                den["value"]):
             fields["denominator"] = outcome("mismatch", "denominator_differs_from_span")
         elif any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in mine) or (
                 percent_written and any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"])
@@ -434,7 +486,7 @@ def check_v4(item, P):
             fields["denominator"] = outcome("unsupported", "denominator_relation_not_rule_checkable")
     else:
         # a total word of the value's own group (国家药监局共批准…318个) is the value itself, not another total
-        other_total = [m for m in v3.TOTAL.finditer(L.text())
+        other_total = [m for m in TOTAL.finditer(L.text())
                        if not (L.start + m.start(1) == vspan["start"] and L.start + m.end(1) == vspan["end"])]
         fields["denominator"] = (outcome("mismatch", "the_value_has_a_stated_denominator") if mine
                                  else outcome("unsupported", "other_ratio_or_total_in_value_sentence")
