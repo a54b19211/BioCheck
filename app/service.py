@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.exceptions import HTTPException
 
-from . import core, extraction
+from . import core, extraction, extraction_v4
 from .llm import chat_json
 
 
@@ -259,6 +259,96 @@ class ExtractionRequest(Strict):
                           Field(discriminator="kind")]] = Field(min_length=1, max_length=50)
 
 
+# ---- contract v2 (checker v4, T-29 P3): measurements only. Numbers travel as canonical decimal strings, never as
+# JSON numbers, so nothing passes through a float; a period is structured (type, precision, value | start..end).
+
+DECIMAL = r"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$"
+MONTH = r"^[0-9]{4}-(?:0[1-9]|1[0-2])$"
+DAY = r"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])$"
+PERIOD_FORMS = {"day": DAY, "month": MONTH, "quarter": r"^[0-9]{4}Q[1-4]$", "half": r"^[0-9]{4}H[12]$",
+                "year": r"^[0-9]{4}$"}
+
+
+class PeriodValue(Strict):
+    type: Literal["point", "interval"]
+    precision: Literal["day", "month", "quarter", "half", "year"]
+    value: str | None = None
+    start: str | None = None
+    end: str | None = None
+
+    @model_validator(mode="after")
+    def one_form(self):
+        import re as _re
+        form = PERIOD_FORMS[self.precision]
+        if self.value is not None:
+            if self.start is not None or self.end is not None or not _re.match(form, self.value):
+                raise ValueError("a period has a value of its precision, or start and end, not both")
+        elif self.start is None or self.end is None or self.type != "interval" or self.precision not in ("day", "month") \
+                or not _re.match(form, self.start) or not _re.match(form, self.end):
+            raise ValueError("a period range is an interval of day or month precision with start and end")
+        return self
+
+
+class PeriodField(Strict):
+    state: Literal["stated", "unknown"] = "stated"
+    value: PeriodValue | None = None
+    span: Span | None = None
+
+    @model_validator(mode="after")
+    def stated_has_value_and_span(self):
+        if (self.state == "stated") != (self.value is not None and self.span is not None):
+            raise ValueError("a stated period needs value and span; an unknown one has neither")
+        return self
+
+
+def _decimal(field, name):
+    import re as _re
+    if field.state == "stated":
+        v = field.value or ""
+        digits = sum(c.isdigit() for c in v)
+        decimals = len(v.split(".")[1]) if "." in v else 0
+        if not _re.match(DECIMAL, v) or digits > extraction_v4.MAX_DIGITS or decimals > extraction_v4.MAX_DECIMALS:
+            raise ValueError(f"{name}: a canonical decimal string of at most 18 digits and 6 decimals")
+
+
+class MeasurementFieldsV2(Strict):
+    object: FieldValue
+    metric: FieldValue
+    value: FieldValue
+    unit: FieldValue
+    period: PeriodField
+    scope: FieldValue
+    scope_mode: Literal["stated", "object_metric_total", "unknown"]
+    denominator: FieldValue
+    measure_kind: Literal["stock", "flow", "cumulative", "rate"]
+    qualifier: Literal["exact", "approximate", "at_least", "at_most", "more_than", "less_than"]
+    modality: Literal["actual", "planned", "projected"]
+
+    @model_validator(mode="after")
+    def numbers_and_states(self):
+        if self.value.state != "stated":
+            raise ValueError("a measurement states its value")
+        _decimal(self.value, "value")
+        _decimal(self.denominator, "denominator")
+        if self.scope_mode == "stated" and self.scope.state != "stated":
+            raise ValueError("scope_mode stated needs a stated scope")
+        if self.scope_mode != "stated" and self.scope.state == "stated":
+            raise ValueError("a stated scope has scope_mode stated")
+        return self
+
+
+class MeasurementItemV2(ItemBase):
+    kind: Literal["measurement"]
+    fields: MeasurementFieldsV2
+
+
+class ExtractionRequestV2(Strict):
+    contract_version: Literal["extraction_consistency.v2"]
+    subject: Subject
+    passages: list[Passage] = Field(min_length=1, max_length=8)
+    items: list[MeasurementItemV2] = Field(min_length=1, max_length=50)
+
+
 def error(status, code, message, **extra):
     return JSONResponse({"error_code": code, "message": message, **extra}, status_code=status)
 
@@ -312,6 +402,13 @@ def create_app(llm=chat_json):
     @app.post("/v1/revise")
     def revise(req: ReviseRequest):
         return core.revise(req.model_dump(), llm)
+
+    @app.post("/v2/extraction-consistency")
+    def extraction_consistency_v2(req: ExtractionRequestV2):
+        try:
+            return extraction_v4.check(req.model_dump(exclude={"contract_version"}, exclude_none=True))
+        except extraction.ContractError as exc:
+            return error(400, "invalid_request", str(exc))
 
     @app.post("/v1/extraction-consistency")
     def extraction_consistency(req: ExtractionRequest):

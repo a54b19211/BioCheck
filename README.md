@@ -154,6 +154,38 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
  "counts": {"consistent": 0, "inconsistent": 0, "unchecked": 1}, "llm_calls": []}
 ```
 
+## 抽取一致性接口 v2（测量，checker v4，T-29 P3）
+
+**POST /v2/extraction-consistency**（契约 `extraction_consistency.v2`，checker `biocheck.extraction_rules.v4`）
+
+- **范围**：只接受 measurement 条目，请求里必须写 `"contract_version": "extraction_consistency.v2"`。/v1（v3）的请求、回执和规则都不变；v1 不会被默认升到 v4。
+- **数值**：value 和 denominator 用规范十进制字符串传输（`318`、`21.3`、`-3`），最多 18 位数字、6 位小数，不用 JSON 数字，全程不经过 float。不规范或超出上限的返回 422。
+- **period** 是结构化的：`{"type": "point"|"interval", "precision": "day"|"month"|"quarter"|"half"|"year", "value"}`，跨越的区间用 `start`/`end` 代替 `value`。
+  - canonical_period.v1 的规范写法逐一列在 `app/extraction_v4.py`；
+  - 「截至2023年12月」是时点，「2023年12月」是区间，两者不相等；
+  - 不补出原文没有的日；
+  - 缺年份或相对期间都是 unsupported；
+  - 跨年区间沿用已写出的年份往前推；
+  - `past N days (D1 to D2)` 两端都算，天数必须等于 N。
+- **新增字段**：
+  - `scope_mode`：stated / object_metric_total / unknown；
+  - `qualifier`：exact / approximate / at_least / at_most / more_than / less_than；
+  - `modality`：actual / planned / projected。
+- **回执字段**：每个条目回执 11 个字段结果：locator 加上 object、metric、value、unit、period、scope、denominator、measure_kind、qualifier、modality。定位失败时同样是这 11 个，除 locator 外全部 unsupported。
+- **v4 在 v3 上新增的规则**（证明不了的一律 unsupported）：
+  - **局部句**：值的上下文是它所在的局部句，即 v3 的子句再按英文句末切开；同一段里其他句子的数字、日期和事件词，既不能支持、也不会干扰当前的量。
+  - **flow**：period 是区间，同时有事件词。
+  - **cumulative**：要有明确的累计语义（累计、cumulative、前N月……）；单纯的 from…to 时间范围、「a total of」或「共」都不算。
+  - **stock**：截至时点加状态词。
+  - **rate**：沿用 v3；百分比变化（下降6.1%）不算 rate。
+  - **scope**：object_metric_total 要求 object 已核且不是指称词、metric 已核、有明确的总量词，并且各字段之外没有限制词。
+  - **字段位置**：可以在值之前的同一局部句里（中间没有别的数量），也可以在有效的 markdown 祖先标题里（遇到同级或更高级标题即结束，列出多个名称的标题不算）。
+  - **qualifier**：看值前后的标记词。
+  - **modality**：看局部句、有效标题和表格标题。
+  - **单位**：中文量词、英文计数名词（之前最多两个白名单修饰词）、%、金额，外加 v3 的单位表；空格分隔的千分位不支持。
+- **字段 span**：可以重叠，例如 object 落在 metric 之内；passages 仍然不能重叠。
+- **测试**：`tests/test_extraction_v4.py` 用 `tests/fixtures/p3_matrix.json`（extraction-contract 样本矩阵 v2：固定 clean_text.v11 产物的真实子句、真实偏移和逐字段原文位置），每一行都走真实 HTTP。`tests/explain_v4.py` 逐行打印状态和非 match 字段的原因，用于审查。
+
 ## 运行测试
 
 ```sh

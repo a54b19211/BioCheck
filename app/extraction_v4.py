@@ -1,0 +1,513 @@
+"""Extraction consistency, contract v2 / checker v4 (T-29 P3): measurements only, the v3 rules extended by the
+smallest versioned set that lets explicit wording or structure prove what v3 left unsupported - the kind of a
+count (flow / cumulative / stock), a canonical period with its type and precision, a scope stated or proven to
+be the object's own total, a value qualifier and the modality. Everything the rules cannot prove stays
+"unsupported". v3 (contract v1, /v1/extraction-consistency) is untouched and imported, not copied.
+
+The quantity's own context is its local sentence: the v3 clause, also cut at an English sentence end, so other
+numbers, dates or event words elsewhere in an English paragraph never support (or spoil) this value."""
+
+import re
+from datetime import date
+from decimal import Decimal
+
+from . import extraction as v3
+from .extraction import ContractError, outcome, squash
+
+CONTRACT_VERSION = "extraction_consistency.v2"
+# Bump whenever a rule, a word list, the unit table or canonical_period changes.
+CHECKER_VERSION = "biocheck.extraction_rules.v4"
+FIELDS = ("object", "metric", "value", "unit", "period", "scope", "denominator", "measure_kind", "qualifier",
+          "modality")
+CANONICAL_DECIMAL = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?")
+MAX_DIGITS, MAX_DECIMALS = 18, 6
+
+MONTHS = {m: i for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july", "august",
+                                      "september", "october", "november", "december"), 1)}
+MONTH_RE = "(" + "|".join(m.capitalize() for m in MONTHS) + ")"
+EN_DATE = re.compile(r"\b\d{1,2}\s+" + MONTH_RE + r"(?:\s+\d{4})?\b|\b" + MONTH_RE + r"\s+\d{4}\b|\b(?:19|20)\d{2}\b")
+SENTENCE_END = re.compile(r"(?<=[a-z0-9\)\]%])\.\s+(?=[A-Z(\[])")
+
+# Word lists (versioned with CHECKER_VERSION).
+EVENT = re.compile(r"批准|获批|注册|受理|发布|报告|新增|新发|发生|上市|\b(?:recorded|reported|notified|approved|new)\b",
+                   re.IGNORECASE)
+CUMULATIVE = re.compile(r"累计|累积|\bcumulative(?:ly)?\b|\byear-to-date\b|年初至今|前\d{1,2}个?月|1\s*(?:至|-|—|~)\s*\d{1,2}月",
+                        re.IGNORECASE)
+AS_OF = re.compile(r"截至|截止|\bas of\b", re.IGNORECASE)
+STATE = re.compile(r"现有|正在|在研|活跃|在册|有效|\b(?:active|currently|ongoing)\b", re.IGNORECASE)
+TOTAL_WORD = re.compile(r"共|合计|总计|全部|\bin total\b", re.IGNORECASE)
+RESTRICTION = re.compile(r"其中|包括|除|以外|不含|部分|省|市|地区|县|哨点|\b(?:among|of which|excluding|except|only|"
+                         r"province|region|district)\b", re.IGNORECASE)
+DEICTIC = re.compile(r"^(?:我国|本国|本省|本市|本院|我院|该|此|这|our\b|this\b|these\b|the country\b)", re.IGNORECASE)
+CHANGE = re.compile(r"(?:下降|增长|上升|减少|提高|降低|增加|同比|环比|\bincreased?\b|\bdecreased?\b|\brose\b|\bfell\b|"
+                    r"\bup\b|\bdown\b)\s*(?:了|by)?\s*$", re.IGNORECASE)
+APPROX_BEFORE = re.compile(r"(?:约|近|逾|超过|不少于|至少|\b(?:approximately|about|nearly|over|more than|at least|up to)\b)\s*$",
+                           re.IGNORECASE)
+APPROX_AFTER = re.compile(r"^\s*(?:余|多|左右)")
+QUALIFIER_OF = {"约": "approximate", "近": "approximate", "左右": "approximate", "approximately": "approximate",
+                "about": "approximate", "nearly": "approximate", "逾": "more_than", "超过": "more_than",
+                "over": "more_than", "more than": "more_than", "余": "more_than", "多": "more_than",
+                "不少于": "at_least", "至少": "at_least", "at least": "at_least", "up to": "at_most"}
+PLANNED = re.compile(r"计划|拟|目标|将|\b(?:plan(?:ned|s)?|target(?:ed)?)\b", re.IGNORECASE)
+PROJECTED = re.compile(r"预计|预测|预期|\b(?:expected|projected|forecast)\b", re.IGNORECASE)
+LIST_SEPARATOR = re.compile(r"、|,|，|\band\b|/|&")
+
+# Units v4 knows beyond v3's table: count classifiers and count nouns are their own canonical form (个 is not 件).
+CLASSIFIERS = ("品种", "品规", "批次", "个", "件", "批", "例", "人", "家", "项", "条", "种")
+COUNT_NOUNS = ("cases", "deaths", "patients", "participants", "provinces", "samples")
+MONEY = ("亿元", "万元", "元")
+MODIFIERS = ("suspected", "confirmed", "probable", "laboratory-confirmed", "new", "human", "associated")
+
+
+# ---- canonical_period.v1 -------------------------------------------------------------------------------------
+
+CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "1": 1, "2": 2, "3": 3, "4": 4}
+
+
+def _ym(y, m):
+    return f"{int(y):04d}-{int(m):02d}" if 1 <= int(m) <= 12 else None
+
+
+def _ymd(y, m, d):
+    try:
+        return date(int(y), int(m), int(d)).isoformat()
+    except ValueError:
+        return None  # 30 February, 29 February of a common year
+
+
+def canonical_period(text):
+    """(period dict, None) or (None, reason). A period is {"type": point|interval, "precision": day|month|quarter|
+    half|year, "value"} or, for an interval spanning several units, {"start", "end"} instead of "value". No day or
+    month the text does not state is added; a period without a year or relative to an unstated date is refused."""
+    t = squash(text).translate(v3.FULLWIDTH)
+    rules = [
+        (r"(\d{4})年(\d{1,2})月", lambda y, m: ("interval", "month", _ym(y, m))),
+        (r"(\d{4})年(?:第)?([一二三四1-4])季度", lambda y, q: ("interval", "quarter", f"{y}Q{CN_NUM[q]}")),
+        (r"(\d{4})年(上|下)半年", lambda y, h: ("interval", "half", f"{y}H{1 if h == '上' else 2}")),
+        (r"(\d{4})年(?:全年)?", lambda y: ("interval", "year", y)),
+        (r"(\d{4})Q([1-4])", lambda y, q: ("interval", "quarter", f"{y}Q{q}")),
+        (r"截[至止](\d{4})年(\d{1,2})月(\d{1,2})日", lambda y, m, d: ("point", "day", _ymd(y, m, d))),
+        (r"截[至止](\d{4})年(\d{1,2})月(?:底|末)?", lambda y, m: ("point", "month", _ym(y, m))),
+        (r"截[至止](\d{4})年(?:底|末)", lambda y: ("point", "year", y)),
+        (r"(?:[Aa]s of )(\d{1,2}) " + MONTH_RE + r" (\d{4})", lambda d, mo, y: ("point", "day", _ymd(y, MONTHS[mo.lower()], d))),
+        (r"(?:[Aa]s of )" + MONTH_RE + r" (\d{4})", lambda mo, y: ("point", "month", _ym(y, MONTHS[mo.lower()]))),
+    ]
+    for pattern, build in rules:
+        m = re.fullmatch(pattern, t)
+        if m:
+            kind, precision, value = build(*m.groups())
+            return ({"type": kind, "precision": precision, "value": value}, None) if value else (None, "invalid_date")
+    m = re.fullmatch(r"(\d{4})年(?:前(\d{1,2})个?月|1\s*(?:至|-|—|~)\s*(\d{1,2})月)", t)
+    if m:
+        end = _ym(m.group(1), m.group(2) or m.group(3))
+        return ({"type": "interval", "precision": "month", "start": f"{m.group(1)}-01", "end": end}, None) if end \
+            else (None, "invalid_date")
+    # English ranges: [from|between] [D1] M1 [Y1] to|and|until|through [D2] M2 Y2
+    m = re.fullmatch(r"(?:(?:[Ff]rom|[Bb]etween|[Ss]ince)\s+)?(\d{1,2}\s+)?" + MONTH_RE + r"(\s+\d{4})?\s+"
+                     r"(?:to|and|until|through)\s+(\d{1,2}\s+)?" + MONTH_RE + r"\s+(\d{4})", t)
+    if m:
+        d1, m1, y1, d2, m2, y2 = m.groups()
+        m1, m2, y2 = MONTHS[m1.lower()], MONTHS[m2.lower()], int(y2)
+        y1 = int(y1) if y1 else (y2 if m1 <= m2 else y2 - 1)  # the stated year carried back; across a new year, the one before
+        if bool(d1) != bool(d2):
+            return None, "mixed_precision_range"
+        if d1:
+            start, end, precision = _ymd(y1, m1, d1.strip()), _ymd(y2, m2, d2.strip()), "day"
+        else:
+            start, end, precision = _ym(y1, m1), _ym(y2, m2), "month"
+        if not start or not end:
+            return None, "invalid_date"
+        if start > end:
+            return None, "range_ends_before_it_starts"
+        return {"type": "interval", "precision": precision, "start": start, "end": end}, None
+    if re.search(r"近\d+年|今年|去年|上月|本月|上半年|下半年|\bpast\b|\blast\b|\bthis year\b|\brecent", t) and not re.search(r"\d{4}", t):
+        return None, "relative_period"
+    if re.search(MONTH_RE, t) and not re.search(r"\d{4}", t):
+        return None, "period_year_not_stated"
+    return None, "period_form_not_supported"
+
+
+def inclusive_days(period):
+    a, b = date.fromisoformat(period["start"]), date.fromisoformat(period["end"])
+    return (b - a).days + 1
+
+
+# ---- the quantity's local context ------------------------------------------------------------------------------
+
+class Local:
+    """The value's local sentence and group inside one passage, and the numbers in them."""
+
+    def __init__(self, P, vspan):
+        pid, c_start, c_end, _ = P.clause(vspan)
+        self.passage = P.by_id[pid]
+        base, text = self.passage["start"], self.passage["text"]
+        # cut the v3 clause at English sentence ends around the value
+        clause = text[c_start - base:c_end - base]
+        cuts = [c_start + m.end() for m in SENTENCE_END.finditer(clause)]
+        self.start = max([c for c in cuts if c <= vspan["start"]], default=c_start)
+        ends = [c_start + m.start() + 1 for m in SENTENCE_END.finditer(clause) if c_start + m.start() + 1 >= vspan["end"]]
+        self.end = min(ends, default=c_end)
+        g_start, g_end = P.group(vspan)
+        self.g_start, self.g_end = max(g_start, self.start), min(g_end, self.end)
+        self.pid, self.base = pid, base
+
+    def text(self, a=None, b=None):
+        a, b = self.start if a is None else a, self.end if b is None else b
+        return self.passage["text"][a - self.base:b - self.base]
+
+    def inside(self, span, group=False):
+        a, b = (self.g_start, self.g_end) if group else (self.start, self.end)
+        return span["passage"] == self.pid and a <= span["start"] and span["end"] <= b
+
+    def numbers(self, a, b, exclude=()):
+        """Numbers in [a, b) that are not dates and not inside any excluded span."""
+        text = self.text(a, b)
+        blank = lambda m: " " * len(m.group())  # noqa: E731
+        text = EN_DATE.sub(blank, v3.DATE.sub(blank, v3.TIMESTAMP.sub(blank, text)))
+        out = []
+        for m in v3.NUMBER.finditer(text.translate(v3.FULLWIDTH)):
+            s, e = a + m.start(), a + m.end()
+            if not any(x["start"] <= s and e <= x["end"] for x in exclude):
+                out.append((s, e))
+        return out
+
+
+def heading_ancestor(P, span, vspan):
+    """True when span lies in a markdown heading line that is an effective ancestor of the value: same passage,
+    before it, no heading of the same or a higher level in between, and the heading names one thing (no list)."""
+    if span["passage"] != vspan["passage"]:
+        return False
+    p = P.by_id[span["passage"]]
+    text, base = p["text"], p["start"]
+    ls = text.rfind("\n", 0, span["start"] - base) + 1
+    le = text.find("\n", span["start"] - base)
+    line = text[ls:len(text) if le < 0 else le]
+    m = re.match(r"(#{1,6})\s", line)
+    if not m or span["end"] - base > (len(text) if le < 0 else le) or span["start"] >= vspan["start"]:
+        return False
+    level = len(m.group(1))
+    between = text[(len(text) if le < 0 else le):vspan["start"] - base]
+    if any(len(h) <= level for h in re.findall(r"(?m)^(#{1,6})\s", between)):
+        return False
+    return not LIST_SEPARATOR.search(line[m.end():])
+
+
+def headings_over(P, vspan):
+    """The text of the value's effective ancestor headings (nearest first), within its passage."""
+    p = P.by_id[vspan["passage"]]
+    text = p["text"][:vspan["start"] - p["start"]]
+    out, level = [], 7
+    for line in reversed(text.split("\n")[:-1]):
+        m = re.match(r"(#{1,6})\s+(.*)", line)
+        if m and len(m.group(1)) < level:
+            out.append(m.group(2))
+            level = len(m.group(1))
+    return out
+
+
+def table_caption(P, vspan):
+    """The non-table line right above the value's table, when the value is in a table row."""
+    if not P.row(vspan):
+        return ""
+    p = P.by_id[vspan["passage"]]
+    lines = p["text"][:vspan["start"] - p["start"]].split("\n")[:-1]
+    for line in reversed(lines):
+        if not line.startswith("|"):
+            return line
+    return ""
+
+
+# ---- the checker -------------------------------------------------------------------------------------------------
+
+def unit_after(text, pos):
+    """(spelling, start, end) of the unit at the value: a classifier, %, money or a v3 unit right at it, or a count
+    noun after at most two listed modifiers; None."""
+    p = pos
+    while p < len(text) and text[p] == " ":
+        p += 1
+    for spelling in sorted(CLASSIFIERS + MONEY, key=len, reverse=True):
+        if text.startswith(spelling, p) and not text.startswith("个月", p):
+            return spelling, p, p + len(spelling)
+    known = v3.unit_at(text, pos)
+    if known:
+        return known[0], known[1], known[2]
+    q, words = p, 0
+    while words <= 2:
+        for noun in COUNT_NOUNS:
+            if text[q:q + len(noun)].lower() == noun and not text[q + len(noun):q + len(noun) + 1].isalpha():
+                return noun, q, q + len(noun)
+        m = re.match(r"(" + "|".join(MODIFIERS) + r")\s+", text[q:], re.IGNORECASE)
+        if not m or words == 2:
+            break
+        q, words = q + m.end(), words + 1
+    return None
+
+
+def own_place(L, P, span, vspan, partners, exclude):
+    """Where a field span stands to the value: "group" (its group, no other quantity), "before" (same sentence,
+    before the value, no other quantity in between), "heading" (an effective ancestor heading), or why not."""
+    if L.inside(span, group=True):
+        others = L.numbers(L.g_start, L.g_end, exclude + [span] + partners)
+        return "several" if others else "group"
+    if L.inside(span) and span["end"] <= vspan["start"]:
+        return "several" if L.numbers(span["end"], vspan["start"], exclude + partners) else "before"
+    if heading_ancestor(P, span, vspan):
+        return "heading"
+    return "outside"
+
+
+def check_v4(item, P):
+    """Field results of one measurement item under v4 (locator checked first, as v3)."""
+    fields = {}
+    quote = P.text(item["locator"])
+    if quote is None:
+        fields["locator"] = outcome("mismatch", "locator_outside_passage")
+    elif squash(quote) == squash(item["quote"]):
+        fields["locator"] = outcome("match", span=item["locator"])
+    else:
+        anywhere = any(squash(item["quote"]) in squash(p["text"]) for p in P.by_id.values())
+        fields["locator"] = outcome("mismatch", "quote_elsewhere_in_passages" if anywhere else "quote_not_in_passages")
+    if fields["locator"]["result"] != "match":
+        for name in FIELDS:
+            fields[name] = outcome("unsupported", "no_valid_location")
+        return fields
+    f = item["fields"]
+    vf = f["value"]
+    vspan = vf["span"]
+    vtext = P.text(vspan)
+    if vtext is None:
+        fields["value"] = outcome("mismatch", "span_outside_passage")
+        for name in FIELDS:
+            fields.setdefault(name, outcome("unsupported", "no_valid_value_span"))
+        return fields
+    if not P.inside(vspan, item["locator"]):
+        fields["value"] = outcome("mismatch", "value_outside_quote")
+    elif re.fullmatch(r"\d{1,3}(?:[   ]\d{3})+(?:\.\d+)?", vtext):
+        fields["value"] = outcome("unsupported", "space_separated_thousands")  # 1 895 122: a form the rules do not read
+    elif not P.whole_number(vspan):
+        fields["value"] = outcome("mismatch", "value_span_not_a_whole_number")
+    elif v3.number(vtext) is None:
+        fields["value"] = outcome("unsupported", "value_not_a_plain_number")
+    elif v3.number(vtext) != Decimal(vf["value"]):
+        fields["value"] = outcome("mismatch", "value_differs_from_span")
+    else:
+        fields["value"] = outcome("match", span=vspan)
+    L = Local(P, vspan)
+    ptext, pbase = L.passage["text"], L.base
+    after = vspan["end"] - pbase
+    # unit
+    at_value = unit_after(ptext, after)
+    unit = f["unit"]
+    if v3.stated(unit):
+        utext = P.text(unit["span"])
+        if utext is None or squash(utext).casefold() != squash(unit["value"]).casefold():
+            fields["unit"] = outcome("mismatch", "unit_differs_from_span")
+        elif at_value and (unit["span"]["passage"], unit["span"]["start"]) == (L.pid, pbase + at_value[1]):
+            fields["unit"] = outcome("match", "unit_at_value", unit["span"])
+        elif at_value:
+            fields["unit"] = outcome("mismatch", "another_unit_at_value:" + at_value[0])
+        else:
+            fields["unit"] = outcome("unsupported", "unit_not_at_value_or_not_in_table")
+    else:
+        fields["unit"] = (outcome("mismatch", "unit_written_at_value:" + at_value[0]) if at_value
+                          else outcome("match", "no_unit_at_value"))
+    # denominator: v3's rule over the local sentence
+    ratios = v3.ratios_in(L.text(), L.start)
+    mine = [r for r in ratios if (r[0], r[1]) == (vspan["start"], vspan["end"])]
+    den = f["denominator"]
+    partners = []
+    percent_written = ptext[after:after + 1] in ("%", "％")
+    if v3.stated(den):
+        dtext = P.text(den["span"])
+        if dtext is None or v3.number(dtext) is None or v3.number(dtext) != Decimal(den["value"]):
+            fields["denominator"] = outcome("mismatch", "denominator_differs_from_span")
+        elif any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in mine) or (
+                percent_written and any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in ratios)):
+            fields["denominator"] = outcome("match", span=den["span"])
+            for r in ratios:
+                if (r[3], r[4]) == (den["span"]["start"], den["span"]["end"]):
+                    partners += [{"start": r[0], "end": r[1]}, {"start": r[3], "end": r[4]}]
+        else:
+            fields["denominator"] = outcome("unsupported", "denominator_relation_not_rule_checkable")
+    else:
+        # a total word of the value's own group (国家药监局共批准…318个) is the value itself, not another total
+        other_total = [m for m in v3.TOTAL.finditer(L.text())
+                       if not (L.start + m.start(1) == vspan["start"] and L.start + m.end(1) == vspan["end"])]
+        fields["denominator"] = (outcome("mismatch", "the_value_has_a_stated_denominator") if mine
+                                 else outcome("unsupported", "other_ratio_or_total_in_value_sentence")
+                                 if (ratios or other_total)
+                                 else outcome("match", "no_denominator_in_value_sentence"))
+    for r in mine:
+        partners += [{"start": r[0], "end": r[1]}, {"start": r[3], "end": r[4]}]
+    partners.append({"start": vspan["start"], "end": vspan["end"]})
+    spans = [x["span"] for x in (f["object"], f["metric"], f["scope"], f["period"]) if v3.stated(x)]
+    # period
+    pf = f["period"]
+    period = None
+    if not v3.stated(pf):
+        fields["period"] = outcome("unsupported", "period_not_stated")
+    else:
+        ptxt = P.text(pf["span"])
+        got, why = canonical_period(ptxt or "")
+        if ptxt is None:
+            fields["period"] = outcome("mismatch", "period_span_outside_passage")
+        elif got is None:
+            fields["period"] = outcome("unsupported", why)
+        elif got != pf["value"]:
+            fields["period"] = outcome("mismatch", "period_differs_from_canonical_span")
+        else:
+            place = own_place(L, P, pf["span"], vspan, partners, [s for s in spans if s is not pf["span"]])
+            before = ptext[max(0, pf["span"]["start"] - pbase - 24):pf["span"]["start"] - pbase]
+            past = re.search(r"past (\d+) days\s*\(\s*$", before, re.IGNORECASE)
+            if past and got.get("precision") == "day" and "start" in got and int(past.group(1)) != inclusive_days(got):
+                fields["period"] = outcome("mismatch", "past_n_days_disagrees_with_dates")
+            elif place in ("group", "before"):
+                fields["period"] = outcome("match", "period_" + place, pf["span"])
+                period = got
+            else:
+                fields["period"] = outcome("unsupported", "several_quantities_in_value_sentence" if place == "several"
+                                           else "period_not_in_value_sentence")
+    # object and metric
+    for name in ("object", "metric"):
+        x = f[name]
+        if not v3.stated(x):
+            fields[name] = outcome("unsupported", f"unknown_{name}_not_rule_checkable")
+            continue
+        text = P.text(x["span"])
+        if text is None or squash(text).casefold() != squash(x["value"]).casefold():
+            fields[name] = outcome("mismatch", f"{name}_differs_from_span")
+            continue
+        if name == "object" and DEICTIC.search(squash(x["value"])):
+            fields[name] = outcome("unsupported", "deictic_object")
+            continue
+        place = own_place(L, P, x["span"], vspan, partners, [s for s in spans if s is not x["span"]])
+        if place in ("group", "before", "heading"):
+            fields[name] = outcome("match", f"{name}_{place}", x["span"])
+        elif place == "several":
+            fields[name] = outcome("unsupported", "several_quantities_in_value_sentence")
+        else:
+            column = v3.header_column(P, x["span"], vspan)
+            fields[name] = (outcome("match", "header_of_value_column", x["span"]) if column is True
+                            else outcome("mismatch", "header_of_" + column) if column in ("another_column", "another_table")
+                            else outcome("unsupported", f"{name}_not_in_value_sentence"))
+    # scope
+    sf, mode = f["scope"], f["scope_mode"]
+    if mode == "stated":
+        if not v3.stated(sf):
+            raise ContractError(f"items[{item['id']}]: scope_mode stated needs a stated scope")
+        text = P.text(sf["span"])
+        if text is None or squash(text).casefold() != squash(sf["value"]).casefold():
+            fields["scope"] = outcome("mismatch", "scope_differs_from_span")
+        else:
+            place = own_place(L, P, sf["span"], vspan, partners, [s for s in spans if s is not sf["span"]])
+            fields["scope"] = (outcome("match", "scope_" + place, sf["span"]) if place in ("group", "before", "heading")
+                               else outcome("unsupported", "scope_not_in_value_sentence"))
+    elif mode == "object_metric_total":
+        if v3.stated(sf):
+            raise ContractError(f"items[{item['id']}]: scope_mode object_metric_total states no scope")
+        group = L.text(L.g_start, L.g_end)
+        covered = [x["span"] for x in (f["object"], f["metric"]) if v3.stated(x)] + [vspan]
+        if pf and v3.stated(pf):
+            covered.append(pf["span"])
+        rest = "".join(" " if any(c["start"] <= L.g_start + i < c["end"] for c in covered) else ch
+                       for i, ch in enumerate(group))
+        lead = L.text(L.start, L.g_start)
+        lead_rest = "".join(" " if any(c["start"] <= L.start + i < c["end"] for c in covered) else ch
+                            for i, ch in enumerate(lead))
+        total = TOTAL_WORD.search(rest)
+        if fields["object"]["result"] != "match" or fields["metric"]["result"] != "match":
+            fields["scope"] = outcome("unsupported", "object_metric_total_needs_checked_object_and_metric")
+        elif not total:
+            fields["scope"] = outcome("unsupported", "no_total_word_in_value_group")
+        elif RESTRICTION.search(rest) or RESTRICTION.search(lead_rest):
+            fields["scope"] = outcome("unsupported", "restriction_outside_the_fields")
+        else:
+            fields["scope"] = outcome("match", "object_metric_total",
+                                      {"passage": L.pid, "start": L.g_start + total.start(), "end": L.g_start + total.end()})
+    else:
+        fields["scope"] = outcome("unsupported", "scope_not_determined")
+    # measure kind
+    kind = f["measure_kind"]
+    sentence, vgroup = L.text(), L.text(L.g_start, L.g_end)
+    cumulative = CUMULATIVE.search(sentence)
+    if kind == "rate":
+        before = ptext[max(0, vspan["start"] - pbase - 12):vspan["start"] - pbase]
+        if CHANGE.search(before):
+            fields["measure_kind"] = outcome("unsupported", "percent_change")
+        elif fields["value"]["result"] == "match" and (percent_written or fields["denominator"]["result"] == "match"
+                                                       and v3.stated(den)):
+            fields["measure_kind"] = outcome("match", "rate_with_percentage_or_ratio")
+        else:
+            fields["measure_kind"] = outcome("unsupported", "measure_kind_not_rule_checkable")
+    elif period is None:
+        fields["measure_kind"] = outcome("unsupported", "kind_needs_a_checked_period")
+    elif kind == "flow":
+        if period["type"] == "point":
+            fields["measure_kind"] = outcome("mismatch", "flow_needs_an_interval")
+        elif cumulative or AS_OF.search(sentence):
+            fields["measure_kind"] = outcome("unsupported", "cumulative_or_as_of_wording")
+        elif EVENT.search(vgroup) or EVENT.search(sentence[max(0, vspan["start"] - L.start - 40):]):
+            fields["measure_kind"] = outcome("match", "event_in_interval")
+        else:
+            fields["measure_kind"] = outcome("unsupported", "no_event_wording")
+    elif kind == "cumulative":
+        fields["measure_kind"] = (outcome("match", "cumulative_wording") if cumulative
+                                  else outcome("unsupported", "no_cumulative_wording"))
+    elif kind == "stock":
+        if period["type"] != "point":
+            fields["measure_kind"] = outcome("mismatch", "stock_needs_a_point")
+        elif cumulative or EVENT.search(vgroup):
+            fields["measure_kind"] = outcome("unsupported", "event_or_cumulative_wording")
+        elif AS_OF.search(P.text(pf["span"]) or "") and STATE.search(sentence):
+            fields["measure_kind"] = outcome("match", "as_of_with_state_word")
+        else:
+            fields["measure_kind"] = outcome("unsupported", "no_state_wording")
+    # qualifier
+    left = ptext[max(0, vspan["start"] - pbase - 16):vspan["start"] - pbase]
+    right_at = at_value[2] if at_value else after
+    right = ptext[right_at:right_at + 4]
+    marks = []
+    m = APPROX_BEFORE.search(left)
+    if m:
+        marks.append(QUALIFIER_OF[squash(m.group(0)).lower()])
+    m = APPROX_AFTER.match(right)
+    if m:
+        marks.append(QUALIFIER_OF[m.group(0).strip()])
+    want = f["qualifier"]
+    if marks:
+        fields["qualifier"] = (outcome("match", "qualifier_marker") if want in marks
+                               else outcome("mismatch", "value_is_qualified:" + marks[0]))
+    else:
+        fields["qualifier"] = (outcome("match", "no_qualifier_marker") if want == "exact"
+                               else outcome("mismatch", "no_qualifier_marker"))
+    # modality: the sentence, the effective headings and the table caption
+    context = " ".join([sentence] + headings_over(P, vspan) + [table_caption(P, vspan)])
+    found = "projected" if PROJECTED.search(context) else "planned" if PLANNED.search(context) else "actual"
+    fields["modality"] = (outcome("match", "modality_" + found) if f["modality"] == found
+                          else outcome("mismatch", "modality_is_" + found))
+    return fields
+
+
+def check(request):
+    """Contract v2: measurement items only. Raises ContractError on a contract break."""
+    passages = request["passages"]
+    if len({p["id"] for p in passages}) != len(passages):
+        raise ContractError("passages: ids must be unique")
+    for p in passages:
+        if p["end"] - p["start"] != len(p["text"]):
+            raise ContractError(f"passages[{p['id']}]: end - start must equal the length of its text")
+    ordered = sorted(passages, key=lambda p: p["start"])
+    if any(a["end"] > b["start"] for a, b in zip(ordered, ordered[1:])):
+        raise ContractError("passages: ranges of one artifact must not overlap")
+    if sum(len(p["text"]) for p in passages) > 20000:
+        raise ContractError("passages: at most 20000 characters in all")
+    if len({i["id"] for i in request["items"]}) != len(request["items"]):
+        raise ContractError("items: ids must be unique")
+    P = v3.Passages(passages)
+    items = []
+    for item in request["items"]:
+        fields = check_v4(item, P)
+        items.append({"id": item["id"], "kind": item["kind"], "status": v3.status(fields), "fields": fields})
+    counts = {s: sum(1 for i in items if i["status"] == s) for s in ("consistent", "inconsistent", "unchecked")}
+    return {"contract_version": CONTRACT_VERSION, "checker_version": CHECKER_VERSION,
+            "subject": request["subject"], "items": items, "counts": counts, "llm_calls": []}

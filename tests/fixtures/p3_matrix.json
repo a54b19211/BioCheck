@@ -1,0 +1,2047 @@
+{
+ "schema": "bioradar.p3_matrix.v2",
+ "bench": "isolated chain-a fabric_bench, datafabric.clean_text.v11 artifacts, read only",
+ "rows": [
+  {
+   "id": "S01",
+   "group": "positive",
+   "input_type": "flow_month",
+   "source": "nmpa",
+   "record": "https://www.nmpa.gov.cn/xxgk/ggtg/ylqxggtg/ylqxpzhzhcchpgg/20260518164034163.html",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "is_demo": false,
+   "raw_sha256": "0667c2260d30a901c87f62f4cdd5f2395be14c17fe759fa9bcb20c800843109b",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "f33378d45600ae31a8b98ef5dd1005cccdc5f5be7d6d5d0aa33a64325f54edca",
+   "sentence": "2026年4月，国家药监局共批准注册医疗器械产品318个",
+   "sentence_span": [
+    216,
+    244
+   ],
+   "clause_span": [
+    216,
+    245
+   ],
+   "clause": "2026年4月，国家药监局共批准注册医疗器械产品318个。",
+   "fields": {
+    "value": {
+     "literal": "318",
+     "start": 240,
+     "end": 243,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "国家药监局",
+     "start": 224,
+     "end": 229,
+     "located_in": "quote"
+    },
+    "metric": {
+     "literal": "批准注册医疗器械产品",
+     "start": 230,
+     "end": 240,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "2026年4月",
+     "start": 216,
+     "end": 223,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "个",
+     "start": 243,
+     "end": 244,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "国家药监局",
+    "metric": "批准注册医疗器械产品",
+    "value": 318,
+    "unit": "个",
+    "period": {
+     "type": "interval",
+     "precision": "month",
+     "value": "2026-04"
+    },
+    "scope": "",
+    "scope_mode": "object_metric_total",
+    "denominator": null,
+    "measure_kind": "flow",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "consistent",
+    "gate": "series",
+    "evidence": {
+     "flow": "event verb 批准注册 + month interval",
+     "scope_mode": "共 total of the object's own approvals, no subset/region/class restriction outside the fields"
+    }
+   },
+   "decision": null,
+   "note": "S01-S03: one literal series key, three monthly points"
+  },
+  {
+   "id": "S02",
+   "group": "positive",
+   "input_type": "flow_month",
+   "source": "nmpa",
+   "record": "https://www.nmpa.gov.cn/xxgk/ggtg/ylqxggtg/ylqxpzhzhcchpgg/20260413103022198.html",
+   "version_id": "466ef25ff5fa925672fc9ae4d529e1e3dad82bfd49f75bc3969b7a2371d36620",
+   "is_demo": false,
+   "raw_sha256": "75e7f740a9181fca57fa24088ba50c0effbf3f3af625ff60639838804c7516f4",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "f88ef2fd3cc22b94785bf2300fffe82eb45e477c16b85de815339650d36ef7d7",
+   "sentence": "2026年3月，国家药监局共批准注册医疗器械产品272个",
+   "sentence_span": [
+    216,
+    244
+   ],
+   "clause_span": [
+    216,
+    245
+   ],
+   "clause": "2026年3月，国家药监局共批准注册医疗器械产品272个。",
+   "fields": {
+    "value": {
+     "literal": "272",
+     "start": 240,
+     "end": 243,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "国家药监局",
+     "start": 224,
+     "end": 229,
+     "located_in": "quote"
+    },
+    "metric": {
+     "literal": "批准注册医疗器械产品",
+     "start": 230,
+     "end": 240,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "2026年3月",
+     "start": 216,
+     "end": 223,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "个",
+     "start": 243,
+     "end": 244,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "国家药监局",
+    "metric": "批准注册医疗器械产品",
+    "value": 272,
+    "unit": "个",
+    "period": {
+     "type": "interval",
+     "precision": "month",
+     "value": "2026-03"
+    },
+    "scope": "",
+    "scope_mode": "object_metric_total",
+    "denominator": null,
+    "measure_kind": "flow",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "consistent",
+    "gate": "series"
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S03",
+   "group": "positive",
+   "input_type": "flow_month",
+   "source": "nmpa",
+   "record": "https://www.nmpa.gov.cn/xxgk/ggtg/ylqxggtg/ylqxpzhzhcchpgg/20260313174242129.html",
+   "version_id": "ed915b6b0e4e55227604ab1df7b419f29684d26ff70d227065434d1371638b5d",
+   "is_demo": false,
+   "raw_sha256": "1f7305b78ab0ef741d249c6df2b118a3c66cbd18b7317be12115ebe8fa6902cf",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "e5c1af0aebcecdb2473f8257dbf01f95f1aeb42305d6d204cb66f288077c4444",
+   "sentence": "2026年2月，国家药监局共批准注册医疗器械产品235个",
+   "sentence_span": [
+    216,
+    244
+   ],
+   "clause_span": [
+    216,
+    245
+   ],
+   "clause": "2026年2月，国家药监局共批准注册医疗器械产品235个。",
+   "fields": {
+    "value": {
+     "literal": "235",
+     "start": 240,
+     "end": 243,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "国家药监局",
+     "start": 224,
+     "end": 229,
+     "located_in": "quote"
+    },
+    "metric": {
+     "literal": "批准注册医疗器械产品",
+     "start": 230,
+     "end": 240,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "2026年2月",
+     "start": 216,
+     "end": 223,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "个",
+     "start": 243,
+     "end": 244,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "国家药监局",
+    "metric": "批准注册医疗器械产品",
+    "value": 235,
+    "unit": "个",
+    "period": {
+     "type": "interval",
+     "precision": "month",
+     "value": "2026-02"
+    },
+    "scope": "",
+    "scope_mode": "object_metric_total",
+    "denominator": null,
+    "measure_kind": "flow",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "consistent",
+    "gate": "series"
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S07",
+   "group": "positive",
+   "input_type": "stock_as_of",
+   "source": "cde",
+   "record": "https://www.cde.org.cn/main/news/viewInfoCommon/b8cf061912c73422dd0cc2e5ecc4eb72",
+   "version_id": "a10d5e592653591fb9558c5b5dccb8893cc121d1cc22ec1c1702141ad70cf9f0",
+   "is_demo": false,
+   "raw_sha256": "df48dc2b18994c8d274b70f5936a75671559eec479655aa7b573af5c4e7807c1",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "b013409957ba0372ac37c0bbd569cc5efd9f5fe06ef84f6908506c522d5fe4f3",
+   "sentence": "截至2023年12月，ICH正在活跃的协调议题共32个",
+   "sentence_span": [
+    3585,
+    3612
+   ],
+   "clause_span": [
+    3546,
+    3642
+   ],
+   "clause": "在加快与国际药品注册技术要求接轨的同时，国家药监局全面参与ICH议题国际协调，截至2023年12月，ICH正在活跃的协调议题共32个，国家药监局参与了每个活跃议题的技术讨论和指导原则起草工作。",
+   "fields": {
+    "value": {
+     "literal": "32",
+     "start": 3609,
+     "end": 3611,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "ICH",
+     "start": 3596,
+     "end": 3599,
+     "located_in": "quote"
+    },
+    "metric": {
+     "literal": "正在活跃的协调议题",
+     "start": 3599,
+     "end": 3608,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "截至2023年12月",
+     "start": 3585,
+     "end": 3595,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "个",
+     "start": 3611,
+     "end": 3612,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "ICH",
+    "metric": "正在活跃的协调议题",
+    "value": 32,
+    "unit": "个",
+    "period": {
+     "type": "point",
+     "precision": "month",
+     "value": "2023-12"
+    },
+    "scope": "",
+    "scope_mode": "object_metric_total",
+    "denominator": null,
+    "measure_kind": "stock",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "consistent",
+    "gate": "series",
+    "evidence": {
+     "stock": "截至 point + state words 正在活跃 + no cumulative/event marker",
+     "scope_mode": "共 total of the object's own active topics"
+    }
+   },
+   "decision": null,
+   "note": "point of month precision: not the same as the interval 2023-12, and no day is added"
+  },
+  {
+   "id": "S19",
+   "group": "positive",
+   "input_type": "epidemic_flow",
+   "source": "who_don",
+   "record": "8bb4df51-9cfa-4c2f-bd91-6634d9f97fe1",
+   "version_id": "b71e1515792f3d93cbf5ca4b6df3049aaf91514f5b5e2f16e06af52b5ca6bed1",
+   "is_demo": false,
+   "raw_sha256": "9aaf1fc4069c7e5af8e8fe59dc8dd1509c23dd8f12cb397104684e8ba0ff7ffb",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "6533446de3e8c9e9ccffd89cf6143ce866d04fb5c78402b2f0ba91b91d9f169a",
+   "sentence": "from September 2022 to January 2023, 42 suspected cases of anthrax in humans had been recorded at the Dengeza Health Post",
+   "sentence_span": [
+    3317,
+    3438
+   ],
+   "clause_span": [
+    2827,
+    5037
+   ],
+   "clause": "On 1 November 2023, the IHR National Focal Point of Zambia notified WHO of an anthrax outbreak in humans. The first human cases were reported from the Dengeza Health Post in the Sinazongwe District of the Southern Province on 5 May 2023. Around the same period, domestic (cattle and goats) and wild animals (hippopotami) were reportedly dying from an unknown cause in the surrounding areas. While Zambia typically reports sporadic cases of anthrax annually, the investigation revealed that from September 2022 to January 2023, 42 suspected cases of anthrax in humans had been recorded at the Dengeza Health Post. All the cases presented at health facilities with skin sores and ulcers, and some of them developed nonspecific symptoms (e.g., nausea, vomiting, difficulty in breathing). Human specimens were collected during the investigation and sent to the Lusaka Central Veterinary Research Institute (CVRI) for testing. The initial samples collected and tested by culture returned negative for anthrax. In June 2023, human and animal cases were reported in the Kanchindu and Siameja veterinary camps of Sinazongwe district. Twenty-six human cases developed sores on their face, arms, and fingers after consuming meat from three wild hippopotamus carcasses. The first human case was reported on 16 June 2023 and laboratory confirmed by culture at the Lusaka CVRI. On the animal side, 13 domestic animals including cattle (10) and goats (3) out of Sinazongwe district susceptible population of 65 000 (30 000 cattle and 35 000 goats), under free range extensive traditional management, died of suspected anthrax. Cattle and goat specimens tested by culture at the Lusaka CVRI returned positive for anthrax on 17 July 2023. Until 1 November, anthrax outbreaks affecting animals and humans were reported in other Southern, Northwestern, and Western provinces. As of 20 November 2023, 684 suspected human cases, including four deaths (CFR 0.6%) were reported from 44 out of 116 districts in nine of Zambia’s 10 provinces. Sinazongwe district is the epicenter, accounting for 287 cases (42% of total 684 cases) and two deaths (50% of total the four deaths). The most affected provinces are the Southern (370 cases;",
+   "fields": {
+    "value": {
+     "literal": "42",
+     "start": 3354,
+     "end": 3356,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "anthrax",
+     "start": 3376,
+     "end": 3383,
+     "located_in": "quote"
+    },
+    "metric": {
+     "literal": "suspected cases of anthrax in humans",
+     "start": 3357,
+     "end": 3393,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "from September 2022 to January 2023",
+     "start": 3317,
+     "end": 3352,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "Dengeza Health Post",
+     "start": 3419,
+     "end": 3438,
+     "located_in": "quote"
+    },
+    "unit": {
+     "literal": "cases",
+     "start": 3367,
+     "end": 3372,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "anthrax",
+    "metric": "suspected cases of anthrax in humans",
+    "value": 42,
+    "unit": "cases",
+    "period": {
+     "type": "interval",
+     "precision": "month",
+     "start": "2022-09",
+     "end": "2023-01"
+    },
+    "scope": "Dengeza Health Post",
+    "scope_mode": "stated",
+    "denominator": null,
+    "measure_kind": "flow",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "consistent",
+    "gate": "series",
+    "evidence": {
+     "flow": "event verb 'recorded' in the value's own sentence + month interval",
+     "fields": "object 'anthrax' and unit 'cases' lie inside the metric span (D5 a); 'suspected' and 'in humans' kept",
+     "scope": "stated 'Dengeza Health Post' in the same sentence, no other quantity between"
+    }
+   },
+   "decision": null,
+   "note": "cross-year month interval 2022-09..2023-01; 'from ... to ...' proves the interval only, not cumulation"
+  },
+  {
+   "id": "S04",
+   "group": "conditional",
+   "input_type": "flow_half_year",
+   "source": "legacy_documents",
+   "record": "legacy:cde:6ef081c9-5909-538c-acdb-3a92af044008",
+   "version_id": "2c32dd0bb85b048f571a3e92ee1c2f06d4f376bc0455d9a90dcbcb1ff790f61b",
+   "is_demo": false,
+   "raw_sha256": "6e0fae8e5f993a7ad47692b799352edcaa259b1a8eadab1a1c8b99cb3cb38b16",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "05245ed984246edc02359e4bb56f746b9b5f75c3ad216bbe93743b5a8424cc23",
+   "sentence": "2021年上半年，我国批准创新性药物21个",
+   "sentence_span": [
+    30,
+    51
+   ],
+   "clause_span": [
+    30,
+    52
+   ],
+   "clause": "2021年上半年，我国批准创新性药物21个。",
+   "fields": {
+    "value": {
+     "literal": "21",
+     "start": 48,
+     "end": 50,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "我国",
+     "start": 39,
+     "end": 41,
+     "located_in": "quote"
+    },
+    "metric": {
+     "literal": "批准创新性药物",
+     "start": 41,
+     "end": 48,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "2021年上半年",
+     "start": 30,
+     "end": 38,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "个",
+     "start": 50,
+     "end": 51,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "我国",
+    "metric": "批准创新性药物",
+    "value": 21,
+    "unit": "个",
+    "period": {
+     "type": "interval",
+     "precision": "half",
+     "value": "2021H1"
+    },
+    "scope": "",
+    "scope_mode": "object_metric_total",
+    "denominator": null,
+    "measure_kind": "flow",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "object": "unsupported: deictic 我国 has no checked unique referent"
+    }
+   },
+   "decision": null,
+   "note": "D6 not done this round: the source's jurisdiction does not prove what 我国 refers to (reprints, quotations); stays a candidate until an independent entity resolution exists. no total marker either: with D6, scope_mode object_metric_total still needs one, so the scope would stay unsupported"
+  },
+  {
+   "id": "S21",
+   "group": "conditional",
+   "input_type": "cumulative_as_of",
+   "source": "cde",
+   "record": "https://www.cde.org.cn/main/news/viewInfoCommon/44374fab577b21d85ab26f76a2feaaa0",
+   "version_id": "b6bf75ad6736013d5a4663dc804c235aec49e1d71e11063128df9a48535047bc",
+   "is_demo": false,
+   "raw_sha256": "ced8d1a05304a2b401c59691812409e49f95a57f4793d08305a4aeb474fa958f",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "315a9d157bf16d9e290374c9018b3d7dbcec0acc1af1afe824f656132266699b",
+   "sentence": "截至2020年12月31日，我国累计发布药品审评技术指导原则272个",
+   "sentence_span": [
+    1456,
+    1490
+   ],
+   "clause_span": [
+    1456,
+    1505
+   ],
+   "clause": "截至2020年12月31日，我国累计发布药品审评技术指导原则272个，其中71个在2020年发布。",
+   "fields": {
+    "value": {
+     "literal": "272",
+     "start": 1486,
+     "end": 1489,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "我国",
+     "start": 1470,
+     "end": 1472,
+     "located_in": "quote"
+    },
+    "metric": {
+     "literal": "发布药品审评技术指导原则",
+     "start": 1474,
+     "end": 1486,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "截至2020年12月31日",
+     "start": 1456,
+     "end": 1469,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "个",
+     "start": 1489,
+     "end": 1490,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "我国",
+    "metric": "发布药品审评技术指导原则",
+    "value": 272,
+    "unit": "个",
+    "period": {
+     "type": "point",
+     "precision": "day",
+     "value": "2020-12-31"
+    },
+    "scope": "",
+    "scope_mode": "object_metric_total",
+    "denominator": null,
+    "measure_kind": "cumulative",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "object": "unsupported: deictic 我国"
+    }
+   },
+   "decision": null,
+   "note": "D6 not done this round: the source's jurisdiction does not prove what 我国 refers to (reprints, quotations); stays a candidate until an independent entity resolution exists. the following group 其中71个在2020年发布 is a subset of the value, after it; it does not restrict the value"
+  },
+  {
+   "id": "S13",
+   "group": "boundary",
+   "input_type": "total_as_of",
+   "source": "who_don",
+   "record": "db4d46d9-c63d-499e-977c-a716e907f3f8",
+   "version_id": "32e12013a9613e4cadb703ee1118b384641f3f0ae2f6dd4c776ba3032bd5ddc2",
+   "is_demo": false,
+   "raw_sha256": "fe456c6441597c4ce8b321316cb5366282c96c0adb505958ed09c1cc07f6ab5a",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "6bd6949aaf978453a51ec66a93ad612e944f1fe4554ddb7dc6822edc641676c2",
+   "sentence": "a total of 3462 EVD cases",
+   "sentence_span": [
+    1912,
+    1937
+   ],
+   "clause_span": [
+    1772,
+    2387
+   ],
+   "clause": " and 406 samples from re-tested patients. Overall, laboratory activities increased by 15% compared to the previous week. As of 19 May 2020, a total of 3462 EVD cases, including 3317 confirmed and 145 probable cases have been reported. Of these, 2279 people died (overall case fatality ratio 66%) and 1171 survived. Of the total confirmed and probable cases, 57% ( n =1970) were female, 29% ( n =1002) were children aged less than 18 years, and 5% ( n =171) were health care workers. Since the beginning of the outbreak 250 292 contacts have been registered, and since August 2018, 303 867 people (frontline workers;",
+   "fields": {
+    "value": {
+     "literal": "3462",
+     "start": 1923,
+     "end": 1927,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "EVD",
+     "start": 1928,
+     "end": 1931,
+     "located_in": "quote"
+    },
+    "metric": {
+     "literal": "cases",
+     "start": 1932,
+     "end": 1937,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "As of 19 May 2020",
+     "start": 1893,
+     "end": 1910,
+     "located_in": "clause"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "cases",
+     "state": "unknown",
+     "why": "not at the value"
+    }
+   },
+   "final": {
+    "object": "EVD",
+    "metric": "cases",
+    "value": 3462,
+    "unit": "cases",
+    "period": {
+     "type": "point",
+     "precision": "day",
+     "value": "2020-05-19"
+    },
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": null,
+    "measure_kind": "cumulative",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "measure_kind": "unsupported: 'a total of' + as-of proves no start (stock or cumulative)",
+     "scope": "unsupported: the country is only in the record title, not in the artifact"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S14",
+   "group": "boundary",
+   "input_type": "epidemic_period",
+   "source": "who_don",
+   "record": "c25f7eb4-f67a-49f4-9ca5-e725ef9e11a5",
+   "version_id": "8836d97facaace14a091606043ccb893ee3f2809a012375171e3f56fbe2ec0a7",
+   "is_demo": false,
+   "raw_sha256": "b62122630c173c1d4293aa5dd302ede9b25c5a5107c4d2d4f96fc963e4334322",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "64d237cc547ac31fc6003a7ed5c209000d04c025516d4bea2ff6d7efab198b7b",
+   "sentence": "In the past 21 days (22 January to 11 February 2020), 12 confirmed cases",
+   "sentence_span": [
+    735,
+    807
+   ],
+   "clause_span": [
+    56,
+    1204
+   ],
+   "clause": "This week, the case incidence continued to be low in the Ebola virus disease (EVD) outbreak in the Democratic Republic of the Congo (Figure 1). From 5 to 11 February, three new confirmed cases were reported in Beni Health Zone, North Kivu Province. All three cases have epidemiological links to a transmission chain originating in Aloya Health Area, Mabalako Health Zone, with possible nosocomial exposure in Beni. The most recent case reported from Beni Health Zone on 11 February was isolated one day after symptom onset. Early detection of cases reduces the probability of transmission of EVD in the community and significantly improves the clinical outcome for the patients. In the past 21 days (22 January to 11 February 2020), 12 confirmed cases, including three community deaths, were reported from four health areas within two active health zones in North Kivu Province (Figure 2, Table 1): Beni ( n =11) and Mabalako ( n =1). It has been 42 days since Katwa Health Zone has reported new cases. The continued reduction of geographic spread of EVD cases and the declining trend in case incidence observed in the past 21 days are encouraging;",
+   "fields": {
+    "value": {
+     "literal": "12",
+     "start": 789,
+     "end": 791,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "confirmed cases",
+     "start": 792,
+     "end": 807,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "22 January to 11 February 2020",
+     "start": 756,
+     "end": 786,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "cases",
+     "start": 802,
+     "end": 807,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "confirmed cases",
+    "value": 12,
+    "unit": "cases",
+    "period": {
+     "type": "interval",
+     "precision": "day",
+     "start": "2020-01-22",
+     "end": "2020-02-11"
+    },
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": null,
+    "measure_kind": "flow",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "object": "unsupported: the disease (Ebola virus disease) is only in the record title",
+     "period": "match when 21 = inclusive days 22 Jan..11 Feb 2020 (v4 past-N-days rule)"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S05",
+   "group": "boundary",
+   "input_type": "flow_year",
+   "source": "cde",
+   "record": "https://www.cde.org.cn/main/news/viewInfoCommon/81eca9751931e2b07695df8294d8fbbb",
+   "version_id": "e7300830fed1277272b4f25caae431fbe000065813acc0624570ec40da63c3ac",
+   "is_demo": false,
+   "raw_sha256": "5ebb423ed4b1c9529a8542a86e79981a7caa5d89617f76324105c637af63698e",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "28d893ec45ec12f1a8d4b03d751b97f89ef07ce84bf1ac8d357d5559f2b2e2fa",
+   "sentence": "2023年，全年共有40个１类创新药获批上市",
+   "sentence_span": [
+    47,
+    69
+   ],
+   "clause_span": [
+    47,
+    149
+   ],
+   "clause": "2023年，全年共有40个１类创新药获批上市（包括中药１类创新药5个），罕见病用药获批上市45个品种，儿童用药产品92个品种，境外已上市、境内未上市药品86个品种，建议批准“国家短缺药品”清单药品１８个；",
+   "fields": {
+    "value": {
+     "literal": "40",
+     "start": 57,
+     "end": 59,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "１类创新药获批上市",
+     "start": 60,
+     "end": 69,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "2023年",
+     "start": 47,
+     "end": 52,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "个",
+     "start": 59,
+     "end": 60,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "１类创新药获批上市",
+    "value": 40,
+    "unit": "个",
+    "period": {
+     "type": "interval",
+     "precision": "year",
+     "value": "2023"
+    },
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": null,
+    "measure_kind": "flow",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "object": "unsupported: not stated",
+     "metric": "unsupported: the group holds another quantity (中药１类创新药5个)"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S06",
+   "group": "boundary",
+   "input_type": "cumulative_ytd",
+   "source": "cde",
+   "record": "https://www.cde.org.cn/main/news/viewInfoCommon/702e718961dca3e91c44864c73d5c73d",
+   "version_id": "f3c6a7431c8b0f3d7421402baa15a08bf0ad12f16e9f13e2a7cd01514b4c65d9",
+   "is_demo": false,
+   "raw_sha256": "77a238f32fee5a9b59022b71435a79b9bf4c30f0535886da76745e4ab23c9c4d",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "f5383d29e15d5bec28ce7c398af508817c5649d24bbd025fd5e7e84de6dc12fd",
+   "sentence": "2023年前5月有34个儿童用药获批上市",
+   "sentence_span": [
+    2,
+    22
+   ],
+   "clause_span": [
+    0,
+    32
+   ],
+   "clause": "# 2023年前5月有34个儿童用药获批上市 数量超过去年同期\n",
+   "fields": {
+    "value": {
+     "literal": "34",
+     "start": 11,
+     "end": 13,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "儿童用药获批上市",
+     "start": 14,
+     "end": 22,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "2023年前5月",
+     "start": 2,
+     "end": 10,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "个",
+     "start": 13,
+     "end": 14,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "儿童用药获批上市",
+    "value": 34,
+    "unit": "个",
+    "period": {
+     "type": "interval",
+     "precision": "month",
+     "start": "2023-01",
+     "end": "2023-05"
+    },
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": null,
+    "measure_kind": "cumulative",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "object": "unsupported: not stated",
+     "measure_kind": "match (前5月 = year-to-date from 1 January)"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S08",
+   "group": "boundary",
+   "input_type": "relative_period",
+   "source": "cde",
+   "record": "https://www.cde.org.cn/main/news/viewInfoCommon/c561f75d79dd795d7689ea56c3334dc2",
+   "version_id": "e54c5dc7b348f1f360b6987c2d3948e8d64f647cb21f6b02fc721d4ec4264fe1",
+   "is_demo": false,
+   "raw_sha256": "be741af71936d165a11d9c62f7dbe67c81d36bd6ac22c6a26e65f5a914011639",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "b0f4341ac80fc60b16e9e788bc0e4e69d7abf726978e60639890786b24830972",
+   "sentence": "近3年共批准128个罕见病药物上市",
+   "sentence_span": [
+    317,
+    334
+   ],
+   "clause_span": [
+    290,
+    354
+   ],
+   "clause": "目前药审中心已发布9项罕见病药物研发相关技术指导原则，近3年共批准128个罕见病药物上市，较好缓解了我国罕见病患者临床迫切需求。",
+   "fields": {
+    "value": {
+     "literal": "128",
+     "start": 323,
+     "end": 326,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "罕见病药物上市",
+     "start": 327,
+     "end": 334,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "近3年",
+     "start": 317,
+     "end": 320,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "个",
+     "start": 326,
+     "end": 327,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "罕见病药物上市",
+    "value": 128,
+    "unit": "个",
+    "period": null,
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": null,
+    "measure_kind": "flow",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "period": "unsupported: relative_period"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S09",
+   "group": "boundary",
+   "input_type": "rate_share_elsewhere",
+   "source": "cde",
+   "record": "https://www.cde.org.cn/main/news/viewInfoCommon/4736b0e3cb05e2a640518c808220954a",
+   "version_id": "327f56aad93a9aa6353d163161837a7a20625c289612b0c3bd95c6e7d84e4de5",
+   "is_demo": false,
+   "raw_sha256": "a10bda929d21518cf1ac6f90373513e36ec609170a5f4c48918fa1fd3be1a5c4",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "2731a4812e91e76ef9da007b654f842b949188f7c01e8661f8c5213840d4f588",
+   "sentence": "上年结转10,259.95万元，占21.3%",
+   "sentence_span": [
+    15956,
+    15978
+   ],
+   "clause_span": [
+    15913,
+    15979
+   ],
+   "clause": "国家药品监督管理局 药品审评中心 2025 年 收入预算48,161.93万元，其中：上年结转10,259.95万元，占21.3%；",
+   "fields": {
+    "value": {
+     "literal": "21.3",
+     "start": 15973,
+     "end": 15977,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "48,161.93",
+     "start": 15941,
+     "end": 15950,
+     "located_in": "clause"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "上年结转",
+     "start": 15956,
+     "end": 15960,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "%",
+     "start": 15977,
+     "end": 15978,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "上年结转",
+    "value": 21.3,
+    "unit": "%",
+    "period": null,
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": 48161.93,
+    "measure_kind": "rate",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "denominator": "unsupported: total stated in another group, ratio not explicit"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S10",
+   "group": "boundary",
+   "input_type": "percent_change",
+   "source": "cde",
+   "record": "https://www.cde.org.cn/main/news/viewInfoCommon/78e6ed5048ac42c5b7018739321a360e",
+   "version_id": "b5742da9e484ae742142f5be6935960dbf51d2663b692afffa8d7438e6176bb0",
+   "is_demo": false,
+   "raw_sha256": "0f3b47401a9c581d9dfa0310b9274ed2b843df2e5eb1a72bbba55796338100e2",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "8008fbac1c07943ec20901fab19e0d82bcc4957d06fb4bfcbf2e3321746b2cca",
+   "sentence": "收、支总计各减少 2,913.53 万元，下降 6.1%",
+   "sentence_span": [
+    27461,
+    27489
+   ],
+   "clause_span": [
+    27449,
+    27515
+   ],
+   "clause": "与 2023 年度相比，收、支总计各减少 2,913.53 万元，下降 6.1%，主要原因：一是一般公共预算财政拨款收入、支出减少；",
+   "fields": {
+    "value": {
+     "literal": "6.1",
+     "start": 27485,
+     "end": 27488,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "收、支总计",
+     "start": 27461,
+     "end": 27466,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "%",
+     "start": 27488,
+     "end": 27489,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "收、支总计",
+    "value": 6.1,
+    "unit": "%",
+    "period": null,
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": null,
+    "measure_kind": "rate",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "measure_kind": "unsupported: percent_change"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S11",
+   "group": "boundary",
+   "input_type": "approximate_planned",
+   "source": "legacy_documents",
+   "record": "legacy:nmpa:9e960342-2967-5d3a-9927-10205e5567a6",
+   "version_id": "7842a4c54c53e037b52a9ec9f0a25bc406cca349eff213e8be1dc6754f0de060",
+   "is_demo": false,
+   "raw_sha256": "e21fc847a8f605cad1d6bf2397f4c1f9804d39160f552407a36fe30c202cb9b2",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "e0f27ddfe65309e8a2f47d95a1f579864b149018e65eca93fb381e3b557b126b",
+   "sentence": "计划采集样品约1100 批次",
+   "sentence_span": [
+    1359,
+    1373
+   ],
+   "clause_span": [
+    1339,
+    1480
+   ],
+   "clause": "2021 年下半年化妆品安全风险监测工作计划采集样品约1100 批次，包括面膜类、浴足类、儿童化妆品类、宣称舒缓类、宣称止痒类、宣称抗皱祛痘类、宣称促进毛发生长类、保湿类、眼用护肤类、健美类、喷雾类、指甲油类、彩妆类、淋洗类、“网红”护肤类、护发类、祛斑美白类、儿童牙膏类化妆品等。",
+   "fields": {
+    "value": {
+     "literal": "1100",
+     "start": 1366,
+     "end": 1370,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "采集样品",
+     "start": 1361,
+     "end": 1365,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "批次",
+     "start": 1371,
+     "end": 1373,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "采集样品",
+    "value": 1100,
+    "unit": "批次",
+    "period": null,
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": null,
+    "measure_kind": "flow",
+    "qualifier": "approximate",
+    "modality": "planned"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "qualifier": "match (约)",
+     "modality": "match (计划)"
+    },
+    "note": "D4: approximate/planned never enter the exact actual series"
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S12",
+   "group": "boundary",
+   "input_type": "several_quantities",
+   "source": "legacy_documents",
+   "record": "legacy:cde:b16272a6-df10-5812-92a3-4ac7a5d47252",
+   "version_id": "f2d3725a94eac866d206ab6eff1d06b08127447b6b39968efddf59f48b8df52b",
+   "is_demo": false,
+   "raw_sha256": "9c69a79714762c470ee7057508578d56357dd672ca1c08a7f9e2aec53b5b576c",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "67c35634a2e6c1113e0c864965703eaf2c98ffe51bb3265d3167a2316102b11c",
+   "sentence": "2021年上半年已有21个1类创新药获批上市，这一数字已经超过2020年全年20个创新药审评通过数量",
+   "sentence_span": [
+    99,
+    149
+   ],
+   "clause_span": [
+    76,
+    170
+   ],
+   "clause": "《医药经济报》记者从国家药监局获得的数据显示，2021年上半年已有21个1类创新药获批上市，这一数字已经超过2020年全年20个创新药审评通过数量，这也意味着我国在创新药审评上刷新了记录。",
+   "fields": {
+    "value": {
+     "literal": "21",
+     "start": 109,
+     "end": 111,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "1类创新药获批上市",
+     "start": 112,
+     "end": 121,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "2021年上半年",
+     "start": 99,
+     "end": 107,
+     "located_in": "quote"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "个",
+     "start": 111,
+     "end": 112,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "1类创新药获批上市",
+    "value": 21,
+    "unit": "个",
+    "period": {
+     "type": "interval",
+     "precision": "half",
+     "value": "2021H1"
+    },
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": null,
+    "measure_kind": "flow",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "object": "unsupported: not stated"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S15",
+   "group": "boundary",
+   "input_type": "rate_ratio_period_elsewhere",
+   "source": "who_don",
+   "record": "7a698a0c-4b7d-4ad0-b92c-e9d2432d119f",
+   "version_id": "c9afbbdcdde1ee26957595ffbe7e19de5b38354f028118f5a0456bc59f15135b",
+   "is_demo": false,
+   "raw_sha256": "83f70ceb07266fef2d01afbcd5d2a58c23427584f58d9b52c424038bc9f18565",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "aeb2962cd2080faaf145d8c18fb0eebeaa58c9694abcdbc7568918ed6b1e1b6c",
+   "sentence": "26% (5/19) of cases",
+   "sentence_span": [
+    4638,
+    4657
+   ],
+   "clause_span": [
+    3100,
+    7179
+   ],
+   "clause": " however, each year several cases report no direct contact with birds, which suggests potential environmental exposure. There is no indication of increased testing or change in testing procedures in Denmark that could explain the current increase in psittacosis cases. The National Health Institute of Denmark, Statens Serum Institute, suspects that infections are primarily associated with wild birds through the inhalation of airborne particles from the dried droppings of infected birds. The prevalence of C. psittaci among wild birds in Denmark is currently unknown, and plans are underway to examine samples from wild birds submitted for avian influenza testing to clarify this. It is assumed that the actual number of individuals infected with C. psittaci is much higher than reported. Some cases may be associated with exposure to domesticated psittacines (including parrots) or other birds that can carry the bacteria asymptomatically. Germany Germany reported an increase in individuals who tested positive for C. psittaci in December 2023 with five confirmed cases, making a total of 14 confirmed cases in 2023. In 2024, as of 20 February, another five confirmed cases of psittacosis were notified. There are no reports of a geographical cluster, except with an accumulation of cases around the city of Hannover over the last year. Almost all cases had pneumonia (18/19), 16 of whom were hospitalized. Among the 19 cases notified from 1 January 2023 to 19 February 2024, none had information on exposure to wild birds, although 26% (5/19) of cases reported exposure to domesticated birds such as parrots, chickens, or breeding pigeons. Over the past five years, Germany has reported an average of 15 cases per year, with the highest number of cases in 2022 (19 cases) and the lowest number in 2019 (11 cases). Usually, around zero to two cases per month are reported. Around 72% (56/78) of the cases in the last five years were confirmed by antibody testing. Information on bird exposure is often missing. Sweden Sweden reported an unusually high number of cases of psittacosis in late November 2023 and early December 2023, with seven cases reported in November 2023 and 19 cases reported in December 2023. This represents a doubling of the number of cases compared to respective months in the previous five years. In 2024, however, ten cases were reported in January and three cases in February, which is lower than the average number of cases reported in the same period in the previous five years. Overall, Sweden reported an increase in the number of reported cases of psittacosis from 2017 onwards. Geographically, cases reported as of early November 2023, are distributed between eight of the 21 regions of Sweden, all located in the southernmost third of the country. Reported cases have been in contact with droppings from small birds, mainly via feeders, and a few are thought to have been infected via domestic birds (hens or cockatoos). Changes in diagnostic practices have likely contributed to this increase, as it has become increasingly common to use RT-PCR panels for screening. The Netherlands The Netherlands observed an increase of confirmed psittacosis cases since late December 2023, with 21 individuals reported as positive for C. psittaci as of 29 February 2024, which is twice as many cases as the same period in previous years. Over the past ten years, there has been an average of nine cases reported during the same period. Recent cases have been geographically spread throughout the country with no common source of infection being identified. The cases had an average age of 67 (range: 37-86 years), of whom 16 were men (76%). All recent cases were hospitalized and one case died. Six of the 21 cases reported since late December 2023 have noted contact with droppings of wild birds, seven had contact with droppings of domestic birds, and eight cases did not report any contact with birds. Testing procedures have not changed in recent years in the Netherlands. Since 2018, more than 95% of the notifications are based on RT-PCR testing.\n",
+   "fields": {
+    "value": {
+     "literal": "26",
+     "start": 4638,
+     "end": 4640,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "19",
+     "start": 4645,
+     "end": 4647,
+     "located_in": "quote"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "of cases",
+     "start": 4649,
+     "end": 4657,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "%",
+     "start": 4640,
+     "end": 4641,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "of cases",
+    "value": 26,
+    "unit": "%",
+    "period": null,
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": 19,
+    "measure_kind": "rate",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "measure_kind": "match (26% with 5/19)",
+     "period": "unsupported: a date range in an earlier group with another quantity (19 cases)"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S16",
+   "group": "boundary",
+   "input_type": "period_without_year",
+   "source": "who_don",
+   "record": "8fbb14a7-4f4d-4e4a-b113-68b944028ebf",
+   "version_id": "e35c8ac03a1f4b5a237e6c6f60b0d8765d21582da4f814e875ab7436401f8d18",
+   "is_demo": false,
+   "raw_sha256": "6d053d5b7f9722bd9a2fdacba3884e16805fdb4f13bd1bd8eb3191aca23e3be0",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "b69b1bd2c3d8f0542bfe2390bc2846f13011a973800c3545430ecb4a2c86ff4e",
+   "sentence": "cumulative confirmed cases have reached 8728",
+   "sentence_span": [
+    2738,
+    2782
+   ],
+   "clause_span": [
+    2199,
+    7327
+   ],
+   "clause": "Since the previous Disease Outbreak News was published on 25 September 2026, an additional 775 confirmed cases, including 379 confirmed deaths, have been reported in the Democratic Republic of the Congo. In the most recent 24-hour period, as of 6 October, 62 new confirmed cases were reported, with Ituri accounting for 33 cases and North Kivu for 30. No new cases were reported in Bas-Uélé, South Kivu or Sud-Ubangi during that period. Across the preceding seven days, the average number of new cases rose to 72 per day. As of 6 October, cumulative confirmed cases have reached 8728, including 4205 deaths and 2269 recoveries. The overall crude CFR is 48.2%. Confirmed cases have now been identified in 64 health zones across seven provinces. Forty-eight of the 64 affected zones reported at least one new case during the preceding 21 days, while 16 reported no recent cases. Ituri remains the most extensively affected province, with 28 of 36 health zones reporting cases during this outbreak, followed by North Kivu (17/34), Haut-Uélé (7/13), Tshopo (7/23), Bas-Uélé (3/11), South Kivu (1/34) and Sud-Ubangi (1/16). Alimbongo in North Kivu is the most recently affected health zone and reported four confirmed cases, including two deaths. Figure 1. Distribution of cumulative confirmed cases of Bundibugyo virus disease in the Democratic Republic of the Congo, as of 6 October 2026 Ituri remains the epicentre, with 6480 cumulative confirmed cases and 2989 deaths. North Kivu follows with 1755 confirmed cases and 1013 deaths, and continues to record the highest provincial CFR, at 57.7%. Haut-Uélé has reported 364 cases and 153 deaths, while Tshopo has recorded 51 cases and 17 deaths. The less-affected provinces continue to report substantially fewer cases, but transmission persists in several of them. The most affected health zones were Beni and Katwa in North Kivu, and Rwampara, Bunia and Mandima in Ituri. The continued occurrence of cases across multiple provinces shows that the outbreak remains geographically active even as intensity varies between health zones. Contact follow-up remains a major operational pressure and has fluctuated below the response target in recent weeks. Coverage was 87.6% on 16 September, briefly above the target of 85%, but fell to 74.7% by 25 September. Although coverage subsequently improved to 82.0% on 27 September, it remained below target and stood at 80.4% in the latest reporting period, with 23 741 of 29 535 contacts reached as of 4 October. The current level therefore reflects a persistent gap in the ability to monitor exposed people consistently throughout the 21-day follow-up period. Figure 2: Number of confirmed Bundibugyo virus disease cases in the Democratic Republic of the Congo, by date of notification, as of 6 October 2026 Figure 3: Number of deaths among confirmed Bundibugyo virus disease cases in the Democratic Republic of the Congo by date of notification, as of 6 October 2026. Kenya On 6 October 2026, the Ministry of Health of Kenya reported the first laboratory-confirmed imported case of BVD in Kenya. According to an official statement from the Ministry of Health, the individual is an adult who lived in the Democratic Republic of the Congo. The patient became ill approximately one month ago and was treated in several hospitals while in the Democratic Republic of the Congo. The patient travelled from the Democratic Republic of the Congo to Kampala, Uganda, by road before arriving in Nairobi, Kenya by air on 3 October. It is currently unclear if and when he was symptomatic during these travels, but upon arriving ill in Kenya, the patient was transported by a relative directly to Nairobi Hospital and isolated in the facility. A sample collected from the patient on 5 October was positive for BDBV at both the National Virology Reference Laboratory and the Kenya Medical Research Institute Laboratory on the same day. The patient was given supportive treatment but subsequently died. A safe and dignified burial has been conducted. Public health response actions were immediately initiated. Contact tracing is ongoing, including for the international flight. Given the timelines of the illness, and the one month time from initial symptoms to death, it is presumed he was not initially sick with BVD, which does not usually have such a long progression from infection to symptoms and death, but became infected with BVD in a health facility or community while seeking care for another ailment. The Netherlands On 1 October 2026, the Netherlands reported the medical evacuation of a healthcare worker who tested positive by PCR for BDBV in the Democratic Republic of the Congo where the patient was working on the Ebola disease outbreak response. Following confirmation of the diagnosis, the patient was safely repatriated to the Netherlands under strict medical and infection-prevention procedures, in close coordination with the relevant health authorities in the Democratic Republic of the Congo and the Netherlands. As with previous medically evacuated cases, this case will not be reported as a local case of BVD in the Netherlands.\n",
+   "fields": {
+    "value": {
+     "literal": "8728",
+     "start": 2778,
+     "end": 2782,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "cumulative confirmed cases",
+     "start": 2738,
+     "end": 2764,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "As of 6 October",
+     "start": 2721,
+     "end": 2736,
+     "located_in": "clause"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "cumulative confirmed cases",
+    "value": 8728,
+    "unit": "",
+    "period": null,
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": null,
+    "measure_kind": "cumulative",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "period": "unsupported: period_year_not_stated (never taken from the publication date)"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S17",
+   "group": "boundary",
+   "input_type": "space_thousands",
+   "source": "who_don",
+   "record": "0b4d2487-30dc-4c41-9d60-c4a4e7feffa8",
+   "version_id": "08ceb58f5ead024598815e05a9330847ac190786f67809abb99fa4915e4736ba",
+   "is_demo": false,
+   "raw_sha256": "afafe3a9de841c13de45ea4633a9fbb59642d0ebe3e29b49a6aa2e165478e70f",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "67d30d2c4fe2eeec46891067369dc0068dfa505203d36036e03e887f667b1d75",
+   "sentence": "1 895 122 (45%)",
+   "sentence_span": [
+    6071,
+    6086
+   ],
+   "clause_span": [
+    5053,
+    6514
+   ],
+   "clause": " and iii) inadequate surveillance and limited case reporting, especially for dengue. Efforts are ongoing to better understand the transmission dynamics of dengue and other arboviruses in the region. The WHO Regional Office for Africa has endorsed the Framework for the integrated control, elimination and eradication of tropical and vector-borne diseases in the African Region 2022-2030. Equally, the Regional Office has also drafted the Framework for implementation of the Global Arbovirus Initiative by targeted Member States in the WHO African Region . WHO Region of the Americas: Between 1 January 2023 and 11 December 2023, a total of 4.1 million suspected dengue cases (cumulative incidence of 419 cases per 100 000 population), including 6710 severe cases (0.16% of suspected cases) and 2049 deaths (CFR 0.05%) were reported from 42 countries and territories in the Region of the Americas, with 15 countries reporting active outbreak. Of the total number of dengue cases until 12 November 2023 (EW 48 of 2023), 1 895 122 (45%) were laboratory confirmed. Currently, 46 countries and territories systematically report, through the Health Information Platform for the Americas (PLISA), on a weekly basis, the total number of cases, incidence, number of severe cases, number of deaths and lethality due to dengue, as well as entomological surveillance data. As of EW 48, Brazil has reported the highest number of suspected cases in the Region (n = 2 909 404;",
+   "fields": {
+    "value": {
+     "literal": "1 895 122",
+     "start": 6071,
+     "end": 6080,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "laboratory confirmed",
+     "start": 6092,
+     "end": 6112,
+     "located_in": "clause"
+    },
+    "period": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "laboratory confirmed",
+    "value": 1895122,
+    "unit": "",
+    "period": null,
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": null,
+    "measure_kind": "stock",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "value": "unsupported: space-separated thousands"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "S18",
+   "group": "boundary",
+   "input_type": "rate_of_ratio_no_period",
+   "source": "who_don",
+   "record": "28ac1b73-33a6-45fa-8474-6690de75b2ff",
+   "version_id": "1df5b15dc4237ed18d9ab17bf8a44878ab0ef74fb29bcb9097ebd884647851e9",
+   "is_demo": false,
+   "raw_sha256": "551916f48aeefaf7bd8294d02a18fb41d094cf2314ed30b0e18cf87b3fb124ed",
+   "processor": "datafabric.clean_text.v11",
+   "text_sha256": "4eef61fe90d740839eed4b4dbc6ca6bb8df007e2435c188ede5ce847f156289a",
+   "sentence": "23 of 26 (88%) provinces",
+   "sentence_span": [
+    5165,
+    5189
+   ],
+   "clause_span": [
+    2326,
+    5513
+   ],
+   "clause": "Since 2022, an epidemic of mpox caused by monkeypox virus (MPXV) clade IIb has been ongoing globally, affecting many countries outside the African continent that had never reported mpox previously. Its spread has been mainly driven and sustained by transmission via sexual contact among men who have sex with men, who represent the most affected group. Although, MPXV strains circulating in Democratic Republic of the Congo belong to clade I, and no cases of MPXV clade IIb have so far been detected, an increase of reported cases, as well as a geographical expansion of their distribution, has been observed in the country since 2022. Transmission due to sexual contact of MPXV clade I was first formally documented in April 2023 in a small cluster of cases in Kwango province, as mentioned in the previous Disease Outbreak News report . The occurrence of sexual transmission of MPXV clade I was further established by the reporting in September 2023 of several new cases exposed through sexual contact with a known case in Kamituga health zone, in South Kivu province. Since then, the number of cases reported in South Kivu has continued to increase, including among sex workers and their contacts, and from an increasing number of health zones. Case investigations and subsequent outbreak investigations together with virus genetics confirm the sustained human-to-human transmission of MPXV clade I in the area without suspected animal exposure. On 1 June 2024, the first case of mpox was confirmed in North Kivu Province, in Karisimbi Health Zone in the city of Goma [1] . A 19-year-old woman presented with a macular skin rash, dysphagia (difficulty swallowing), dysuria (pain on urination), headache and genital lesions. PCR of swabs from the skin lesions tested positive for MPXV. A total of 45 contacts are being followed-up. In-depth epidemiological investigation identified a sexual contact with suspected mpox and a travel history to South Kivu Province. The contact reportedly traveled onwards to Masisi Health Zone, North Kivu, where the investigation continues. The case of mpox in Goma, North Kivu, which is characterized by insecurity, is the first ever reported case in that province. Overall, in 2023, a total of 14 626 mpox cases and 654 deaths (CFR) 4.5%) were reported in the Democratic Republic of the Congo, representing the highest figures in the recorded in the country and the highest among countries in the WHO African Region. Among these cases, 1 461 (10%) were laboratory-tested, of which 966 were positive (test positivity, 68%). In 2024, as of 26 May, a total of 7 851 mpox cases were reported in the Democratic Republic of the Congo, including 384 deaths (CFR 4.9%). These cases were reported in 177 of the 519 (34%) health zones across 22 out of the 26 provinces (85%). The new case in Goma raises this to 23 of 26 (88%) provinces. The most affected provinces in 2024 are Equateur, Sud Ubangi, Sankuru and South Kivu (Figure 1). Figure 1. Geographic distribution of reported mpox cases, the Democratic Republic of the Congo, 1 January to 26 May 2024 (n=7 851). Source: National mpox integrated disease surveillance data, Democratic Republic of the Congo;",
+   "fields": {
+    "value": {
+     "literal": "88",
+     "start": 5175,
+     "end": 5177,
+     "located_in": "quote"
+    },
+    "denominator": {
+     "literal": "26",
+     "start": 5171,
+     "end": 5173,
+     "located_in": "quote"
+    },
+    "object": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "metric": {
+     "literal": "provinces",
+     "start": 5180,
+     "end": 5189,
+     "located_in": "quote"
+    },
+    "period": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "scope": {
+     "literal": "",
+     "state": "unknown",
+     "why": "not stated"
+    },
+    "unit": {
+     "literal": "%",
+     "start": 5177,
+     "end": 5178,
+     "located_in": "after the value"
+    }
+   },
+   "final": {
+    "object": "",
+    "metric": "provinces",
+    "value": 88,
+    "unit": "%",
+    "period": null,
+    "scope": "",
+    "scope_mode": "unknown",
+    "denominator": 26,
+    "measure_kind": "rate",
+    "qualifier": "exact",
+    "modality": "actual"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "fields": {
+     "measure_kind": "match (88% with 23 of 26)",
+     "period": "not stated: D3, no fill from the record date"
+    }
+   },
+   "decision": null,
+   "note": ""
+  },
+  {
+   "id": "N01",
+   "group": "negative",
+   "kind": "wrong_final_at_real_span",
+   "of": "S01",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "change": {
+    "final.value": 381
+   },
+   "expected": {
+    "status": "inconsistent",
+    "gate": "candidate",
+    "field": "value mismatch (span holds 318)"
+   },
+   "note": ""
+  },
+  {
+   "id": "N02",
+   "group": "negative",
+   "kind": "wrong_final_at_real_span",
+   "of": "S01",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "change": {
+    "final.unit": "件"
+   },
+   "expected": {
+    "status": "inconsistent",
+    "gate": "candidate",
+    "field": "unit mismatch (span holds 个)"
+   },
+   "note": ""
+  },
+  {
+   "id": "N03",
+   "group": "negative",
+   "kind": "wrong_final_at_real_span",
+   "of": "S01",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "change": {
+    "final.period": {
+     "type": "interval",
+     "precision": "month",
+     "value": "2026-03"
+    }
+   },
+   "expected": {
+    "status": "inconsistent",
+    "gate": "candidate",
+    "field": "period mismatch (canonical of 2026年4月 is 2026-04)"
+   },
+   "note": ""
+  },
+  {
+   "id": "N04",
+   "group": "negative",
+   "kind": "wrong_final_at_real_span",
+   "of": "S01",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "change": {
+    "final.object": "国家药品监督管理局"
+   },
+   "expected": {
+    "status": "inconsistent",
+    "gate": "candidate",
+    "field": "object mismatch: no synonym mapping"
+   },
+   "note": ""
+  },
+  {
+   "id": "N05",
+   "group": "negative",
+   "kind": "wrong_final_at_real_span",
+   "of": "S07",
+   "version_id": "a10d5e592653591fb9558c5b5dccb8893cc121d1cc22ec1c1702141ad70cf9f0",
+   "change": {
+    "final.measure_kind": "flow"
+   },
+   "expected": {
+    "status": "inconsistent",
+    "gate": "candidate",
+    "field": "measure_kind mismatch: 截至 gives a point, flow needs an interval"
+   },
+   "note": ""
+  },
+  {
+   "id": "N06",
+   "group": "negative",
+   "kind": "wrong_final_at_real_span",
+   "of": "S07",
+   "version_id": "a10d5e592653591fb9558c5b5dccb8893cc121d1cc22ec1c1702141ad70cf9f0",
+   "change": {
+    "final.period": {
+     "type": "interval",
+     "precision": "month",
+     "value": "2023-12"
+    }
+   },
+   "expected": {
+    "status": "inconsistent",
+    "gate": "candidate",
+    "field": "period mismatch: 截至2023年12月 is a point, not the month interval"
+   },
+   "note": ""
+  },
+  {
+   "id": "N07",
+   "group": "negative",
+   "kind": "wrong_final_at_real_span",
+   "of": "S11",
+   "version_id": "7842a4c54c53e037b52a9ec9f0a25bc406cca349eff213e8be1dc6754f0de060",
+   "change": {
+    "final.qualifier": "exact",
+    "final.modality": "actual"
+   },
+   "expected": {
+    "status": "inconsistent",
+    "gate": "candidate",
+    "field": "qualifier mismatch (约), modality mismatch (计划)"
+   },
+   "note": ""
+  },
+  {
+   "id": "N08",
+   "group": "negative",
+   "kind": "wrong_final_at_real_span",
+   "of": "S15",
+   "version_id": "c9afbbdcdde1ee26957595ffbe7e19de5b38354f028118f5a0456bc59f15135b",
+   "change": {
+    "final.denominator": 18
+   },
+   "expected": {
+    "status": "inconsistent",
+    "gate": "candidate",
+    "field": "denominator mismatch (span holds 19)"
+   },
+   "note": ""
+  },
+  {
+   "id": "N09",
+   "group": "negative",
+   "kind": "wrong_final_at_real_span",
+   "of": "S19",
+   "version_id": "b71e1515792f3d93cbf5ca4b6df3049aaf91514f5b5e2f16e06af52b5ca6bed1",
+   "change": {
+    "final.measure_kind": "cumulative"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "field": "measure_kind unsupported: 'from September 2022 to January 2023' proves an interval, not cumulation"
+   },
+   "note": ""
+  },
+  {
+   "id": "N11",
+   "group": "negative",
+   "kind": "literal_not_in_artifact",
+   "of": "S01",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "change": {
+    "literals.value": "381"
+   },
+   "expected": {
+    "status": "not_built",
+    "gate": "candidate",
+    "field": "value literal occurs 0 times: no span is made up"
+   },
+   "note": "",
+   "literal_occurrences_in_clause": 0
+  },
+  {
+   "id": "N12",
+   "group": "negative",
+   "kind": "literal_not_in_artifact",
+   "of": "S01",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "change": {
+    "literals.unit": "件"
+   },
+   "expected": {
+    "status": "not_built",
+    "gate": "candidate"
+   },
+   "note": "",
+   "literal_occurrences_in_clause": 0
+  },
+  {
+   "id": "N13",
+   "group": "negative",
+   "kind": "literal_not_in_artifact",
+   "of": "S01",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "change": {
+    "literals.object": "国家药品监督管理局"
+   },
+   "expected": {
+    "status": "not_built",
+    "gate": "candidate"
+   },
+   "note": "",
+   "literal_occurrences_in_clause": 0
+  },
+  {
+   "id": "N14",
+   "group": "negative",
+   "kind": "literal_not_in_artifact",
+   "of": "S15",
+   "version_id": "c9afbbdcdde1ee26957595ffbe7e19de5b38354f028118f5a0456bc59f15135b",
+   "change": {
+    "literals.denominator": "190"
+   },
+   "expected": {
+    "status": "not_built",
+    "gate": "candidate"
+   },
+   "note": "",
+   "literal_occurrences_in_clause": 0
+  },
+  {
+   "id": "N21",
+   "group": "negative",
+   "kind": "runtime",
+   "of": "S01",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "change": {
+    "artifact": "text tampered: sha differs from the binding"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "field": "artifact_changed before any call"
+   },
+   "note": ""
+  },
+  {
+   "id": "N22",
+   "group": "negative",
+   "kind": "runtime",
+   "of": "S01",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "change": {
+    "source": "read permission revoked after the call"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "field": "source_unreadable: not adopted, not reused"
+   },
+   "note": ""
+  },
+  {
+   "id": "N23",
+   "group": "negative",
+   "kind": "runtime",
+   "of": "S01",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "change": {
+    "biocheck": "timeout / 503"
+   },
+   "expected": {
+    "status": "unchecked",
+    "gate": "candidate",
+    "field": "kept pending and retried, never a pass"
+   },
+   "note": ""
+  },
+  {
+   "id": "N24",
+   "group": "negative",
+   "kind": "runtime",
+   "of": "S01",
+   "version_id": "c73a6861d2b576061b97b06abab386cca49b3b6af4595079f0b5d58bb980becb",
+   "change": {
+    "quote": "occurs 0 times in the artifact"
+   },
+   "expected": {
+    "status": "not_built",
+    "gate": "candidate"
+   },
+   "note": ""
+  }
+ ]
+}
