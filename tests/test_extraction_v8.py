@@ -18,9 +18,10 @@ def run(client, text, value, **kw):  # noqa: F811
     return f, answer(client, synthetic(text, text, f))
 
 
-def test_the_checker_is_v8_with_the_shared_normalization():
-    assert v8.CHECKER_VERSION == "biocheck.extraction_rules.v8"
-    assert v8.NORMALIZE_VERSION == "extraction_normalize.v1"
+def test_the_checker_reads_with_the_shared_normalization():
+    # v8 on its own commit (43dba74) read with extraction_normalize.v1; from v9 on, v2 (test_extraction_v9)
+    assert v8.CHECKER_VERSION == "biocheck.extraction_rules.v9"
+    assert v8.NORMALIZE_VERSION == "extraction_normalize.v2"
 
 
 @pytest.mark.parametrize("written,canonical", [("1 444", "1444"), ("1 444", "1444"), ("1 444", "1444"),

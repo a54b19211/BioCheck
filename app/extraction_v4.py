@@ -27,8 +27,12 @@ CONTRACT_VERSION = "extraction_consistency.v2"
 # v7 (Codex r137): a negation of the quantity's predicate outside the item's fields leaves the kind unproven.
 # v8: v7 + extraction_normalize.v1 (numbers grouped by space / NBSP / NNBSP, English single years, the unit in
 # the metric phrase bound to the value); v7 stays the frozen baseline on its own commit (45600af)
-CHECKER_VERSION = "biocheck.extraction_rules.v8"
-NORMALIZE_VERSION = norm.NORMALIZE_VERSION
+# v9 (Codex r161): v8 + extraction_normalize.v2 - a period span is read only when it is the whole written period
+# (no month, day, range, start or sub-period continues it: "2018" of "In January 2018" or "Since 2018" is not the
+# year); a unit in the bound metric phrase must be the phrase's head counting noun ("close" of "14 close
+# contacts" is not a unit). v8 stays as released on its own commit (43dba74)
+CHECKER_VERSION = "biocheck.extraction_rules.v9"
+NORMALIZE_VERSION = norm.NORMALIZE_V2
 FIELDS = ("object", "metric", "value", "unit", "period", "scope", "denominator", "measure_kind", "qualifier",
           "modality")
 CANONICAL_DECIMAL = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?")
@@ -257,9 +261,16 @@ def whole_number(P, span):
     return norm.is_whole_number(p["text"], span["start"] - p["start"], span["end"] - p["start"])
 
 
+def whole_period(P, span):
+    """The period span is the whole written period in its passage (extraction_normalize.v2 period_span_whole)."""
+    p = P.by_id[span["passage"]]
+    return norm.period_span_whole(p["text"], span["start"] - p["start"], span["end"] - p["start"])
+
+
 def bound_unit(P, f, unit, vspan):
-    """The stated unit is a word of the stated metric phrase that starts right after the value, nothing between
-    the value and the unit but words (extraction_normalize.v1 unit_bound); the metric span must hold its value."""
+    """The stated unit is the head counting noun of the stated metric phrase that starts right after the value,
+    nothing between the value and the unit but words (extraction_normalize.v2 unit_head); the metric span must
+    hold its value."""
     metric = f["metric"]
     if not v3.stated(metric) or len({vspan["passage"], unit["span"]["passage"], metric["span"]["passage"]}) != 1:
         return False
@@ -268,7 +279,7 @@ def bound_unit(P, f, unit, vspan):
         return False
     p = P.by_id[vspan["passage"]]
     b = p["start"]
-    return norm.unit_bound(p["text"], vspan["end"] - b, unit["span"]["start"] - b, unit["span"]["end"] - b,
+    return norm.unit_head(p["text"], vspan["end"] - b, unit["span"]["start"] - b, unit["span"]["end"] - b,
                            metric["span"]["start"] - b, metric["span"]["end"] - b)
 
 
@@ -508,6 +519,8 @@ def check_v4(item, P):
             fields["period"] = outcome("mismatch", "period_span_outside_passage")
         elif got is None:
             fields["period"] = outcome("unsupported", why)
+        elif not whole_period(P, pf["span"]):
+            fields["period"] = outcome("unsupported", "period_span_not_the_whole_period")
         elif got != pf["value"]:
             fields["period"] = outcome("mismatch", "period_differs_from_canonical_span")
         else:
