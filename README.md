@@ -116,7 +116,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
                        "denominator": {"state": "not_applicable"}, "measure_kind": "stock"}}]}
 ```
 
-- `passages`：同一份固定产物里有界的几段原文（最多 8 段，合计不超过 2 万字），各自用产物的绝对偏移。表格的表头和数据行是两段，不能拼接成一个伪造的连续区间。原文由调用方从固定产物回读得到，这里只核对给出的这几段，不代表已经核验了来源原件。
+- `passages`：同一份固定产物里有界的几段原文（最多 8 段，合计不超过 2 万字），各自用产物的绝对偏移。不能把不连续的几段拼接成一个伪造的连续区间。表头和数据行分在两段时，证明不了是同一张表，列名会记 `unsupported`；要核对列名，需要把表头和这一行放进同一段（各段合计仍不超过 2 万字）。原文由调用方从固定产物回读得到，这里只核对给出的这几段，不代表已经核验了来源原件。
 - 每个字段写成 `{"value": …, "span": {"passage", "start", "end"}}`，或者 `{"state": "unknown" | "not_applicable"}`（来源没写）。各类条目的必填维度：
   - `measurement`（语义同 Fabric `Measurement`）：object、metric、value、unit、period、scope、denominator，以及 measure_kind；
   - `identifier`：scheme 和 identifier；
@@ -124,15 +124,15 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
   - `annotation`：label。
 - 规则：
   - `quote` 必须正好是 `locator` 处的文字，否则其余字段一律不读，记 `unsupported`。
-  - value 必须在 quote 里，并且与 span 处的数字精确相等。只做两种转换：全角数字、千分位逗号。不沿用报告接口的舍入。
-  - unit 必须紧跟在这个数字后面。用 `app/extraction.py` 里带版本的单位表，取最长匹配，所以 mg/kg、mg/day 不会被读成 mg 或分母。
-  - denominator 必须是这个数字所在比例的分母，比例要写在它所在的分句里（分句以 "；;。！？" 和换行切分，表格的一行算一个分句）。百分数可以由同一分句里写明的比例按显示的位数复算。
-  - period 和 scope 必须在数值所在的分句里。
-  - object 和 metric 要在同一分句或同一行；如果是表格的列名，必须是数值所在那一列的表头。
-  - measure_kind 只对"带 % 或带比例的 rate"做核对。
-  - identifier 只核对原文的字面写法；需要规范化才对得上的，记 `unsupported`。
+  - value 的 span 必须恰好是原文里一个完整的数字（含符号、小数、千分位），并与所报的值精确相等。只做两种转换：全角数字、千分位逗号。不沿用报告接口的舍入。
+  - unit 必须紧跟在这个数字后面，用带版本的单位表取最长匹配，所以 mg/kg、mg/day 不会被读成 mg 或分母。
+  - denominator 必须是这个数字所在、并在同一分句里写明的比例的分母（分句以 "；;。！？" 和换行切分）。百分数可以由这样的比例按显示的位数复算。
+  - period、scope、object、metric 必须落在数值所在的"组"里，并且这个组里没有别的数量（数值自己比例的分子、分母除外）。组是在分句的基础上再按 "，,、" 切开的一段；表格的一行算一条记录。
+  - 表格的列名必须是同一段原文里、数值所在那张表的表头，并且在同一列。表头和数据行分在不同段时，证明不了是同一张表，记 `unsupported`。
+  - measure_kind 为 rate 时，必须在数值处写着 %，或者有真实写明的比例；"没写分母"不算证据。
+  - identifier 只核对原文的字面写法，需要规范化才对得上的记 `unsupported`。
   - claim 的 polarity 和 qualifiers、annotation 的判断，都属于语义判断，记 `unsupported`。
-  - `unknown` 只有在规则能证明来源确实没写时才算 `match`。例如分句里写了日期，不能证明那就是这个测量的时期，这时记 `unsupported`，不记 `mismatch`。
+  - `unknown` 只有在规则能证明来源确实没写时才算 `match`。
 - 每个字段的结果是以下四种之一：
   - `match`：对上了；
   - `mismatch`：原文写的是别的，或者这个字段属于另一个数量、另一列；
@@ -144,7 +144,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 返回：
 
 ```json
-{"contract_version": "extraction_consistency.v1", "checker_version": "biocheck.extraction_rules.v1",
+{"contract_version": "extraction_consistency.v1", "checker_version": "biocheck.extraction_rules.v2",
  "subject": {…},
  "items": [{"id": "m1", "kind": "measurement", "status": "unchecked",
             "fields": {"locator": {"result": "match", "span": {…}},

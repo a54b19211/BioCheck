@@ -18,6 +18,7 @@ HEADER = ("| 序号 | 药品品名 | 标示生产企业名称 | 药品规格 | �
 ROW = ("| 954 | 利巴韦林片 | 广东华南药业集团有限公司 | 100mg | 191003 | 广宁县医药有限公司 | "
        "《中国药典》2015年版二部 | 合格 | |")
 CN = "在入组的120例患者中，客观缓解32例（26.7%），中位随访12个月。"
+RATE = "成人患者客观缓解率为26.7%（32/120），中位随访12个月。"
 AGES = "成人10人中2人有效；儿童100人中80人有效。"
 
 
@@ -65,14 +66,21 @@ def results(item):
 
 
 def test_a_percentage_tied_to_its_stated_ratio_is_consistent():
-    d = Doc(p=CN)
-    quote = "在入组的120例患者中，客观缓解32例（26.7%）"
-    m = measurement(d, "p", quote, object=d.field("p", "客观缓解"), metric=d.field("p", "客观缓解"),
-                    value=d.field("p", "26.7"), unit=d.field("p", "%"), scope=d.field("p", "患者"),
+    d = Doc(p=RATE)
+    quote = "成人患者客观缓解率为26.7%（32/120）"
+    m = measurement(d, "p", quote, object=d.field("p", "客观缓解率"), metric=d.field("p", "客观缓解率"),
+                    value=d.field("p", "26.7"), unit=d.field("p", "%"), scope=d.field("p", "成人患者"),
                     denominator=d.field("p", "120"))
     (got,) = run(d, m)
     assert got["status"] == "consistent", got
     assert got["fields"]["denominator"]["reason"] == "percentage_of_stated_ratio"
+    # the same percentage with its population in another group of the clause: not provable, so unchecked
+    d = Doc(p=CN)
+    m = measurement(d, "p", "在入组的120例患者中，客观缓解32例（26.7%）", object=d.field("p", "客观缓解"),
+                    metric=d.field("p", "客观缓解"), value=d.field("p", "26.7"), unit=d.field("p", "%"),
+                    scope=d.field("p", "患者"), denominator=d.field("p", "120"))
+    (got,) = run(d, m)
+    assert got["fields"]["scope"]["reason"] == "scope_not_in_value_group" and got["status"] == "unchecked"
 
 
 def test_fields_of_another_group_are_rejected_not_matched_by_the_sentence():
@@ -91,16 +99,21 @@ def test_fields_of_another_group_are_rejected_not_matched_by_the_sentence():
 
 
 def test_a_table_value_is_tied_to_its_own_column_header():
-    d = Doc(h=HEADER, r=ROW)
+    d = Doc(r=HEADER + "\n" + ROW)  # header and row in one passage: one table
+    apart = Doc(h=HEADER, r=ROW)  # two slices cannot prove they are one table
+    m = measurement(apart, "r", "100mg", kind="stock", metric=apart.field("h", "药品规格"),
+                    value=apart.field("r", "100"), unit=apart.field("r", "mg"))
+    (got,) = run(apart, m)
+    assert got["fields"]["metric"]["reason"] == "header_table_not_provable"
     base = dict(object=d.field("r", "利巴韦林片"), value=d.field("r", "100"), unit=d.field("r", "mg"))
-    good = measurement(d, "r", "100mg", kind="stock", metric=d.field("h", "药品规格"), **base)
+    good = measurement(d, "r", "100mg", kind="stock", metric=d.field("r", "药品规格"), **base)
     (got,) = run(d, good)
     assert got["fields"]["metric"] == {"result": "match", "reason": "header_of_value_column",
-                                       "span": d.span("h", "药品规格")}
+                                       "span": d.span("r", "药品规格")}
     assert got["fields"]["object"]["result"] == "match" and got["fields"]["unit"]["result"] == "match"
     # "2015年版" in the row is a pharmacopoeia edition, not proof against an unknown period
     assert got["fields"]["period"]["result"] == "unsupported"
-    wrong = measurement(d, "r", "100mg", kind="stock", metric=d.field("h", "生产批号"), **base)
+    wrong = measurement(d, "r", "100mg", kind="stock", metric=d.field("r", "生产批号"), **base)
     (got,) = run(d, wrong)
     assert got["fields"]["metric"]["reason"] == "header_of_another_column" and got["status"] == "inconsistent"
 
@@ -127,7 +140,9 @@ def test_denominators_only_from_this_numbers_ratio():
     (got,) = run(d, measurement(d, "p", "32 of 120 responded", value=d.field("p", "32"),
                                 denominator=d.field("p", "120"), period=d.field("p", "2021-06-30"),
                                 scope=d.field("p", "adults")))
-    assert results(got)["denominator"] == results(got)["period"] == results(got)["scope"] == "match"
+    assert results(got)["denominator"] == results(got)["period"] == "match"
+    # "adults" is in the group before the comma: v2 cannot prove it is this quantity's population
+    assert got["fields"]["scope"]["reason"] == "scope_not_in_value_group" and got["status"] == "unchecked"
     d2 = Doc(p="截至2021/6/30，报告32例。")
     (got,) = run(d2, measurement(d2, "p", "报告32例", value=d2.field("p", "32")))
     assert got["fields"]["denominator"]["result"] == "match"  # a slash date is no ratio

@@ -16,7 +16,7 @@ from .claims import DATE, TIMESTAMP
 
 CONTRACT_VERSION = "extraction_consistency.v1"
 # Bump whenever a rule, the unit table, the number conversions or the clause rule below changes.
-CHECKER_VERSION = "biocheck.extraction_rules.v1"
+CHECKER_VERSION = "biocheck.extraction_rules.v2"  # v2: whole numbers, same table, groups, rate evidence
 
 # Units the rules know, canonical -> spellings. The longest spelling wins at a position ("mg/kg" is never "mg",
 # "mg/day" is no ratio). A unit not listed here is "unsupported", never guessed.
@@ -56,6 +56,7 @@ RATIOS = (
 )
 TOTAL = re.compile(r"(?:\b[Nn]\s*=\s*|共\s*|总计\s*|合计\s*)(\d[\d,]*)")
 CLAUSE_STOP = "；;。！？!?\n"
+GROUP_STOP = CLAUSE_STOP + "，,、"  # a clause can hold several groups: "成人10人中2人有效，儿童100人中80人有效"
 TABLE_RULE = re.compile(r"^\|?\s*:?-{3,}")
 
 KIND_FIELDS = {
@@ -120,6 +121,31 @@ class Passages:
         end = min(ends) if ends else len(text)
         return p["id"], p["start"] + start, p["start"] + end, text[start:end]
 
+    def group(self, span):
+        """Like clause(), also cut at "，,、": the smallest stretch naming one quantity's own context."""
+        p = self.by_id[span["passage"]]
+        text, a, b = p["text"], span["start"] - p["start"], span["end"] - p["start"]
+        start = max(text.rfind(c, 0, a) for c in GROUP_STOP) + 1
+        ends = [i for i in (text.find(c, b) for c in GROUP_STOP) if i >= 0]
+        return p["start"] + start, p["start"] + (min(ends) if ends else len(text))
+
+    def row(self, span):
+        """(start, end) in artifact offsets of the markdown table row line holding the span, or None."""
+        p = self.by_id[span["passage"]]
+        text, a = p["text"], span["start"] - p["start"]
+        start, end = text.rfind("\n", 0, a) + 1, text.find("\n", a)
+        line = text[start:len(text) if end < 0 else end]
+        if not line.startswith("|") or TABLE_RULE.match(line.strip()):
+            return None
+        return p["start"] + start, p["start"] + start + len(line)
+
+    def whole_number(self, span):
+        """The span is exactly one written number of its passage (sign, decimals, thousands included)."""
+        p = self.by_id[span["passage"]]
+        text = p["text"].translate(FULLWIDTH)
+        a, b = span["start"] - p["start"], span["end"] - p["start"]
+        return any(m.span() == (a, b) for m in NUMBER.finditer(text))
+
     def inside(self, inner, outer):
         return inner["passage"] == outer["passage"] and outer["start"] <= inner["start"] and inner["end"] <= outer["end"]
 
@@ -150,6 +176,14 @@ def ratios_in(clause_text, offset):
     return out
 
 
+def mine_ratios(ratios, vspan, den):
+    """The ratios this value takes part in: as numerator, or as the ratio its stated denominator belongs to."""
+    out = [r for r in ratios if (r[0], r[1]) == (vspan["start"], vspan["end"])]
+    if stated(den):
+        out += [r for r in ratios if (r[3], r[4]) == (den["span"]["start"], den["span"]["end"])]
+    return out
+
+
 def stated(field):
     return field is not None and field.get("state", "stated") == "stated"
 
@@ -168,6 +202,8 @@ def check_measurement(item, P, fields):
         return
     if not P.inside(vspan, item["locator"]):
         fields["value"] = outcome("mismatch", "value_outside_quote")
+    elif not P.whole_number(vspan):
+        fields["value"] = outcome("mismatch", "value_span_not_a_whole_number")  # "0" of 100%, "10" of -10%
     elif number(vtext) is None or number(value_field["value"]) is None:
         fields["value"] = outcome("unsupported", "value_not_a_plain_number")
     elif number(vtext) != number(value_field["value"]):
@@ -230,7 +266,27 @@ def check_measurement(item, P, fields):
                                  else outcome("unsupported", "other_ratio_or_total_in_value_clause")
                                  if ratios or TOTAL.search(clause_text)
                                  else outcome("match", "no_denominator_in_value_clause"))
-    # period and scope: in the value's clause
+    # the value's own context: in a table row, the row (one record); in prose, the value's group, and only if
+    # that group names no other quantity (numbers other than the value and the partners of its ratio)
+    row = P.row(vspan)
+    g_start, g_end = row if row else P.group(vspan)
+    partners = {(vspan["start"], vspan["end"])}
+    for r in mine_ratios(ratios, vspan, f.get("denominator")):
+        partners |= {(r[0], r[1]), (r[3], r[4])}
+
+    def own_context(field_span):
+        if field_span["passage"] != pid or not (g_start <= field_span["start"] and field_span["end"] <= g_end):
+            return "outside"
+        if row:
+            return "row"
+        text = passage["text"][g_start - passage["start"]:g_end - passage["start"]]
+        blanked = DATE.sub(lambda m: " " * len(m.group()), TIMESTAMP.sub(lambda m: " " * len(m.group()), text))
+        others = [m for m in NUMBER.finditer(blanked.translate(FULLWIDTH))
+                  if (g_start + m.start(), g_start + m.end()) not in partners
+                  and not (field_span["start"] <= g_start + m.start() and g_start + m.end() <= field_span["end"])]
+        return "several" if others else "group"
+
+    # period and scope: in the value's own context
     for name in ("period", "scope"):
         field = f[name]
         if not stated(field):
@@ -243,12 +299,15 @@ def check_measurement(item, P, fields):
                 fields[name] = outcome("unsupported", "absence_of_scope_not_rule_checkable")
             continue
         text = P.text(field["span"])
+        where = own_context(field["span"]) if text is not None else "outside"
         if text is None or squash(text).casefold() != squash(field["value"]).casefold():
             fields[name] = outcome("mismatch", f"{name}_differs_from_span")
-        elif field["span"]["passage"] == pid and c_start <= field["span"]["start"] and field["span"]["end"] <= c_end:
+        elif where in ("row", "group"):
             fields[name] = outcome("match", span=field["span"])
+        elif where == "several":
+            fields[name] = outcome("unsupported", "several_quantities_in_value_group")
         else:
-            fields[name] = outcome("unsupported", f"{name}_not_in_value_clause")
+            fields[name] = outcome("unsupported", f"{name}_not_in_value_group")
     # object and metric: in the value's clause or row, or (a table metric) the header of the value's column
     for name in ("object", "metric"):
         field = f[name]
@@ -259,17 +318,27 @@ def check_measurement(item, P, fields):
         if text is None or squash(text).casefold() != squash(field["value"]).casefold():
             fields[name] = outcome("mismatch", f"{name}_differs_from_span")
             continue
-        if field["span"]["passage"] == pid and c_start <= field["span"]["start"] and field["span"]["end"] <= c_end:
+        where = own_context(field["span"])
+        if where in ("row", "group"):
             fields[name] = outcome("match", span=field["span"])
             continue
+        if where == "several":
+            fields[name] = outcome("unsupported", "several_quantities_in_value_group")
+            continue
         column = header_column(P, field["span"], vspan)
-        fields[name] = (outcome("match", "header_of_value_column", field["span"]) if column is True
-                        else outcome("mismatch", "header_of_another_column") if column is False
-                        else outcome("unsupported", f"{name}_not_in_value_clause"))
+        if column is True:
+            fields[name] = outcome("match", "header_of_value_column", field["span"])
+        elif column in ("another_column", "another_table"):
+            fields[name] = outcome("mismatch", "header_of_" + column)
+        else:
+            fields[name] = outcome("unsupported", "header_table_not_provable" if column == "unprovable"
+                                   else f"{name}_not_in_value_group")
     kind = item["fields"]["measure_kind"]
-    if kind == "rate" and (percent_written or (fields["unit"]["result"] == "match" and
-                                               CANONICAL.get(squash(f["unit"].get("value")).casefold()) == "%")
-                           or fields["denominator"]["result"] == "match"):
+    # a rate needs positive evidence: a percentage written at the value, or a ratio actually stated for it -
+    # "no denominator in the clause" proves nothing (Codex r106)
+    ratio_shown = fields["denominator"]["result"] == "match" and fields["denominator"].get("reason") in (
+        None, "percentage_of_stated_ratio")
+    if kind == "rate" and fields["value"]["result"] == "match" and (percent_written or ratio_shown):
         fields["measure_kind"] = outcome("match", "rate_with_percentage_or_ratio")
     else:
         fields["measure_kind"] = outcome("unsupported", "measure_kind_not_rule_checkable")
@@ -283,25 +352,44 @@ def cell_index(line, pos):
 
 
 def header_column(P, header_span, value_span):
-    """True / False when header_span is a cell of a table header line (a line followed by a separator row in
-    its passage) and value_span sits in a table row line: same column or not. None when not that shape."""
-    hp, vp = P.by_id[header_span["passage"]], P.by_id[value_span["passage"]]
-    ht, ha = hp["text"], header_span["start"] - hp["start"]
-    hl_start = ht.rfind("\n", 0, ha) + 1
-    hl_end = ht.find("\n", ha)
-    hl_end = len(ht) if hl_end < 0 else hl_end
-    following = ht[hl_end + 1:].split("\n", 1)[0] if hl_end < len(ht) else ""
-    if not (ht[hl_start:hl_end].startswith("|") and TABLE_RULE.match(following.strip())):
+    """The table metric check: True when header_span is a cell of the header of the table the value's row
+    belongs to, in the same column; "another_column" / "another_table" when it is a header cell of the wrong
+    column or of another table; "unprovable" when header and row are in different passages (non-contiguous
+    slices cannot prove they are one table); None when the shapes are not a table header and row."""
+    if header_span["passage"] != value_span["passage"]:
+        return "unprovable"
+    p = P.by_id[value_span["passage"]]
+    lines, pos = [], 0
+    for line in p["text"].split("\n"):
+        lines.append((pos, pos + len(line), line))
+        pos += len(line) + 1
+
+    def at(offset):
+        return next((i for i, (s, e, _) in enumerate(lines) if s <= offset <= e), None)
+
+    def heads(i):
+        return (i + 1 < len(lines) and lines[i][2].startswith("|") and lines[i + 1][2].startswith("|")
+                and bool(TABLE_RULE.match(lines[i + 1][2].strip())))
+
+    hi, vi = at(header_span["start"] - p["start"]), at(value_span["start"] - p["start"])
+    if hi is None or vi is None or not lines[vi][2].startswith("|") or not heads(hi):
         return None
-    vt, va = vp["text"], value_span["start"] - vp["start"]
-    vl_start = vt.rfind("\n", 0, va) + 1
-    vl_end = vt.find("\n", va)
-    vl_end = len(vt) if vl_end < 0 else vl_end
-    row = vt[vl_start:vl_end]
-    if not row.startswith("|") or TABLE_RULE.match(row.strip()):
+    own = None  # the header of the value row's table: the nearest header above it inside its "|" block
+    for i in range(vi - 1, -1, -1):
+        if not lines[i][2].startswith("|"):
+            break
+        if heads(i):
+            own = i
+            break
+    if own is None:
+        return "unprovable"
+    if own != hi:
+        return "another_table"
+    hc = cell_index(lines[hi][2], header_span["start"] - p["start"] - lines[hi][0])
+    vc = cell_index(lines[vi][2], value_span["start"] - p["start"] - lines[vi][0])
+    if hc is None or vc is None:
         return None
-    hc, vc = cell_index(ht[hl_start:hl_end], ha - hl_start), cell_index(row, va - vl_start)
-    return None if hc is None or vc is None else hc == vc
+    return True if hc == vc else "another_column"
 
 
 def check_item(item, P):
