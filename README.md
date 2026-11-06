@@ -6,13 +6,11 @@ BioCheck 是 BioRadar 的一个专业服务：根据雷达给的固定材料写�
 
 ## 运行服务
 
-Python 3.10+。
+CPython 3.12，依赖只从锁文件装（见下文「开发环境与测试」）。
 
 ```sh
-pip install -r requirements.txt
-# 抽取一致性接口用的共享契约包 extraction-contract==1.13.0（按 wheel 的 sha256 钉死，见 requirements-contract.txt）
-uv pip install --no-index --find-links "${EXTRACTION_CONTRACT_WHEELS:-../extraction-contract/dist}" \
-    --require-hashes -r requirements-contract.txt
+make venv                                # .venv，只按 requirements.lock 安装，每个包都校验 sha256
+. .venv/bin/activate
 export LLM_PROVIDER=deepseek             # deepseek 或 openai（OpenAI 兼容接口）
 export LLM_BASE_URL=https://api.deepseek.com
 export LLM_API_KEY=sk-...
@@ -23,7 +21,7 @@ export SERVICE_TOKEN=一个足够长的随机串
 uvicorn app.service:app --host 127.0.0.1 --port 18562
 ```
 
-契约包必须是 1.13.0：checker v16（契约 v3）的期间规则 `period_span_whole_v5` 从这一版才有。`scripts/check_clean_install.sh` 在一个全新的虚拟环境里按上面两步安装，再逐个导入 `app/` 下的模块，并在这个环境里跑一遍测试（规则运行时才会读契约包的函数），钉的版本缺东西时在这里就失败（`UV_OFFLINE=1` 只用本地 uv 缓存）。
+契约包必须是 1.13.0：checker v16（契约 v3）的期间规则 `period_span_whole_v5` 从这一版才有。`make check-install` 在一个全新的虚拟环境里按锁文件安装，再逐个导入 `app/` 下的模块，并在这个环境里跑一遍测试（规则运行时才会读契约包的函数），钉的版本缺东西时在这里就失败（`UV_OFFLINE=1` 只用本地 uv 缓存）。
 
 `GET /health` 不需要令牌；`/v1/*` 都要请求头 `Authorization: Bearer $SERVICE_TOKEN`。没有配置 `SERVICE_TOKEN` 时服务拒绝所有 `/v1/*` 请求（503）。
 
@@ -203,11 +201,20 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 - 测量字段和条目状态与 v2 的规则相同，只是用这一版契约的读法：metric 短语里的单位按 `extraction_normalize.v4`，完整期间按 v5（上一行以完整日期结尾，例如公告的「发布时间」，不算期间的延续）；产出类单位（`120万支` 的单位是 `万支`，数量级不丢）和「实际产出」才算 flow。
 - 每个维度另给一个结果 `dims[kind]`，只有同时满足以下几条才是 match：原文在该 span 处写着这个值；文本里有这类角色的明确依据（标签、病例名词、人群词、「按报告日统计」这类口径写法等，机构、日期和裸数字都不算）；它所在短语没有否定、排除，也没有和别的成员并列；它和值在同一局部句且中间没有别的数量，或者在值的有效祖先标题里；它填满了一个能识别的结构位置。其余一律 unsupported。维度结果不改变条目状态。
 
-## 运行测试
+## 开发环境与测试
+
+唯一的入口是 `Makefile`。需要 uv 0.13.0（在 PATH 上，例如 `~/.local/bin/uv`；或者 `make UV=<路径>`），以及旁边 extraction-contract 检出里构建好的 wheel（`../extraction-contract/dist`，或 `EXTRACTION_CONTRACT_WHEELS=<目录>`）。
 
 ```sh
-python -m pytest -q
+make venv            # .venv：只按 requirements.lock 安装（含契约 wheel），每个包都校验 sha256
+make test            # 全部测试（不联网，模型用 FakeLLM）
+make lint            # ruff
+make check-install   # 一个用完即删的新环境：按锁文件安装、逐个导入 app/ 模块、再跑一遍测试
+make check-lock      # requirements.lock 是否仍与 requirements*.txt 一致（要访问包索引）
 ```
+
+- 直接依赖写在 `requirements.txt`（运行 + 测试 + ruff）和 `requirements-contract.txt`（契约 wheel 的版本和 sha256）；`requirements.lock` 是由它们解析出的完整锁，每个包都带 sha256，解析目标是 CPython 3.12、x86_64-unknown-linux-gnu（锁文件头一行写着解析命令）。改了这两个文件后运行 `make lock`，再提交锁文件。
+- 已验证的组合：uv 0.13.0、CPython 3.12.15、711 个测试通过。
 
 `tests/test_checker_golden.py` 用 `tests/fixtures/checker_golden.jsonl` 逐字节比对三个契约的全部样例回执；只有提升 `CHECKER_VERSION` 时才用 `PYTHONPATH=. python tests/golden.py` 重新生成。
 

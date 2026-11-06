@@ -1,13 +1,13 @@
 #!/bin/sh
-# Install requirements.txt and the hash-pinned extraction-contract wheel into a new, empty virtualenv, import
-# every module under app/ and run the test suite there: a pin that lacks what the code uses fails here, not on
-# the first request.
+# Install requirements.lock (every distribution, the extraction-contract wheel included, pinned by sha256) into a
+# new, empty virtualenv, import every module under app/ and run the test suite there: a pin that lacks what the
+# code uses fails here, not on the first request. `make check-install` runs it with the Makefile defaults.
 #
 #   scripts/check_clean_install.sh
 #
 # EXTRACTION_CONTRACT_WHEELS  directory holding the contract wheel (default ../extraction-contract/dist)
 # UV                          the uv binary (default: uv on PATH)
-# PYTHON                      interpreter for the virtualenv (default python3; README: Python 3.10+)
+# PYTHON                      interpreter for the virtualenv (default 3.12: the lock is resolved for it)
 # UV_OFFLINE=1                install from the local uv cache only
 set -eu
 cd "$(dirname "$0")/.."
@@ -15,10 +15,8 @@ UV="${UV:-uv}"
 WHEELS="${EXTRACTION_CONTRACT_WHEELS:-../extraction-contract/dist}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-"$UV" venv --quiet --python "${PYTHON:-python3}" "$work/venv"
-"$UV" pip install --quiet --python "$work/venv/bin/python" -r requirements.txt
-"$UV" pip install --quiet --python "$work/venv/bin/python" --no-index --find-links "$WHEELS" --require-hashes \
-    -r requirements-contract.txt
+"$UV" venv --quiet --python "${PYTHON:-3.12}" "$work/venv"
+"$UV" pip sync --quiet --python "$work/venv/bin/python" --require-hashes --find-links "$WHEELS" requirements.lock
 "$work/venv/bin/python" - <<'EOF'
 import importlib
 import importlib.metadata
