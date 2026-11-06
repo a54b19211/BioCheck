@@ -1,0 +1,35 @@
+#!/bin/sh
+# Install requirements.txt and the hash-pinned extraction-contract wheel into a new, empty virtualenv, import
+# every module under app/ and run the test suite there: a pin that lacks what the code uses fails here, not on
+# the first request.
+#
+#   scripts/check_clean_install.sh
+#
+# EXTRACTION_CONTRACT_WHEELS  directory holding the contract wheel (default ../extraction-contract/dist)
+# UV                          the uv binary (default: uv on PATH)
+# PYTHON                      interpreter for the virtualenv (default python3; README: Python 3.10+)
+# UV_OFFLINE=1                install from the local uv cache only
+set -eu
+cd "$(dirname "$0")/.."
+UV="${UV:-uv}"
+WHEELS="${EXTRACTION_CONTRACT_WHEELS:-../extraction-contract/dist}"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+"$UV" venv --quiet --python "${PYTHON:-python3}" "$work/venv"
+"$UV" pip install --quiet --python "$work/venv/bin/python" -r requirements.txt
+"$UV" pip install --quiet --python "$work/venv/bin/python" --no-index --find-links "$WHEELS" --require-hashes \
+    -r requirements-contract.txt
+"$work/venv/bin/python" - <<'EOF'
+import importlib
+import importlib.metadata
+import pathlib
+import sys
+
+names = sorted("app." + p.stem for p in pathlib.Path("app").glob("*.py") if p.stem != "__init__")
+for name in names:
+    importlib.import_module(name)
+print(f"python {sys.version.split()[0]}, extraction-contract {importlib.metadata.version('extraction-contract')}:"
+      f" imported {len(names)} modules ({', '.join(names)})")
+EOF
+# a module attribute is only read when a rule runs: the suite (offline, fake model) exercises every checker
+"$work/venv/bin/python" -m pytest -q -p no:cacheprovider

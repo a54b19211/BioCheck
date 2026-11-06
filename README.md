@@ -10,6 +10,9 @@ Python 3.10+。
 
 ```sh
 pip install -r requirements.txt
+# 抽取一致性接口用的共享契约包 extraction-contract==1.13.0（按 wheel 的 sha256 钉死，见 requirements-contract.txt）
+uv pip install --no-index --find-links "${EXTRACTION_CONTRACT_WHEELS:-../extraction-contract/dist}" \
+    --require-hashes -r requirements-contract.txt
 export LLM_PROVIDER=deepseek             # deepseek 或 openai（OpenAI 兼容接口）
 export LLM_BASE_URL=https://api.deepseek.com
 export LLM_API_KEY=sk-...
@@ -19,6 +22,8 @@ export LLM_WRITE_THINKING=false          # 可选，只影响 generate；核验�
 export SERVICE_TOKEN=一个足够长的随机串
 uvicorn app.service:app --host 127.0.0.1 --port 18562
 ```
+
+契约包必须是 1.13.0：checker v16（契约 v3）的期间规则 `period_span_whole_v5` 从这一版才有。`scripts/check_clean_install.sh` 在一个全新的虚拟环境里按上面两步安装，再逐个导入 `app/` 下的模块，并在这个环境里跑一遍测试（规则运行时才会读契约包的函数），钉的版本缺东西时在这里就失败（`UV_OFFLINE=1` 只用本地 uv 缓存）。
 
 `GET /health` 不需要令牌；`/v1/*` 都要请求头 `Authorization: Bearer $SERVICE_TOKEN`。没有配置 `SERVICE_TOKEN` 时服务拒绝所有 `/v1/*` 请求（503）。
 
