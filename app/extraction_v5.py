@@ -168,31 +168,8 @@ _CASE_RUN = ("population", "disease")
 _NUMBER_RUN = ("product_or_class", "stage")
 
 
-def whole_phrase(kind, text, start, end, members):
-    """Whether text[start:end] fills a whole slot of a recognised structure for `kind`. members: (start, end,
-    kind) of the item's OTHER dimensions in the same passage that are independently proven (v14) - the only
-    ones a metric slot may border."""
-    ps, pe, mark = _bounds(text, start, end)
-    phrase = text[ps:pe].strip()
-    value = text[start:end].strip()
-    form = _SELF.get(kind)
-    if mark and mark in ":：":
-        # a labelled value: the label is the whole phrase before the colon, the value the whole phrase after it
-        lps, _lpe, _ = _bounds(text, ps - 1, ps - 1)
-        label = _HEADING_MARK.sub("", text[lps:ps - 1]).strip()
-        return phrase == value and bool(re.fullmatch(_LABELS.get(kind, r"(?!)"), label, re.IGNORECASE))
-    m = re.match(r"^(?:" + _LABELS.get(kind, r"(?!)") + r")\s*(?:为|是)\s*(?P<v>.+)$", phrase, re.IGNORECASE)
-    if m:
-        return m.group("v").strip() == value  # "人群为成人", "分母为检测人数"
-    line_start = text.rfind("\n", 0, start) + 1
-    line_end = text.find("\n", end)
-    line = text[line_start:len(text) if line_end < 0 else line_end]
-    if _HEADING_MARK.match(line) and line.lstrip().startswith("#"):
-        return _HEADING_MARK.sub("", line).strip() == value and bool(form and form.search(value))
-    frame = _FRAME.match(phrase)
-    if phrase == value or (frame and frame.group("x") == value and kind == "population"):
-        return bool(form and form.search(value))  # a phrase of its own, or "在X中": the whole has the form
-    # a slot of the metric phrase: the contiguous run of independently proven members holding this span
+def _run_of(start, end, kind, members):
+    """The contiguous run of independently proven members holding text[start:end], in text order."""
     run = [(start, end, kind)]
     while True:
         left = next((m for m in members if m[1] == run[0][0] and m not in run), None)
@@ -204,6 +181,13 @@ def whole_phrase(kind, text, start, end, members):
         if right is None:
             break
         run.append(right)
+    return run
+
+
+def _metric_slot(kind, text, start, end, members, ps, pe):
+    """text[start:end] is a slot of the metric phrase: after a verb, a population-and-disease run before a case
+    noun, or a product class or stage alone before a number."""
+    run = _run_of(start, end, kind, members)
     kinds = [k for _a, _b, k in run]
     before, after = text[ps:run[0][0]], text[run[-1][1]:pe]
     if not _VERB_BEFORE.search(before):
@@ -215,8 +199,44 @@ def whole_phrase(kind, text, start, end, members):
                 return False
         return bool(_CASE_AFTER.match(after))
     if kinds == [kind] and kind in _NUMBER_RUN:
-        return bool(form and form.search(value)) and bool(_NUMBER_AFTER.match(after))
+        form = _SELF.get(kind)
+        return bool(form and form.search(text[start:end].strip())) and bool(_NUMBER_AFTER.match(after))
     return False
+
+
+def _labelled(kind, text, ps, phrase, value):
+    """A labelled value: the label is the whole phrase before the colon, the value the whole phrase after it."""
+    lps, _lpe, _ = _bounds(text, ps - 1, ps - 1)
+    label = _HEADING_MARK.sub("", text[lps:ps - 1]).strip()
+    return phrase == value and bool(re.fullmatch(_LABELS.get(kind, r"(?!)"), label, re.IGNORECASE))
+
+
+def _line_of(text, start, end):
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    return text[line_start:len(text) if line_end < 0 else line_end]
+
+
+def whole_phrase(kind, text, start, end, members):
+    """Whether text[start:end] fills a whole slot of a recognised structure for `kind`. members: (start, end,
+    kind) of the item's OTHER dimensions in the same passage that are independently proven - the only ones a
+    metric slot may border."""
+    ps, pe, mark = _bounds(text, start, end)
+    phrase = text[ps:pe].strip()
+    value = text[start:end].strip()
+    form = _SELF.get(kind)
+    if mark and mark in ":：":
+        return _labelled(kind, text, ps, phrase, value)
+    m = re.match(r"^(?:" + _LABELS.get(kind, r"(?!)") + r")\s*(?:为|是)\s*(?P<v>.+)$", phrase, re.IGNORECASE)
+    if m:
+        return m.group("v").strip() == value  # "人群为成人", "分母为检测人数"
+    line = _line_of(text, start, end)
+    if _HEADING_MARK.match(line) and line.lstrip().startswith("#"):
+        return _HEADING_MARK.sub("", line).strip() == value and bool(form and form.search(value))
+    frame = _FRAME.match(phrase)
+    if phrase == value or (frame and frame.group("x") == value and kind == "population"):
+        return bool(form and form.search(value))  # a phrase of its own, or "在X中": the whole has the form
+    return _metric_slot(kind, text, start, end, members, ps, pe)
 
 
 def related(L, P, span, vspan):

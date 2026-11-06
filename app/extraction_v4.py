@@ -7,6 +7,7 @@ be the object's own total, a value qualifier and the modality. Everything the ru
 The quantity's own context is its local sentence: the v3 clause, also cut at an English sentence end, so other
 numbers, dates or event words elsewhere in an English paragraph never support (or spoil) this value."""
 
+import dataclasses
 import re
 from datetime import date
 from decimal import Decimal
@@ -143,59 +144,77 @@ def _ymd(y, m, d):
         return None  # 30 February, 29 February of a common year
 
 
+# the canonical forms, tried in order on the whole squashed text: (pattern, groups -> (type, precision, value))
+_PERIOD_FORMS = [
+    (r"(\d{4})年(\d{1,2})月", lambda y, m: ("interval", "month", _ym(y, m))),
+    (r"(\d{4})年(?:第)?([一二三四1-4])季度", lambda y, q: ("interval", "quarter", f"{y}Q{CN_NUM[q]}")),
+    (r"(\d{4})年(上|下)半年", lambda y, h: ("interval", "half", f"{y}H{1 if h == '上' else 2}")),
+    (r"(\d{4})年(?:全年)?", lambda y: ("interval", "year", y)),
+    (r"(\d{4})Q([1-4])", lambda y, q: ("interval", "quarter", f"{y}Q{q}")),
+    (r"截[至止](\d{4})年(\d{1,2})月(\d{1,2})日", lambda y, m, d: ("point", "day", _ymd(y, m, d))),
+    (r"截[至止](\d{4})年(\d{1,2})月(?:底|末)?", lambda y, m: ("point", "month", _ym(y, m))),
+    (r"截[至止](\d{4})年(?:底|末)", lambda y: ("point", "year", y)),
+    (r"(?:[Aa]s of )(\d{1,2}) " + MONTH_RE + r" (\d{4})",
+     lambda d, mo, y: ("point", "day", _ymd(y, MONTHS[mo.lower()], d))),
+    (r"(?:[Aa]s of )" + MONTH_RE + r" (\d{4})", lambda mo, y: ("point", "month", _ym(y, MONTHS[mo.lower()]))),
+]
+_CN_MONTHS_TO = re.compile(r"(\d{4})年(?:前(\d{1,2})个?月|1\s*(?:至|-|—|~)\s*(\d{1,2})月)")
+# English ranges: [from|between] [D1] M1 [Y1] to|and|until|through [D2] M2 Y2
+_EN_RANGE = re.compile(r"(?:(?:[Ff]rom|[Bb]etween|[Ss]ince)\s+)?(\d{1,2}\s+)?" + MONTH_RE + r"(\s+\d{4})?\s+"
+                       r"(?:to|and|until|through)\s+(\d{1,2}\s+)?" + MONTH_RE + r"\s+(\d{4})")
+_RELATIVE = re.compile(r"近\d+年|今年|去年|上月|本月|上半年|下半年|\bpast\b|\blast\b|\bthis year\b|\brecent")
+
+
+def _english_range(found):
+    """(period, None) or (None, reason) of an English range match. Without a first year the stated one is
+    carried back - across a new year, the one before."""
+    d1, m1, y1, d2, m2, y2 = found.groups()
+    m1, m2, y2 = MONTHS[m1.lower()], MONTHS[m2.lower()], int(y2)
+    y1 = int(y1) if y1 else (y2 if m1 <= m2 else y2 - 1)
+    if bool(d1) != bool(d2):
+        return None, "mixed_precision_range"
+    if d1:
+        start, end, precision = _ymd(y1, m1, d1.strip()), _ymd(y2, m2, d2.strip()), "day"
+    else:
+        start, end, precision = _ym(y1, m1), _ym(y2, m2), "month"
+    if not start or not end:
+        return None, "invalid_date"
+    if start > end:
+        return None, "range_ends_before_it_starts"
+    return {"type": "interval", "precision": precision, "start": start, "end": end}, None
+
+
+def _refusal(t):
+    """Why a text of no supported form is no period."""
+    if _RELATIVE.search(t) and not re.search(r"\d{4}", t):
+        return "relative_period"
+    if re.search(MONTH_RE, t) and not re.search(r"\d{4}", t):
+        return "period_year_not_stated"
+    return "period_form_not_supported"
+
+
 def canonical_period(text):
     """(period dict, None) or (None, reason). A period is {"type": point|interval, "precision": day|month|quarter|
     half|year, "value"} or, for an interval spanning several units, {"start", "end"} instead of "value". No day or
     month the text does not state is added; a period without a year or relative to an unstated date is refused."""
     t = squash(text).translate(v3.FULLWIDTH)
-    rules = [
-        (r"(\d{4})年(\d{1,2})月", lambda y, m: ("interval", "month", _ym(y, m))),
-        (r"(\d{4})年(?:第)?([一二三四1-4])季度", lambda y, q: ("interval", "quarter", f"{y}Q{CN_NUM[q]}")),
-        (r"(\d{4})年(上|下)半年", lambda y, h: ("interval", "half", f"{y}H{1 if h == '上' else 2}")),
-        (r"(\d{4})年(?:全年)?", lambda y: ("interval", "year", y)),
-        (r"(\d{4})Q([1-4])", lambda y, q: ("interval", "quarter", f"{y}Q{q}")),
-        (r"截[至止](\d{4})年(\d{1,2})月(\d{1,2})日", lambda y, m, d: ("point", "day", _ymd(y, m, d))),
-        (r"截[至止](\d{4})年(\d{1,2})月(?:底|末)?", lambda y, m: ("point", "month", _ym(y, m))),
-        (r"截[至止](\d{4})年(?:底|末)", lambda y: ("point", "year", y)),
-        (r"(?:[Aa]s of )(\d{1,2}) " + MONTH_RE + r" (\d{4})", lambda d, mo, y: ("point", "day", _ymd(y, MONTHS[mo.lower()], d))),
-        (r"(?:[Aa]s of )" + MONTH_RE + r" (\d{4})", lambda mo, y: ("point", "month", _ym(y, MONTHS[mo.lower()]))),
-    ]
-    for pattern, build in rules:
+    for pattern, build in _PERIOD_FORMS:
         m = re.fullmatch(pattern, t)
         if m:
             kind, precision, value = build(*m.groups())
             return ({"type": kind, "precision": precision, "value": value}, None) if value else (None, "invalid_date")
-    m = re.fullmatch(r"(\d{4})年(?:前(\d{1,2})个?月|1\s*(?:至|-|—|~)\s*(\d{1,2})月)", t)
+    m = _CN_MONTHS_TO.fullmatch(t)
     if m:
         end = _ym(m.group(1), m.group(2) or m.group(3))
         return ({"type": "interval", "precision": "month", "start": f"{m.group(1)}-01", "end": end}, None) if end \
             else (None, "invalid_date")
-    # English ranges: [from|between] [D1] M1 [Y1] to|and|until|through [D2] M2 Y2
-    m = re.fullmatch(r"(?:(?:[Ff]rom|[Bb]etween|[Ss]ince)\s+)?(\d{1,2}\s+)?" + MONTH_RE + r"(\s+\d{4})?\s+"
-                     r"(?:to|and|until|through)\s+(\d{1,2}\s+)?" + MONTH_RE + r"\s+(\d{4})", t)
+    m = _EN_RANGE.fullmatch(t)
     if m:
-        d1, m1, y1, d2, m2, y2 = m.groups()
-        m1, m2, y2 = MONTHS[m1.lower()], MONTHS[m2.lower()], int(y2)
-        y1 = int(y1) if y1 else (y2 if m1 <= m2 else y2 - 1)  # the stated year carried back; across a new year, the one before
-        if bool(d1) != bool(d2):
-            return None, "mixed_precision_range"
-        if d1:
-            start, end, precision = _ymd(y1, m1, d1.strip()), _ymd(y2, m2, d2.strip()), "day"
-        else:
-            start, end, precision = _ym(y1, m1), _ym(y2, m2), "month"
-        if not start or not end:
-            return None, "invalid_date"
-        if start > end:
-            return None, "range_ends_before_it_starts"
-        return {"type": "interval", "precision": precision, "start": start, "end": end}, None
+        return _english_range(m)
     year = norm.english_year(t)
     if year:
         return year, None
-    if re.search(r"近\d+年|今年|去年|上月|本月|上半年|下半年|\bpast\b|\blast\b|\bthis year\b|\brecent", t) and not re.search(r"\d{4}", t):
-        return None, "relative_period"
-    if re.search(MONTH_RE, t) and not re.search(r"\d{4}", t):
-        return None, "period_year_not_stated"
-    return None, "period_form_not_supported"
+    return None, _refusal(t)
 
 
 def inclusive_days(period):
@@ -433,314 +452,456 @@ def own_place(L, P, span, vspan, partners, exclude):
     return "outside"
 
 
-def check_v4(item, P, unit_head=None, output=False, period_whole=None):
-    """Field results of one measurement item under v4 (locator checked first, as v3)."""
-    fields = {}
+@dataclasses.dataclass
+class Measure:
+    """One measurement item under check: its fields, the value's span and local sentence, the unit written at
+    the value, and what the earlier field checks established (ratio partners, covered spans, checked period)."""
+
+    P: v3.Passages
+    f: dict
+    vspan: dict
+    fields: dict
+    L: Local
+    at_value: tuple | None
+    partners: list = dataclasses.field(default_factory=list)
+    cover: list = dataclasses.field(default_factory=list)
+    period: dict | None = None
+
+    @property
+    def ptext(self):
+        return self.L.passage["text"]
+
+    @property
+    def pbase(self):
+        return self.L.base
+
+    @property
+    def after(self):
+        """The passage offset right after the value."""
+        return self.vspan["end"] - self.pbase
+
+    @property
+    def percent_written(self):
+        return self.ptext[self.after:self.after + 1] in ("%", "％")
+
+    @property
+    def vgroup(self):
+        return self.L.text(self.L.g_start, self.L.g_end)
+
+    def others(self, span):
+        """The stated object, metric, scope and period spans other than `span`."""
+        f = self.f
+        return [x["span"] for x in (f["object"], f["metric"], f["scope"], f["period"])
+                if v3.stated(x) and x["span"] is not span]
+
+    def place(self, span):
+        return own_place(self.L, self.P, span, self.vspan, self.partners, self.others(span))
+
+    def covered(self, pos):
+        return any(c["start"] <= pos < c["end"] for c in self.cover)
+
+
+def locator_result(item, P):
+    """The short quote must be exactly the text at its locator; nothing else is read otherwise."""
     quote = P.text(item["locator"])
     if quote is None:
-        fields["locator"] = outcome("mismatch", "locator_outside_passage")
-    elif squash(quote) == squash(item["quote"]):
-        fields["locator"] = outcome("match", span=item["locator"])
+        return outcome("mismatch", "locator_outside_passage")
+    if squash(quote) == squash(item["quote"]):
+        return outcome("match", span=item["locator"])
+    anywhere = any(squash(item["quote"]) in squash(p["text"]) for p in P.by_id.values())
+    return outcome("mismatch", "quote_elsewhere_in_passages" if anywhere else "quote_not_in_passages")
+
+
+def value_result(item, P, vtext):
+    """The value span is one whole written number inside the quote, equal to the stated canonical decimal."""
+    vf = item["fields"]["value"]
+    if not P.inside(vf["span"], item["locator"]):
+        return outcome("mismatch", "value_outside_quote")
+    if not whole_number(P, vf["span"]):
+        return outcome("mismatch", "value_span_not_a_whole_number")
+    if norm.decimal_text(vtext) is None:
+        return outcome("unsupported", "value_not_a_plain_number")
+    if Decimal(norm.decimal_text(vtext)) != Decimal(vf["value"]):
+        return outcome("mismatch", "value_differs_from_span")
+    return outcome("match", span=vf["span"])
+
+
+def unit_result(m, unit_head):
+    """A stated unit is the whole unit recognised at the value, or the head of the bound metric phrase; "no unit"
+    is proven only by punctuation or the sentence end after the number."""
+    unit, at_value, L = m.f["unit"], m.at_value, m.L
+    if not v3.stated(unit):
+        if at_value:
+            return outcome("mismatch", "unit_written_at_value:" + at_value[0])
+        if NO_UNIT_AFTER.match(m.ptext[m.after:L.end - m.pbase]):  # the rest of the sentence, whitespace skipped
+            return outcome("match", "no_unit_at_value")  # only punctuation follows the number
+        return outcome("unsupported", "unrecognized_text_after_value")  # not proven unitless
+    utext = m.P.text(unit["span"])
+    if utext is None or squash(utext).casefold() != squash(unit["value"]).casefold():
+        return outcome("mismatch", "unit_differs_from_span")
+    span = unit["span"]
+    if at_value and (span["passage"], span["start"], span["end"]) == (
+            L.pid, m.pbase + at_value[1], m.pbase + at_value[2]):
+        return outcome("match", "unit_at_value", span)  # the whole recognized unit, exactly
+    if at_value:
+        return outcome("mismatch", "unit_span_is_not_the_unit_at_value:" + at_value[0])
+    if bound_unit(m.P, m.f, unit, m.vspan, unit_head):
+        return outcome("match", "unit_in_bound_metric", span)
+    return outcome("unsupported", "unit_not_at_value_or_not_in_table")
+
+
+def _ends(span):
+    return span["start"], span["end"]
+
+
+def _ratio_partners(ratios):
+    return [x for r in ratios for x in ({"start": r[0], "end": r[1]}, {"start": r[3], "end": r[4]})]
+
+
+def _stated_denominator(m, own_ratios, mine):
+    """(result, partners): the stated denominator is that of a ratio of the value itself, or of a ratio written
+    right next to the percentage - never another population's ratio elsewhere in the group."""
+    den = m.f["denominator"]
+    dtext = m.P.text(den["span"])
+    if dtext is None or norm.decimal_text(dtext) is None or Decimal(norm.decimal_text(dtext)) != Decimal(
+            den["value"]):
+        return outcome("mismatch", "denominator_differs_from_span"), []
+    of_den = [r for r in own_ratios if (r[3], r[4]) == _ends(den["span"])]
+    if any((r[3], r[4]) == _ends(den["span"]) for r in mine) or (
+            m.percent_written and any(next_to(m.ptext, m.pbase, r, m.vspan) for r in of_den)):
+        return outcome("match", span=den["span"]), _ratio_partners(of_den)
+    return outcome("unsupported", "denominator_relation_not_rule_checkable"), []
+
+
+def _unknown_denominator(m, ratios, mine):
+    """"No denominator" is proven only when the sentence states no ratio and no other total."""
+    L = m.L
+    # a total word of the value's own group (国家药监局共批准…318个) is the value itself, not another total
+    other_total = [t for t in TOTAL.finditer(L.text())
+                   if (L.start + t.start(1), L.start + t.end(1)) != _ends(m.vspan)]
+    if mine:
+        return outcome("mismatch", "the_value_has_a_stated_denominator")
+    if ratios or other_total:
+        return outcome("unsupported", "other_ratio_or_total_in_value_sentence")
+    return outcome("match", "no_denominator_in_value_sentence")
+
+
+def denominator_result(m):
+    """(result, ratio partners of the value). A ratio counts only inside the value's own group (a percentage never
+    borrows another population's ratio); any ratio of the sentence still keeps "no denominator" from being
+    proven. The partners - the value, its ratios' numbers - are no "other quantity" of the group."""
+    L = m.L
+    ratios = ratios_in(L.text(), L.start)
+    own_ratios = [r for r in ratios if L.g_start <= min(r[0], r[3]) and max(r[1], r[4]) <= L.g_end]
+    mine = [r for r in own_ratios if (r[0], r[1]) == _ends(m.vspan)]
+    if v3.stated(m.f["denominator"]):
+        result, partners = _stated_denominator(m, own_ratios, mine)
     else:
-        anywhere = any(squash(item["quote"]) in squash(p["text"]) for p in P.by_id.values())
-        fields["locator"] = outcome("mismatch", "quote_elsewhere_in_passages" if anywhere else "quote_not_in_passages")
+        result, partners = _unknown_denominator(m, ratios, mine), []
+    partners += _ratio_partners(mine) + [{"start": m.vspan["start"], "end": m.vspan["end"]}]
+    return result, partners
+
+
+def period_result(m, period_whole):
+    """(result, the checked canonical period or None): the span is the whole written period, its canonical form
+    is the stated one, and it stands in the value's group or before it in its sentence."""
+    pf = m.f["period"]
+    if not v3.stated(pf):
+        return outcome("unsupported", "period_not_stated"), None
+    ptxt = m.P.text(pf["span"])
+    got, why = canonical_period(ptxt or "")
+    if ptxt is None:
+        return outcome("mismatch", "period_span_outside_passage"), None
+    if got is None:
+        return outcome("unsupported", why), None
+    if not whole_period(m.P, pf["span"], period_whole):
+        return outcome("unsupported", "period_span_not_the_whole_period"), None
+    if got != pf["value"]:
+        return outcome("mismatch", "period_differs_from_canonical_span"), None
+    place = m.place(pf["span"])
+    start = pf["span"]["start"] - m.pbase
+    past = re.search(r"past (\d+) days\s*\(\s*$", m.ptext[max(0, start - 24):start], re.IGNORECASE)
+    if past and got.get("precision") == "day" and "start" in got and int(past.group(1)) != inclusive_days(got):
+        return outcome("mismatch", "past_n_days_disagrees_with_dates"), None
+    if place in ("group", "before"):
+        return outcome("match", "period_" + place, pf["span"]), got
+    return outcome("unsupported", "several_quantities_in_value_sentence" if place == "several"
+                   else "period_not_in_value_sentence"), None
+
+
+def object_or_metric_result(m, name):
+    """The object or metric stands in the value's group, before it in its sentence, in its nearest effective
+    heading, or is the header of the value's table column."""
+    x = m.f[name]
+    if not v3.stated(x):
+        return outcome("unsupported", f"unknown_{name}_not_rule_checkable")
+    text = m.P.text(x["span"])
+    if text is None or squash(text).casefold() != squash(x["value"]).casefold():
+        return outcome("mismatch", f"{name}_differs_from_span")
+    if name == "object" and DEICTIC.search(squash(x["value"])):
+        return outcome("unsupported", "deictic_object")
+    place = m.place(x["span"])
+    if place in ("group", "before", "heading"):
+        return outcome("match", f"{name}_{place}", x["span"])
+    if place == "several":
+        return outcome("unsupported", "several_quantities_in_value_sentence")
+    column = v3.header_column(m.P, x["span"], m.vspan)
+    if column is True:
+        return outcome("match", "header_of_value_column", x["span"])
+    if column in ("another_column", "another_table"):
+        return outcome("mismatch", "header_of_" + column)
+    return outcome("unsupported", f"{name}_not_in_value_sentence")
+
+
+def _blank_covered(text, offset, covered):
+    """text with every character inside a covered span replaced by a space."""
+    return "".join(" " if any(c["start"] <= offset + i < c["end"] for c in covered) else ch
+                   for i, ch in enumerate(text))
+
+
+def _stated_scope(m, item_id):
+    sf = m.f["scope"]
+    if not v3.stated(sf):
+        raise ContractError(f"items[{item_id}]: scope_mode stated needs a stated scope")
+    text = m.P.text(sf["span"])
+    if text is None or squash(text).casefold() != squash(sf["value"]).casefold():
+        return outcome("mismatch", "scope_differs_from_span")
+    place = m.place(sf["span"])
+    if place in ("group", "before", "heading"):
+        return outcome("match", "scope_" + place, sf["span"])
+    return outcome("unsupported", "scope_not_in_value_sentence")
+
+
+def _object_metric_total(m, item_id):
+    """The scope is the object's own total: object and metric checked, a total word in the value's group, and
+    no restriction outside the fields - nor in an effective heading over the value (# 湖北省内) unless that
+    heading names the object itself and nothing narrower."""
+    f, L = m.f, m.L
+    if v3.stated(f["scope"]):
+        raise ContractError(f"items[{item_id}]: scope_mode object_metric_total states no scope")
+    covered = [x["span"] for x in (f["object"], f["metric"]) if v3.stated(x)] + [m.vspan]
+    if f["period"] and v3.stated(f["period"]):
+        covered.append(f["period"]["span"])
+    rest = _blank_covered(L.text(L.g_start, L.g_end), L.g_start, covered)
+    lead_rest = _blank_covered(L.text(L.start, L.g_start), L.start, covered)
+    total = TOTAL_WORD.search(rest)
+    obj = squash(f["object"]["value"]) if v3.stated(f["object"]) else ""
+    if m.fields["object"]["result"] != "match" or m.fields["metric"]["result"] != "match":
+        return outcome("unsupported", "object_metric_total_needs_checked_object_and_metric")
+    if not total:
+        return outcome("unsupported", "no_total_word_in_value_group")
+    if RESTRICTION.search(rest) or RESTRICTION.search(lead_rest):
+        return outcome("unsupported", "restriction_outside_the_fields")
+    if any(obj not in squash(h) or RESTRICTION.search(h.replace(obj, " ")) for h in headings_over(m.P, m.vspan)):
+        return outcome("unsupported", "heading_may_restrict_the_total")
+    return outcome("match", "object_metric_total",
+                   {"passage": L.pid, "start": L.g_start + total.start(), "end": L.g_start + total.end()})
+
+
+def scope_result(m, item_id):
+    mode = m.f["scope_mode"]
+    if mode == "stated":
+        return _stated_scope(m, item_id)
+    if mode == "object_metric_total":
+        return _object_metric_total(m, item_id)
+    return outcome("unsupported", "scope_not_determined")
+
+
+def words_outside_fields(m):
+    """The words of the quantity's own phrase no field accounts for: a qualifier left out of the metric
+    (suspected, in humans, 批准注册) changes what is counted. Chinese: the whole group but its function
+    characters; English: from the value to the first auxiliary verb, joining words and an event verb after the
+    metric (a predicate) aside."""
+    L, ptext, pbase, vspan = m.L, m.ptext, m.pbase, m.vspan
+    gtext = ptext[L.g_start - pbase:L.g_end - pbase]
+    if CJK.search(gtext):
+        return [ch for i, ch in enumerate(gtext)
+                if CJK.match(ch) and ch not in CN_FUNCTION and not m.covered(L.g_start + i)]
+    aux = AUX.search(ptext, vspan["end"] - pbase, L.g_end - pbase)
+    zone_end = pbase + aux.start() if aux else L.g_end
+    metric_end = m.f["metric"]["span"]["end"]
+    left_out = []
+    for w in re.finditer(r"[A-Za-z][A-Za-z-]*", ptext[vspan["end"] - pbase:zone_end - pbase]):
+        pos = vspan["end"] + w.start()
+        word = w.group(0).lower()
+        if m.covered(pos) or word in GLUE or (pos >= metric_end and EVENT.fullmatch(word)):
+            continue
+        left_out.append(w.group(0))
+    return left_out
+
+
+def negations_outside_fields(m):
+    """A negated predicate of the quantity (had not been recorded, 未报告) is no affirmative event: the negation
+    words of the value's group outside the item's own fields."""
+    L, pbase = m.L, m.pbase
+    return [n.group(0) for n in NEGATED.finditer(m.ptext, L.g_start - pbase, L.g_end - pbase)
+            if not m.covered(pbase + n.start())]
+
+
+def _rate(m):
+    before = m.ptext[max(0, m.vspan["start"] - m.pbase - 12):m.vspan["start"] - m.pbase]
+    if CHANGE.search(before):
+        return outcome("unsupported", "percent_change")
+    ratio_shown = m.fields["denominator"]["result"] == "match" and v3.stated(m.f["denominator"])
+    if m.fields["value"]["result"] == "match" and (m.percent_written or ratio_shown):
+        return outcome("match", "rate_with_percentage_or_ratio")
+    return outcome("unsupported", "measure_kind_not_rule_checkable")
+
+
+def _output_flow(vgroup):
+    """Output in an interval is a flow only as actual output: never a plan, a capacity or a stock."""
+    if PLANNED.search(vgroup):
+        return outcome("unsupported", "output_planned_not_actual")
+    if CAPACITY.search(vgroup):
+        return outcome("unsupported", "output_capacity_not_actual")
+    if INVENTORY.search(vgroup):
+        return outcome("mismatch", "inventory_is_not_a_flow")
+    return outcome("match", "actual_output_in_interval")
+
+
+def _flow(m, output):
+    vgroup, sentence = m.vgroup, m.L.text()
+    if m.period["type"] == "point":
+        return outcome("mismatch", "flow_needs_an_interval")
+    if CUMULATIVE.search(sentence) or AS_OF.search(sentence):
+        return outcome("unsupported", "cumulative_or_as_of_wording")
+    if EVENT.search(vgroup):
+        return outcome("match", "event_in_interval")
+    if output and (OUTPUT.search(vgroup) or CAPACITY.search(vgroup) or INVENTORY.search(vgroup)):
+        return _output_flow(vgroup)
+    return outcome("unsupported", "no_event_wording")
+
+
+def _cumulative(m, output):
+    pf = m.f["period"]
+    own = m.vgroup + " " + ((m.P.text(pf["span"]) or "") if v3.stated(pf) else "")
+    if CUMULATIVE.search(own):
+        return outcome("match", "cumulative_wording")
+    return outcome("unsupported", "no_cumulative_wording")
+
+
+def _stock(m, output):
+    vgroup = m.vgroup
+    if m.period["type"] != "point":
+        return outcome("mismatch", "stock_needs_a_point")
+    if CUMULATIVE.search(m.L.text()) or EVENT.search(vgroup):
+        return outcome("unsupported", "event_or_cumulative_wording")
+    if AS_OF.search(m.P.text(m.f["period"]["span"]) or "") and STATE.search(vgroup):
+        return outcome("match", "as_of_with_state_word")
+    return outcome("unsupported", "no_state_wording")
+
+
+_KIND_RULES = {"flow": _flow, "cumulative": _cumulative, "stock": _stock}
+
+
+def kind_result(m, output):
+    """The measure kind needs positive evidence in the value's own group and its own period - never a word said
+    of another object elsewhere in the sentence; such a word anywhere still vetoes the simpler reading (flow).
+    None for a kind outside the contract's four, which the request schema never admits."""
+    negation = negations_outside_fields(m)
+    if negation:
+        return outcome("unsupported", "negated_predicate:" + negation[0])
+    if m.f["measure_kind"] == "rate":
+        return _rate(m)
+    if m.period is None:
+        return outcome("unsupported", "kind_needs_a_checked_period")
+    rule = _KIND_RULES.get(m.f["measure_kind"])
+    return rule(m, output) if rule else None
+
+
+_AFTER_LONGEST_FIRST = sorted(AFTER_MARKERS, key=len, reverse=True)
+
+
+def qualifier_marks(left, right):
+    """(qualifiers marked right before / after the value, whether the marker before it is negated by a word
+    this list does not hold - 不 / not)."""
+    marks, negated = [], False
+    found = BEFORE.search(left)
+    if found:
+        marks.append(QUALIFIER_OF[squash(found.group(0)).lower()])
+        negated = bool(NEGATION.search(left[:found.start()]))
+    for marker in _AFTER_LONGEST_FIRST:
+        if right.lower().startswith(marker):
+            marks.append(QUALIFIER_OF[marker])
+            break
+    return marks, negated
+
+
+def _exact_by_position(m, gap):
+    """Exactness is proven, not presumed: what stands right before the value is the start of its group, the end
+    of one of the item's own field spans or a neutral connector."""
+    f = m.f
+    field_ends = {x["span"]["end"] for x in (f["object"], f["metric"], f["scope"]) if v3.stated(x)}
+    if v3.stated(f["period"]):
+        field_ends.add(f["period"]["span"]["end"])
+    word = re.search(r"([A-Za-z-]+)$", gap)
+    if not gap.strip(" ，,、（(|") or m.L.g_start + len(gap) in field_ends or gap[-1] in CN_CONNECT \
+            or (word and word.group(1).lower() in EN_CONNECT):
+        return outcome("match", "exact_by_position")
+    return outcome("unsupported", "exactness_not_provable")
+
+
+def qualifier_result(m):
+    """A marker at the value must agree with the stated qualifier; "exact" also needs no bounding suffix."""
+    L, ptext, pbase = m.L, m.ptext, m.pbase
+    left = ptext[L.g_start - pbase:m.vspan["start"] - pbase].rstrip()  # whitespace before the value skipped
+    right_at = m.at_value[2] if m.at_value else m.after
+    right = ptext[right_at:L.end - pbase].lstrip()  # to the sentence's end, whitespace after the value skipped
+    marks, negated = qualifier_marks(left, right)
+    want = m.f["qualifier"]
+    if negated:
+        return outcome("unsupported", "negated_comparator_not_supported")
+    if marks:
+        return (outcome("match", "qualifier_marker") if want in marks
+                else outcome("mismatch", "value_is_qualified:" + marks[0]))
+    if want != "exact":
+        return outcome("mismatch", "no_qualifier_marker")
+    return _exact_by_position(m, left)
+
+
+def modality_result(m):
+    """The modality written in the sentence, the effective headings or the table caption."""
+    context = " ".join([m.L.text()] + headings_over(m.P, m.vspan) + [table_caption(m.P, m.vspan)])
+    found = "projected" if PROJECTED.search(context) else "planned" if PLANNED.search(context) else "actual"
+    return (outcome("match", "modality_" + found) if m.f["modality"] == found
+            else outcome("mismatch", "modality_is_" + found))
+
+
+def check_v4(item, P, unit_head=None, output=False, period_whole=None):
+    """Field results of one measurement item under v4 (locator checked first, as v3). The field checks run in
+    this order because later ones read what earlier ones established (partners, period, object and metric)."""
+    fields = {"locator": locator_result(item, P)}
     if fields["locator"]["result"] != "match":
         for name in FIELDS:
             fields[name] = outcome("unsupported", "no_valid_location")
         return fields
     f = item["fields"]
-    vf = f["value"]
-    vspan = vf["span"]
+    vspan = f["value"]["span"]
     vtext = P.text(vspan)
     if vtext is None:
         fields["value"] = outcome("mismatch", "span_outside_passage")
         for name in FIELDS:
             fields.setdefault(name, outcome("unsupported", "no_valid_value_span"))
         return fields
-    if not P.inside(vspan, item["locator"]):
-        fields["value"] = outcome("mismatch", "value_outside_quote")
-    elif not whole_number(P, vspan):
-        fields["value"] = outcome("mismatch", "value_span_not_a_whole_number")
-    elif norm.decimal_text(vtext) is None:
-        fields["value"] = outcome("unsupported", "value_not_a_plain_number")
-    elif Decimal(norm.decimal_text(vtext)) != Decimal(vf["value"]):
-        fields["value"] = outcome("mismatch", "value_differs_from_span")
-    else:
-        fields["value"] = outcome("match", span=vspan)
+    fields["value"] = value_result(item, P, vtext)
     L = Local(P, vspan)
-    ptext, pbase = L.passage["text"], L.base
-    after = vspan["end"] - pbase
-    # unit
-    at_value = unit_after(ptext, after, output)
-    unit = f["unit"]
-    if v3.stated(unit):
-        utext = P.text(unit["span"])
-        if utext is None or squash(utext).casefold() != squash(unit["value"]).casefold():
-            fields["unit"] = outcome("mismatch", "unit_differs_from_span")
-        elif at_value and (unit["span"]["passage"], unit["span"]["start"], unit["span"]["end"]) == (
-                L.pid, pbase + at_value[1], pbase + at_value[2]):
-            fields["unit"] = outcome("match", "unit_at_value", unit["span"])  # the whole recognized unit, exactly
-        elif at_value:
-            fields["unit"] = outcome("mismatch", "unit_span_is_not_the_unit_at_value:" + at_value[0])
-        elif bound_unit(P, f, unit, vspan, unit_head):
-            fields["unit"] = outcome("match", "unit_in_bound_metric", unit["span"])
-        else:
-            fields["unit"] = outcome("unsupported", "unit_not_at_value_or_not_in_table")
-    else:
-        if at_value:
-            fields["unit"] = outcome("mismatch", "unit_written_at_value:" + at_value[0])
-        elif NO_UNIT_AFTER.match(ptext[after:L.end - pbase]):  # the rest of the sentence, whitespace skipped
-            fields["unit"] = outcome("match", "no_unit_at_value")  # only punctuation follows the number
-        else:
-            fields["unit"] = outcome("unsupported", "unrecognized_text_after_value")  # not proven unitless
-    # denominator: a ratio of the value's own group (a percentage never borrows another population's ratio);
-    # any ratio of the sentence still keeps "no denominator" from being proven
-    ratios = ratios_in(L.text(), L.start)
-    own_ratios = [r for r in ratios if L.g_start <= min(r[0], r[3]) and max(r[1], r[4]) <= L.g_end]
-    mine = [r for r in own_ratios if (r[0], r[1]) == (vspan["start"], vspan["end"])]
-    den = f["denominator"]
-    partners = []
-    percent_written = ptext[after:after + 1] in ("%", "％")
-    if v3.stated(den):
-        dtext = P.text(den["span"])
-        if dtext is None or norm.decimal_text(dtext) is None or Decimal(norm.decimal_text(dtext)) != Decimal(
-                den["value"]):
-            fields["denominator"] = outcome("mismatch", "denominator_differs_from_span")
-        elif any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in mine) or (
-                percent_written and any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"])
-                                        and next_to(ptext, pbase, r, vspan) for r in own_ratios)):
-            fields["denominator"] = outcome("match", span=den["span"])
-            for r in own_ratios:
-                if (r[3], r[4]) == (den["span"]["start"], den["span"]["end"]):
-                    partners += [{"start": r[0], "end": r[1]}, {"start": r[3], "end": r[4]}]
-        else:
-            fields["denominator"] = outcome("unsupported", "denominator_relation_not_rule_checkable")
-    else:
-        # a total word of the value's own group (国家药监局共批准…318个) is the value itself, not another total
-        other_total = [m for m in TOTAL.finditer(L.text())
-                       if not (L.start + m.start(1) == vspan["start"] and L.start + m.end(1) == vspan["end"])]
-        fields["denominator"] = (outcome("mismatch", "the_value_has_a_stated_denominator") if mine
-                                 else outcome("unsupported", "other_ratio_or_total_in_value_sentence")
-                                 if (ratios or other_total)
-                                 else outcome("match", "no_denominator_in_value_sentence"))
-    for r in mine:
-        partners += [{"start": r[0], "end": r[1]}, {"start": r[3], "end": r[4]}]
-    partners.append({"start": vspan["start"], "end": vspan["end"]})
-    spans = [x["span"] for x in (f["object"], f["metric"], f["scope"], f["period"]) if v3.stated(x)]
-    # period
-    pf = f["period"]
-    period = None
-    if not v3.stated(pf):
-        fields["period"] = outcome("unsupported", "period_not_stated")
-    else:
-        ptxt = P.text(pf["span"])
-        got, why = canonical_period(ptxt or "")
-        if ptxt is None:
-            fields["period"] = outcome("mismatch", "period_span_outside_passage")
-        elif got is None:
-            fields["period"] = outcome("unsupported", why)
-        elif not whole_period(P, pf["span"], period_whole):
-            fields["period"] = outcome("unsupported", "period_span_not_the_whole_period")
-        elif got != pf["value"]:
-            fields["period"] = outcome("mismatch", "period_differs_from_canonical_span")
-        else:
-            place = own_place(L, P, pf["span"], vspan, partners, [s for s in spans if s is not pf["span"]])
-            before = ptext[max(0, pf["span"]["start"] - pbase - 24):pf["span"]["start"] - pbase]
-            past = re.search(r"past (\d+) days\s*\(\s*$", before, re.IGNORECASE)
-            if past and got.get("precision") == "day" and "start" in got and int(past.group(1)) != inclusive_days(got):
-                fields["period"] = outcome("mismatch", "past_n_days_disagrees_with_dates")
-            elif place in ("group", "before"):
-                fields["period"] = outcome("match", "period_" + place, pf["span"])
-                period = got
-            else:
-                fields["period"] = outcome("unsupported", "several_quantities_in_value_sentence" if place == "several"
-                                           else "period_not_in_value_sentence")
-    # object and metric
+    m = Measure(P, f, vspan, fields, L, unit_after(L.passage["text"], vspan["end"] - L.base, output))
+    fields["unit"] = unit_result(m, unit_head)
+    fields["denominator"], m.partners = denominator_result(m)
+    fields["period"], m.period = period_result(m, period_whole)
     for name in ("object", "metric"):
-        x = f[name]
-        if not v3.stated(x):
-            fields[name] = outcome("unsupported", f"unknown_{name}_not_rule_checkable")
-            continue
-        text = P.text(x["span"])
-        if text is None or squash(text).casefold() != squash(x["value"]).casefold():
-            fields[name] = outcome("mismatch", f"{name}_differs_from_span")
-            continue
-        if name == "object" and DEICTIC.search(squash(x["value"])):
-            fields[name] = outcome("unsupported", "deictic_object")
-            continue
-        place = own_place(L, P, x["span"], vspan, partners, [s for s in spans if s is not x["span"]])
-        if place in ("group", "before", "heading"):
-            fields[name] = outcome("match", f"{name}_{place}", x["span"])
-        elif place == "several":
-            fields[name] = outcome("unsupported", "several_quantities_in_value_sentence")
-        else:
-            column = v3.header_column(P, x["span"], vspan)
-            fields[name] = (outcome("match", "header_of_value_column", x["span"]) if column is True
-                            else outcome("mismatch", "header_of_" + column) if column in ("another_column", "another_table")
-                            else outcome("unsupported", f"{name}_not_in_value_sentence"))
-    # scope
-    sf, mode = f["scope"], f["scope_mode"]
-    if mode == "stated":
-        if not v3.stated(sf):
-            raise ContractError(f"items[{item['id']}]: scope_mode stated needs a stated scope")
-        text = P.text(sf["span"])
-        if text is None or squash(text).casefold() != squash(sf["value"]).casefold():
-            fields["scope"] = outcome("mismatch", "scope_differs_from_span")
-        else:
-            place = own_place(L, P, sf["span"], vspan, partners, [s for s in spans if s is not sf["span"]])
-            fields["scope"] = (outcome("match", "scope_" + place, sf["span"]) if place in ("group", "before", "heading")
-                               else outcome("unsupported", "scope_not_in_value_sentence"))
-    elif mode == "object_metric_total":
-        if v3.stated(sf):
-            raise ContractError(f"items[{item['id']}]: scope_mode object_metric_total states no scope")
-        group = L.text(L.g_start, L.g_end)
-        covered = [x["span"] for x in (f["object"], f["metric"]) if v3.stated(x)] + [vspan]
-        if pf and v3.stated(pf):
-            covered.append(pf["span"])
-        rest = "".join(" " if any(c["start"] <= L.g_start + i < c["end"] for c in covered) else ch
-                       for i, ch in enumerate(group))
-        lead = L.text(L.start, L.g_start)
-        lead_rest = "".join(" " if any(c["start"] <= L.start + i < c["end"] for c in covered) else ch
-                            for i, ch in enumerate(lead))
-        total = TOTAL_WORD.search(rest)
-        # an effective heading over the value may narrow it (# 湖北省内): a total is proven only under headings
-        # that name the object itself and carry no restriction
-        heads = [t for _, _, t in ancestor_headings(P, vspan)]
-        obj = squash(f["object"]["value"]) if v3.stated(f["object"]) else ""
-        if fields["object"]["result"] != "match" or fields["metric"]["result"] != "match":
-            fields["scope"] = outcome("unsupported", "object_metric_total_needs_checked_object_and_metric")
-        elif not total:
-            fields["scope"] = outcome("unsupported", "no_total_word_in_value_group")
-        elif RESTRICTION.search(rest) or RESTRICTION.search(lead_rest):
-            fields["scope"] = outcome("unsupported", "restriction_outside_the_fields")
-        elif any(obj not in squash(h) or RESTRICTION.search(h.replace(obj, " ")) for h in heads):
-            fields["scope"] = outcome("unsupported", "heading_may_restrict_the_total")
-        else:
-            fields["scope"] = outcome("match", "object_metric_total",
-                                      {"passage": L.pid, "start": L.g_start + total.start(), "end": L.g_start + total.end()})
-    else:
-        fields["scope"] = outcome("unsupported", "scope_not_determined")
-    # the quantity's own phrase is covered by the item's fields: a qualifier left out of the metric
-    # (suspected, in humans, 批准注册) changes what is counted, so the metric does not hold
-    cover = cover_of(f, vspan, partners, ptext, pbase, L)
-
-    def covered(pos):
-        return any(c["start"] <= pos < c["end"] for c in cover)
-
-    # a negated predicate of the quantity (had not been recorded, 未报告) is no affirmative event: whatever
-    # negation stands in the value's group outside the item's own fields leaves the kind unproven
-    negation = [m.group(0) for m in NEGATED.finditer(ptext, L.g_start - pbase, L.g_end - pbase)
-                if not covered(pbase + m.start())]
+        fields[name] = object_or_metric_result(m, name)
+    fields["scope"] = scope_result(m, item["id"])
+    m.cover = cover_of(f, vspan, m.partners, m.ptext, m.pbase, L)
     if fields["metric"]["result"] == "match":
-        gtext = ptext[L.g_start - pbase:L.g_end - pbase]
-        left_out = []
-        if CJK.search(gtext):
-            left_out = [ch for i, ch in enumerate(gtext)
-                        if CJK.match(ch) and ch not in CN_FUNCTION and not covered(L.g_start + i)]
-        else:
-            aux = AUX.search(ptext, vspan["end"] - pbase, L.g_end - pbase)
-            zone_end = pbase + aux.start() if aux else L.g_end
-            metric_end = f["metric"]["span"]["end"]
-            for w in re.finditer(r"[A-Za-z][A-Za-z-]*", ptext[vspan["end"] - pbase:zone_end - pbase]):
-                pos = vspan["end"] + w.start()
-                word = w.group(0).lower()
-                if covered(pos) or word in GLUE or (pos >= metric_end and EVENT.fullmatch(word)):
-                    continue
-                left_out.append(w.group(0))
+        left_out = words_outside_fields(m)
         if left_out:
             fields["metric"] = outcome("unsupported", "quantity_words_outside_the_fields:" + " ".join(left_out)[:60])
-    # measure kind
-    kind = f["measure_kind"]
-    sentence, vgroup = L.text(), L.text(L.g_start, L.g_end)
-    # positive evidence of the kind belongs to the value's own group and its own period - never a word said of
-    # another object elsewhere in the sentence; such a word anywhere still vetoes the simpler reading (flow)
-    own = vgroup + " " + ((P.text(pf["span"]) or "") if v3.stated(pf) else "")
-    cumulative = CUMULATIVE.search(own)
-    cumulative_anywhere = CUMULATIVE.search(sentence)
-    if negation:
-        fields["measure_kind"] = outcome("unsupported", "negated_predicate:" + negation[0])
-    elif kind == "rate":
-        before = ptext[max(0, vspan["start"] - pbase - 12):vspan["start"] - pbase]
-        if CHANGE.search(before):
-            fields["measure_kind"] = outcome("unsupported", "percent_change")
-        elif fields["value"]["result"] == "match" and (percent_written or fields["denominator"]["result"] == "match"
-                                                       and v3.stated(den)):
-            fields["measure_kind"] = outcome("match", "rate_with_percentage_or_ratio")
-        else:
-            fields["measure_kind"] = outcome("unsupported", "measure_kind_not_rule_checkable")
-    elif period is None:
-        fields["measure_kind"] = outcome("unsupported", "kind_needs_a_checked_period")
-    elif kind == "flow":
-        if period["type"] == "point":
-            fields["measure_kind"] = outcome("mismatch", "flow_needs_an_interval")
-        elif cumulative_anywhere or AS_OF.search(sentence):
-            fields["measure_kind"] = outcome("unsupported", "cumulative_or_as_of_wording")
-        elif EVENT.search(vgroup):
-            fields["measure_kind"] = outcome("match", "event_in_interval")
-        elif output and (OUTPUT.search(vgroup) or CAPACITY.search(vgroup) or INVENTORY.search(vgroup)):
-            # output in an interval is a flow only as actual output (v15): never a plan, a capacity or a stock
-            if PLANNED.search(vgroup):
-                fields["measure_kind"] = outcome("unsupported", "output_planned_not_actual")
-            elif CAPACITY.search(vgroup):
-                fields["measure_kind"] = outcome("unsupported", "output_capacity_not_actual")
-            elif INVENTORY.search(vgroup):
-                fields["measure_kind"] = outcome("mismatch", "inventory_is_not_a_flow")
-            else:
-                fields["measure_kind"] = outcome("match", "actual_output_in_interval")
-        else:
-            fields["measure_kind"] = outcome("unsupported", "no_event_wording")
-    elif kind == "cumulative":
-        fields["measure_kind"] = (outcome("match", "cumulative_wording") if cumulative
-                                  else outcome("unsupported", "no_cumulative_wording"))
-    elif kind == "stock":
-        if period["type"] != "point":
-            fields["measure_kind"] = outcome("mismatch", "stock_needs_a_point")
-        elif cumulative_anywhere or EVENT.search(vgroup):
-            fields["measure_kind"] = outcome("unsupported", "event_or_cumulative_wording")
-        elif AS_OF.search(P.text(pf["span"]) or "") and STATE.search(vgroup):
-            fields["measure_kind"] = outcome("match", "as_of_with_state_word")
-        else:
-            fields["measure_kind"] = outcome("unsupported", "no_state_wording")
-    # qualifier: a marker at the value must agree with the stated qualifier; "exact" is proven, not presumed -
-    # what stands right before the value is the start of its group, the end of one of the item's own field spans
-    # or a neutral connector, and no bounding suffix follows it
-    rel = vspan["start"] - pbase
-    left = ptext[L.g_start - pbase:rel].rstrip()  # from the group's start, whitespace before the value skipped
-    right_at = at_value[2] if at_value else after
-    right = ptext[right_at:L.end - pbase].lstrip()  # to the sentence's end, whitespace after the value skipped
-    marks, negated = [], False
-    m = BEFORE.search(left)
-    if m:
-        marks.append(QUALIFIER_OF[squash(m.group(0)).lower()])
-        negated = bool(NEGATION.search(left[:m.start()]))  # 不 / not before a phrase this list does not hold
-    for marker in sorted(AFTER_MARKERS, key=len, reverse=True):
-        if right.lower().startswith(marker):
-            marks.append(QUALIFIER_OF[marker])
-            break
-    want = f["qualifier"]
-    if negated:
-        fields["qualifier"] = outcome("unsupported", "negated_comparator_not_supported")
-    elif marks:
-        fields["qualifier"] = (outcome("match", "qualifier_marker") if want in marks
-                               else outcome("mismatch", "value_is_qualified:" + marks[0]))
-    elif want != "exact":
-        fields["qualifier"] = outcome("mismatch", "no_qualifier_marker")
-    else:
-        gap = ptext[L.g_start - pbase:rel].rstrip()
-        field_ends = {x["span"]["end"] for x in (f["object"], f["metric"], f["scope"]) if v3.stated(x)}
-        if v3.stated(pf):
-            field_ends.add(pf["span"]["end"])
-        word = re.search(r"([A-Za-z-]+)$", gap)
-        if not gap.strip(" ，,、（(|") or L.g_start + len(gap) in field_ends or gap[-1] in CN_CONNECT \
-                or (word and word.group(1).lower() in EN_CONNECT):
-            fields["qualifier"] = outcome("match", "exact_by_position")
-        else:
-            fields["qualifier"] = outcome("unsupported", "exactness_not_provable")
-    # modality: the sentence, the effective headings and the table caption
-    context = " ".join([sentence] + headings_over(P, vspan) + [table_caption(P, vspan)])
-    found = "projected" if PROJECTED.search(context) else "planned" if PLANNED.search(context) else "actual"
-    fields["modality"] = (outcome("match", "modality_" + found) if f["modality"] == found
-                          else outcome("mismatch", "modality_is_" + found))
+    kind = kind_result(m, output)
+    if kind is not None:
+        fields["measure_kind"] = kind
+    fields["qualifier"] = qualifier_result(m)
+    fields["modality"] = modality_result(m)
     return fields
 
 

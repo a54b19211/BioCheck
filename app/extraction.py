@@ -9,6 +9,7 @@ the number, the denominator in an explicit ratio of that number within its claus
 clause), and a table metric's header must head the value's column. Whatever the rules cannot prove is
 "unsupported", which makes the item "unchecked", never "consistent"."""
 
+import dataclasses
 import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 
@@ -193,100 +194,121 @@ def stated(field):
     return field is not None and field.get("state", "stated") == "stated"
 
 
-def check_measurement(item, P, fields):
-    f = item["fields"]
-    value_field = f["value"]
-    if not stated(value_field):
-        raise ContractError(f"items[{item['id']}].fields.value: a measurement states its value")
-    vspan = value_field["span"]
-    vtext = P.text(vspan)
-    if vtext is None:
-        fields["value"] = outcome("mismatch", "span_outside_passage")
-        for name in KIND_FIELDS["measurement"] + ("measure_kind",):
-            fields.setdefault(name, outcome("unsupported", "no_valid_value_span"))
-        return
-    if not P.inside(vspan, item["locator"]):
-        fields["value"] = outcome("mismatch", "value_outside_quote")
-    elif not P.whole_number(vspan):
-        fields["value"] = outcome("mismatch", "value_span_not_a_whole_number")  # "0" of 100%, "10" of -10%
-    elif number(vtext) is None or number(value_field["value"]) is None:
-        fields["value"] = outcome("unsupported", "value_not_a_plain_number")
-    elif number(vtext) != number(value_field["value"]):
-        fields["value"] = outcome("mismatch", "value_differs_from_span")
-    else:
-        fields["value"] = outcome("match", span=vspan)
-    pid, c_start, c_end, clause_text = P.clause(vspan)
+@dataclasses.dataclass
+class ValueClause:
+    """The clause around a measurement's value in its passage, and the unit written right at the number."""
+
+    pid: str
+    start: int  # artifact offset of the clause
+    text: str
+    passage: dict
+    after: int  # passage offset right after the value
+    at_value: tuple | None
+
+    @property
+    def percent_written(self):
+        return self.passage["text"][self.after:self.after + 1] in ("%", "％")
+
+
+def value_clause(P, vspan):
+    pid, c_start, _c_end, clause_text = P.clause(vspan)
     passage = P.by_id[pid]
     after = vspan["end"] - passage["start"]
-    at_value = unit_at(passage["text"], after)
-    percent_written = passage["text"][after:after + 1] in ("%", "％")
-    # unit: written right at the number
-    unit = f["unit"]
-    if stated(unit):
-        canonical = CANONICAL.get(squash(unit["value"]).casefold())
-        utext = P.text(unit["span"])
-        if canonical is None:
-            fields["unit"] = outcome("unsupported", "unit_not_in_table")
-        elif utext is None or CANONICAL.get(squash(utext).casefold()) != canonical:
-            fields["unit"] = outcome("mismatch", "unit_differs_from_span")
-        elif at_value and (unit["span"]["passage"], unit["span"]["start"]) == (pid, passage["start"] + at_value[1]) \
-                and at_value[0] == canonical:
-            fields["unit"] = outcome("match", span=unit["span"])
-        elif at_value and at_value[0] != canonical:
-            fields["unit"] = outcome("mismatch", "another_unit_at_value:" + at_value[0])
-        else:
-            fields["unit"] = outcome("mismatch", "unit_not_at_value")
-    else:
-        fields["unit"] = (outcome("mismatch", "unit_written_at_value:" + at_value[0]) if at_value
-                          else outcome("match", "no_unit_at_value"))
-    # denominator: the denominator of an explicit ratio of this very number, inside its clause
-    ratios = ratios_in(clause_text, c_start)
-    mine = [r for r in ratios if (r[0], r[1]) == (vspan["start"], vspan["end"])]
-    den = f["denominator"]
-    if stated(den):
-        dtext = P.text(den["span"])
-        wanted = number(den["value"])
-        if dtext is not None and (wanted is None or number(dtext) is None):
-            fields["denominator"] = outcome("unsupported", "denominator_not_a_supported_number")
-        elif dtext is None or number(dtext) != wanted:
-            fields["denominator"] = outcome("mismatch", "denominator_differs_from_span")
-        elif any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in mine):
-            fields["denominator"] = outcome("match", span=den["span"])
-        elif mine:
-            fields["denominator"] = outcome("mismatch", "the_value_has_another_denominator")
-        elif percent_written and number(vtext) is not None:
-            # a percentage of a ratio stated in the same clause: n/N*100 rounded to the digits shown
-            shown = number(vtext)
-            places = max(0, -shown.as_tuple().exponent)
-            # numbers are bounded by MAX_DIGITS, so a 60-digit context computes n/N*100 exactly enough
-            with localcontext() as ctx:
-                ctx.prec = 60
-                fits = [r for r in ratios if (r[3], r[4]) == (den["span"]["start"], den["span"]["end"])
-                        and r[2] is not None and r[5]
-                        and (r[2] / r[5] * 100).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP) == shown]
-            fields["denominator"] = (outcome("match", "percentage_of_stated_ratio", den["span"]) if fits
-                                     else outcome("mismatch", "percentage_does_not_follow_from_ratio")
-                                     if any((r[3], r[4]) == (den["span"]["start"], den["span"]["end"]) for r in ratios)
-                                     else outcome("unsupported", "denominator_relation_not_rule_checkable"))
-        else:
-            fields["denominator"] = outcome("unsupported", "denominator_relation_not_rule_checkable")
-    else:
-        # "unknown": wrong for certain only when this very number has a stated denominator; other ratios or
-        # totals in the clause may belong to other quantities
-        fields["denominator"] = (outcome("mismatch", "the_value_has_a_stated_denominator") if mine
-                                 else outcome("unsupported", "other_ratio_or_total_in_value_clause")
-                                 if ratios or TOTAL.search(clause_text)
-                                 else outcome("match", "no_denominator_in_value_clause"))
-    # the value's own context: in a table row, the row (one record); in prose, the value's group, and only if
-    # that group names no other quantity (numbers other than the value and the partners of its ratio)
+    return ValueClause(pid, c_start, clause_text, passage, after, unit_at(passage["text"], after))
+
+
+def _ends(span):
+    return span["start"], span["end"]
+
+
+def _value_result(item, P, vtext):
+    value_field = item["fields"]["value"]
+    vspan = value_field["span"]
+    if not P.inside(vspan, item["locator"]):
+        return outcome("mismatch", "value_outside_quote")
+    if not P.whole_number(vspan):
+        return outcome("mismatch", "value_span_not_a_whole_number")  # "0" of 100%, "10" of -10%
+    if number(vtext) is None or number(value_field["value"]) is None:
+        return outcome("unsupported", "value_not_a_plain_number")
+    if number(vtext) != number(value_field["value"]):
+        return outcome("mismatch", "value_differs_from_span")
+    return outcome("match", span=vspan)
+
+
+def _unit_result(unit, P, vc):
+    """The unit is written right at the number: the unit table's longest spelling there."""
+    at_value = vc.at_value
+    if not stated(unit):
+        return (outcome("mismatch", "unit_written_at_value:" + at_value[0]) if at_value
+                else outcome("match", "no_unit_at_value"))
+    canonical = CANONICAL.get(squash(unit["value"]).casefold())
+    utext = P.text(unit["span"])
+    if canonical is None:
+        return outcome("unsupported", "unit_not_in_table")
+    if utext is None or CANONICAL.get(squash(utext).casefold()) != canonical:
+        return outcome("mismatch", "unit_differs_from_span")
+    if at_value and (unit["span"]["passage"], unit["span"]["start"]) == (vc.pid, vc.passage["start"] + at_value[1]) \
+            and at_value[0] == canonical:
+        return outcome("match", span=unit["span"])
+    if at_value and at_value[0] != canonical:
+        return outcome("mismatch", "another_unit_at_value:" + at_value[0])
+    return outcome("mismatch", "unit_not_at_value")
+
+
+def _percentage_of_ratio(den, shown, ratios):
+    """A percentage of a ratio stated in the same clause: n/N*100 rounded to the digits shown."""
+    places = max(0, -shown.as_tuple().exponent)
+    of_den = [r for r in ratios if (r[3], r[4]) == _ends(den["span"])]
+    # numbers are bounded by MAX_DIGITS, so a 60-digit context computes n/N*100 exactly enough
+    with localcontext() as ctx:
+        ctx.prec = 60
+        fits = [r for r in of_den if r[2] is not None and r[5]
+                and (r[2] / r[5] * 100).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP) == shown]
+    if fits:
+        return outcome("match", "percentage_of_stated_ratio", den["span"])
+    if of_den:
+        return outcome("mismatch", "percentage_does_not_follow_from_ratio")
+    return outcome("unsupported", "denominator_relation_not_rule_checkable")
+
+
+def _denominator_result(den, P, vc, ratios, mine, vtext):
+    """The denominator of an explicit ratio of this very number, inside its clause. "unknown" is wrong for
+    certain only when this very number has a stated denominator; other ratios or totals in the clause may
+    belong to other quantities."""
+    if not stated(den):
+        if mine:
+            return outcome("mismatch", "the_value_has_a_stated_denominator")
+        if ratios or TOTAL.search(vc.text):
+            return outcome("unsupported", "other_ratio_or_total_in_value_clause")
+        return outcome("match", "no_denominator_in_value_clause")
+    dtext = P.text(den["span"])
+    wanted = number(den["value"])
+    if dtext is not None and (wanted is None or number(dtext) is None):
+        return outcome("unsupported", "denominator_not_a_supported_number")
+    if dtext is None or number(dtext) != wanted:
+        return outcome("mismatch", "denominator_differs_from_span")
+    if any((r[3], r[4]) == _ends(den["span"]) for r in mine):
+        return outcome("match", span=den["span"])
+    if mine:
+        return outcome("mismatch", "the_value_has_another_denominator")
+    if vc.percent_written and number(vtext) is not None:
+        return _percentage_of_ratio(den, number(vtext), ratios)
+    return outcome("unsupported", "denominator_relation_not_rule_checkable")
+
+
+def _own_context(P, vspan, vc, ratios, den):
+    """where(field_span) -> "row" | "group" | "several" | "outside": the value's own context is, in a table row,
+    the row (one record); in prose, the value's group, and only if that group names no other quantity (numbers
+    other than the value and the partners of its ratio)."""
     row = P.row(vspan)
     g_start, g_end = row if row else P.group(vspan)
-    partners = {(vspan["start"], vspan["end"])}
-    for r in mine_ratios(ratios, vspan, f.get("denominator")):
+    partners = {_ends(vspan)}
+    for r in mine_ratios(ratios, vspan, den):
         partners |= {(r[0], r[1]), (r[3], r[4])}
+    passage = vc.passage
 
-    def own_context(field_span):
-        if field_span["passage"] != pid or not (g_start <= field_span["start"] and field_span["end"] <= g_end):
+    def where(field_span):
+        if field_span["passage"] != vc.pid or not (g_start <= field_span["start"] and field_span["end"] <= g_end):
             return "outside"
         if row:
             return "row"
@@ -297,62 +319,83 @@ def check_measurement(item, P, fields):
                   and not (field_span["start"] <= g_start + m.start() and g_start + m.end() <= field_span["end"])]
         return "several" if others else "group"
 
-    # period and scope: in the value's own context
-    for name in ("period", "scope"):
-        field = f[name]
-        if not stated(field):
-            if name == "period":
-                blanked = TIMESTAMP.sub(" ", clause_text)
-                # a date in the clause may be something else (a pharmacopoeia edition "2015年版"): not proof
-                fields[name] = (outcome("unsupported", "date_in_value_clause") if DATE.search(blanked)
-                                else outcome("match", "no_date_in_value_clause"))
-            else:
-                fields[name] = outcome("unsupported", "absence_of_scope_not_rule_checkable")
-            continue
-        text = P.text(field["span"])
-        where = own_context(field["span"]) if text is not None else "outside"
-        if text is None or squash(text).casefold() != squash(field["value"]).casefold():
-            fields[name] = outcome("mismatch", f"{name}_differs_from_span")
-        elif where in ("row", "group"):
-            fields[name] = outcome("match", span=field["span"])
-        elif where == "several":
-            fields[name] = outcome("unsupported", "several_quantities_in_value_group")
-        else:
-            fields[name] = outcome("unsupported", f"{name}_not_in_value_group")
-    # object and metric: in the value's clause or row, or (a table metric) the header of the value's column
-    for name in ("object", "metric"):
-        field = f[name]
-        if not stated(field):
-            fields[name] = outcome("unsupported", f"unknown_{name}_not_rule_checkable")
-            continue
-        text = P.text(field["span"])
-        if text is None or squash(text).casefold() != squash(field["value"]).casefold():
-            fields[name] = outcome("mismatch", f"{name}_differs_from_span")
-            continue
-        where = own_context(field["span"])
-        if where in ("row", "group"):
-            fields[name] = outcome("match", span=field["span"])
-            continue
-        if where == "several":
-            fields[name] = outcome("unsupported", "several_quantities_in_value_group")
-            continue
-        column = header_column(P, field["span"], vspan)
-        if column is True:
-            fields[name] = outcome("match", "header_of_value_column", field["span"])
-        elif column in ("another_column", "another_table"):
-            fields[name] = outcome("mismatch", "header_of_" + column)
-        else:
-            fields[name] = outcome("unsupported", "header_table_not_provable" if column == "unprovable"
-                                   else f"{name}_not_in_value_group")
-    kind = item["fields"]["measure_kind"]
-    # a rate needs positive evidence: a percentage written at the value, or a ratio actually stated for it -
-    # "no denominator in the clause" proves nothing (Codex r106)
+    return where
+
+
+def _period_or_scope_result(name, field, P, vc, where):
+    """Period and scope stand in the value's own context."""
+    if not stated(field):
+        if name == "period":
+            # a date in the clause may be something else (a pharmacopoeia edition "2015年版"): not proof
+            return (outcome("unsupported", "date_in_value_clause") if DATE.search(TIMESTAMP.sub(" ", vc.text))
+                    else outcome("match", "no_date_in_value_clause"))
+        return outcome("unsupported", "absence_of_scope_not_rule_checkable")
+    text = P.text(field["span"])
+    place = where(field["span"]) if text is not None else "outside"
+    if text is None or squash(text).casefold() != squash(field["value"]).casefold():
+        return outcome("mismatch", f"{name}_differs_from_span")
+    if place in ("row", "group"):
+        return outcome("match", span=field["span"])
+    if place == "several":
+        return outcome("unsupported", "several_quantities_in_value_group")
+    return outcome("unsupported", f"{name}_not_in_value_group")
+
+
+def _object_or_metric_result(name, field, P, vspan, where):
+    """Object and metric stand in the value's clause or row, or (a table metric) head the value's column."""
+    if not stated(field):
+        return outcome("unsupported", f"unknown_{name}_not_rule_checkable")
+    text = P.text(field["span"])
+    if text is None or squash(text).casefold() != squash(field["value"]).casefold():
+        return outcome("mismatch", f"{name}_differs_from_span")
+    place = where(field["span"])
+    if place in ("row", "group"):
+        return outcome("match", span=field["span"])
+    if place == "several":
+        return outcome("unsupported", "several_quantities_in_value_group")
+    column = header_column(P, field["span"], vspan)
+    if column is True:
+        return outcome("match", "header_of_value_column", field["span"])
+    if column in ("another_column", "another_table"):
+        return outcome("mismatch", "header_of_" + column)
+    return outcome("unsupported", "header_table_not_provable" if column == "unprovable"
+                   else f"{name}_not_in_value_group")
+
+
+def _kind_result(kind, fields, vc):
+    """A rate needs positive evidence: a percentage written at the value, or a ratio actually stated for it -
+    "no denominator in the clause" proves nothing."""
     ratio_shown = fields["denominator"]["result"] == "match" and fields["denominator"].get("reason") in (
         None, "percentage_of_stated_ratio")
-    if kind == "rate" and fields["value"]["result"] == "match" and (percent_written or ratio_shown):
-        fields["measure_kind"] = outcome("match", "rate_with_percentage_or_ratio")
-    else:
-        fields["measure_kind"] = outcome("unsupported", "measure_kind_not_rule_checkable")
+    if kind == "rate" and fields["value"]["result"] == "match" and (vc.percent_written or ratio_shown):
+        return outcome("match", "rate_with_percentage_or_ratio")
+    return outcome("unsupported", "measure_kind_not_rule_checkable")
+
+
+def check_measurement(item, P, fields):
+    """Field results of a measurement item, anchored on its value, into `fields`."""
+    f = item["fields"]
+    if not stated(f["value"]):
+        raise ContractError(f"items[{item['id']}].fields.value: a measurement states its value")
+    vspan = f["value"]["span"]
+    vtext = P.text(vspan)
+    if vtext is None:
+        fields["value"] = outcome("mismatch", "span_outside_passage")
+        for name in KIND_FIELDS["measurement"] + ("measure_kind",):
+            fields.setdefault(name, outcome("unsupported", "no_valid_value_span"))
+        return
+    fields["value"] = _value_result(item, P, vtext)
+    vc = value_clause(P, vspan)
+    fields["unit"] = _unit_result(f["unit"], P, vc)
+    ratios = ratios_in(vc.text, vc.start)
+    mine = [r for r in ratios if (r[0], r[1]) == _ends(vspan)]
+    fields["denominator"] = _denominator_result(f["denominator"], P, vc, ratios, mine, vtext)
+    where = _own_context(P, vspan, vc, ratios, f.get("denominator"))
+    for name in ("period", "scope"):
+        fields[name] = _period_or_scope_result(name, f[name], P, vc, where)
+    for name in ("object", "metric"):
+        fields[name] = _object_or_metric_result(name, f[name], P, vspan, where)
+    fields["measure_kind"] = _kind_result(item["fields"]["measure_kind"], fields, vc)
 
 
 def cell_index(line, pos):
