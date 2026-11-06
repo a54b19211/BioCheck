@@ -13,7 +13,7 @@ import dataclasses
 import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 
-from .claims import DATE, TIMESTAMP
+from .claims import DATE, TIMESTAMP, squash
 
 CONTRACT_VERSION = "extraction_consistency.v1"
 # Bump whenever a rule, the unit table, the number conversions or the clause rule below changes.
@@ -72,8 +72,23 @@ class ContractError(ValueError):
     """The request breaks the contract in a way the HTTP schema cannot see."""
 
 
-def squash(text):
-    return " ".join((text or "").split())
+def spaces(m):
+    """A regex match replaced by as many spaces: blanking keeps every offset."""
+    return " " * len(m.group())
+
+
+def blank_dates(text):
+    """text with its timestamps and dates blanked (2015/3/1 is no ratio, 2023年 no quantity)."""
+    return DATE.sub(spaces, TIMESTAMP.sub(spaces, text))
+
+
+def written_as(text, value):
+    """The text at a span is the stated value, whitespace runs and case aside (None: no text at the span)."""
+    return text is not None and squash(text).casefold() == squash(value).casefold()
+
+
+def ends(span):
+    return span["start"], span["end"]
 
 
 def outcome(kind, reason="", span=None):
@@ -173,7 +188,7 @@ def unit_at(text, pos):
 def ratios_in(clause_text, offset):
     """Explicit (numerator, denominator) statements in a clause: [(num_start, num_end, num, den_start, den_end, den)]
     in artifact offsets. Dates and timestamps are blanked first (2015/3/1 is no ratio)."""
-    text = DATE.sub(lambda m: " " * len(m.group()), TIMESTAMP.sub(lambda m: " " * len(m.group()), clause_text))
+    text = blank_dates(clause_text)
     out = []
     for pattern, n, d in RATIOS:
         for m in pattern.finditer(text):
@@ -217,10 +232,6 @@ def value_clause(P, vspan):
     return ValueClause(pid, c_start, clause_text, passage, after, unit_at(passage["text"], after))
 
 
-def _ends(span):
-    return span["start"], span["end"]
-
-
 def _value_result(item, P, vtext):
     value_field = item["fields"]["value"]
     vspan = value_field["span"]
@@ -258,7 +269,7 @@ def _unit_result(unit, P, vc):
 def _percentage_of_ratio(den, shown, ratios):
     """A percentage of a ratio stated in the same clause: n/N*100 rounded to the digits shown."""
     places = max(0, -shown.as_tuple().exponent)
-    of_den = [r for r in ratios if (r[3], r[4]) == _ends(den["span"])]
+    of_den = [r for r in ratios if (r[3], r[4]) == ends(den["span"])]
     # numbers are bounded by MAX_DIGITS, so a 60-digit context computes n/N*100 exactly enough
     with localcontext() as ctx:
         ctx.prec = 60
@@ -287,7 +298,7 @@ def _denominator_result(den, P, vc, ratios, mine, vtext):
         return outcome("unsupported", "denominator_not_a_supported_number")
     if dtext is None or number(dtext) != wanted:
         return outcome("mismatch", "denominator_differs_from_span")
-    if any((r[3], r[4]) == _ends(den["span"]) for r in mine):
+    if any((r[3], r[4]) == ends(den["span"]) for r in mine):
         return outcome("match", span=den["span"])
     if mine:
         return outcome("mismatch", "the_value_has_another_denominator")
@@ -302,7 +313,7 @@ def _own_context(P, vspan, vc, ratios, den):
     other than the value and the partners of its ratio)."""
     row = P.row(vspan)
     g_start, g_end = row if row else P.group(vspan)
-    partners = {_ends(vspan)}
+    partners = {ends(vspan)}
     for r in mine_ratios(ratios, vspan, den):
         partners |= {(r[0], r[1]), (r[3], r[4])}
     passage = vc.passage
@@ -313,8 +324,7 @@ def _own_context(P, vspan, vc, ratios, den):
         if row:
             return "row"
         text = passage["text"][g_start - passage["start"]:g_end - passage["start"]]
-        blanked = DATE.sub(lambda m: " " * len(m.group()), TIMESTAMP.sub(lambda m: " " * len(m.group()), text))
-        others = [m for m in NUMBER.finditer(blanked.translate(FULLWIDTH))
+        others = [m for m in NUMBER.finditer(blank_dates(text).translate(FULLWIDTH))
                   if (g_start + m.start(), g_start + m.end()) not in partners
                   and not (field_span["start"] <= g_start + m.start() and g_start + m.end() <= field_span["end"])]
         return "several" if others else "group"
@@ -332,7 +342,7 @@ def _period_or_scope_result(name, field, P, vc, where):
         return outcome("unsupported", "absence_of_scope_not_rule_checkable")
     text = P.text(field["span"])
     place = where(field["span"]) if text is not None else "outside"
-    if text is None or squash(text).casefold() != squash(field["value"]).casefold():
+    if not written_as(text, field["value"]):
         return outcome("mismatch", f"{name}_differs_from_span")
     if place in ("row", "group"):
         return outcome("match", span=field["span"])
@@ -345,8 +355,7 @@ def _object_or_metric_result(name, field, P, vspan, where):
     """Object and metric stand in the value's clause or row, or (a table metric) head the value's column."""
     if not stated(field):
         return outcome("unsupported", f"unknown_{name}_not_rule_checkable")
-    text = P.text(field["span"])
-    if text is None or squash(text).casefold() != squash(field["value"]).casefold():
+    if not written_as(P.text(field["span"]), field["value"]):
         return outcome("mismatch", f"{name}_differs_from_span")
     place = where(field["span"])
     if place in ("row", "group"):
@@ -388,7 +397,7 @@ def check_measurement(item, P, fields):
     vc = value_clause(P, vspan)
     fields["unit"] = _unit_result(f["unit"], P, vc)
     ratios = ratios_in(vc.text, vc.start)
-    mine = [r for r in ratios if (r[0], r[1]) == _ends(vspan)]
+    mine = [r for r in ratios if (r[0], r[1]) == ends(vspan)]
     fields["denominator"] = _denominator_result(f["denominator"], P, vc, ratios, mine, vtext)
     where = _own_context(P, vspan, vc, ratios, f.get("denominator"))
     for name in ("period", "scope"):
@@ -446,42 +455,54 @@ def header_column(P, header_span, value_span):
     return True if hc == vc else "another_column"
 
 
-def check_item(item, P):
-    fields = {}
+def locator_result(item, P):
+    """The short quote must be exactly the text at its locator; nothing else is read otherwise."""
     quote = P.text(item["locator"])
     if quote is None:
-        fields["locator"] = outcome("mismatch", "locator_outside_passage")
-    elif squash(quote) == squash(item["quote"]):
-        fields["locator"] = outcome("match", span=item["locator"])
-    else:
-        anywhere = any(squash(item["quote"]) in squash(p["text"]) for p in P.by_id.values())
-        fields["locator"] = outcome("mismatch", "quote_elsewhere_in_passages" if anywhere else "quote_not_in_passages")
+        return outcome("mismatch", "locator_outside_passage")
+    if squash(quote) == squash(item["quote"]):
+        return outcome("match", span=item["locator"])
+    anywhere = any(squash(item["quote"]) in squash(p["text"]) for p in P.by_id.values())
+    return outcome("mismatch", "quote_elsewhere_in_passages" if anywhere else "quote_not_in_passages")
+
+
+def _identifier_result(item, P):
+    """An identifier only as written: a form that needs normalising to match is not verifiable here."""
+    field = item["fields"]["identifier"]
+    text = P.text(field["span"])
+    if text is None or not P.inside(field["span"], item["locator"]):
+        return outcome("mismatch", "identifier_outside_quote")
+    if squash(text) == squash(field["value"]):
+        return outcome("match", span=field["span"])
+    if re.sub(r"[\W_]", "", text).casefold() == re.sub(r"[\W_]", "", field["value"]).casefold():
+        return outcome("unsupported", "normalized_form_not_verifiable_in_v1")
+    return outcome("mismatch", "identifier_differs_from_span")
+
+
+def _claim_results(item, P, fields):
+    """A claim's statement as written; its polarity and qualifiers are semantic judgements."""
+    f = item["fields"]
+    field = f["statement"]
+    text = P.text(field["span"])
+    fields["statement"] = (outcome("match", span=field["span"]) if text is not None
+                           and squash(text) == squash(field["value"]) else outcome("mismatch", "statement_differs_from_span"))
+    fields["polarity"] = outcome("unsupported", "polarity_is_semantic")
+    if f.get("qualifiers"):
+        fields["qualifiers"] = outcome("unsupported", "qualifiers_are_semantic")
+
+
+def check_item(item, P):
+    fields = {"locator": locator_result(item, P)}
     if fields["locator"]["result"] != "match":
         for name in KIND_FIELDS[item["kind"]] + (("measure_kind",) if item["kind"] == "measurement" else ()):
             fields[name] = outcome("unsupported", "no_valid_location")
         return fields
-    f = item["fields"]
     if item["kind"] == "measurement":
         check_measurement(item, P, fields)
     elif item["kind"] == "identifier":
-        field = f["identifier"]
-        text = P.text(field["span"])
-        if text is None or not P.inside(field["span"], item["locator"]):
-            fields["identifier"] = outcome("mismatch", "identifier_outside_quote")
-        elif squash(text) == squash(field["value"]):
-            fields["identifier"] = outcome("match", span=field["span"])
-        elif re.sub(r"[\W_]", "", text).casefold() == re.sub(r"[\W_]", "", field["value"]).casefold():
-            fields["identifier"] = outcome("unsupported", "normalized_form_not_verifiable_in_v1")
-        else:
-            fields["identifier"] = outcome("mismatch", "identifier_differs_from_span")
+        fields["identifier"] = _identifier_result(item, P)
     elif item["kind"] == "claim":
-        field = f["statement"]
-        text = P.text(field["span"])
-        fields["statement"] = (outcome("match", span=field["span"]) if text is not None
-                               and squash(text) == squash(field["value"]) else outcome("mismatch", "statement_differs_from_span"))
-        fields["polarity"] = outcome("unsupported", "polarity_is_semantic")
-        if f.get("qualifiers"):
-            fields["qualifiers"] = outcome("unsupported", "qualifiers_are_semantic")
+        _claim_results(item, P, fields)
     elif item["kind"] == "annotation":
         fields["label"] = outcome("unsupported", "annotation_judgement_is_semantic")
     return fields
@@ -496,8 +517,10 @@ def status(fields):
     return "unchecked"
 
 
-def check(request):
-    """Every item against the request's passages. Raises ContractError on a contract break."""
+def check_request(request, primary=True):
+    """The contract rules the HTTP schema cannot see: unique ids, passages whose offsets fit their text and that
+    are disjoint slices of one artifact within the size bound, and (contract v1) a primary passage. Raises
+    ContractError."""
     passages = request["passages"]
     if len({p["id"] for p in passages}) != len(passages):
         raise ContractError("passages: ids must be unique")
@@ -509,15 +532,25 @@ def check(request):
         raise ContractError("passages: ranges of one artifact must not overlap")
     if sum(len(p["text"]) for p in passages) > 20000:
         raise ContractError("passages: at most 20000 characters in all")
-    if not any(p["role"] == "primary" for p in passages):
+    if primary and not any(p["role"] == "primary" for p in passages):
         raise ContractError("passages: one passage at least is the primary one")
     if len({i["id"] for i in request["items"]}) != len(request["items"]):
         raise ContractError("items: ids must be unique")
-    P = Passages(passages)
+
+
+def answer(request, check_one, contract_version, checker_version):
+    """The response: each item's field results by check_one(item, P), its status, and the status counts."""
+    P = Passages(request["passages"])
     items = []
     for item in request["items"]:
-        fields = check_item(item, P)
+        fields = check_one(item, P)
         items.append({"id": item["id"], "kind": item["kind"], "status": status(fields), "fields": fields})
     counts = {s: sum(1 for i in items if i["status"] == s) for s in ("consistent", "inconsistent", "unchecked")}
-    return {"contract_version": CONTRACT_VERSION, "checker_version": CHECKER_VERSION,
+    return {"contract_version": contract_version, "checker_version": checker_version,
             "subject": request["subject"], "items": items, "counts": counts, "llm_calls": []}
+
+
+def check(request):
+    """Every item against the request's passages. Raises ContractError on a contract break."""
+    check_request(request)
+    return answer(request, check_item, CONTRACT_VERSION, CHECKER_VERSION)

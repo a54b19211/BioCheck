@@ -26,6 +26,11 @@ TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:?\
 DATE = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|(?:\d{4}年)?\d{1,2}月(?:\d{1,2}日)?(?:\d{1,2}时)?|\d{4}年|(?<=[至到~～-])\d{1,2}日")  # dates come from metadata; the model checks them
 
 
+def squash(text):
+    """text with each whitespace run as one space, none at either end (None reads as "")."""
+    return " ".join((text or "").split())
+
+
 def citations(text):
     found = [part.strip() for m in CITE.finditer(text) for part in re.split(r"[,，;；]", m.group(1))]
     return list(dict.fromkeys(found))
@@ -110,7 +115,7 @@ def numeric_hints(sentence, cited_texts):
 
 def locate_quote(text, quote):
     """'found' (exactly once), 'ambiguous' (several times) or 'not_found'. Whitespace runs count as one."""
-    text, quote = " ".join(text.split()), " ".join((quote or "").split())
+    text, quote = squash(text), squash(quote)
     first = text.find(quote) if quote else -1
     if first < 0:
         return "not_found"

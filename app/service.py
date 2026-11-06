@@ -279,13 +279,12 @@ class PeriodValue(Strict):
 
     @model_validator(mode="after")
     def one_form(self):
-        import re as _re
         form = PERIOD_FORMS[self.precision]
         if self.value is not None:
-            if self.start is not None or self.end is not None or not _re.match(form, self.value):
+            if self.start is not None or self.end is not None or not re.match(form, self.value):
                 raise ValueError("a period has a value of its precision, or start and end, not both")
         elif self.start is None or self.end is None or self.type != "interval" or self.precision not in ("day", "month") \
-                or not _re.match(form, self.start) or not _re.match(form, self.end):
+                or not re.match(form, self.start) or not re.match(form, self.end):
             raise ValueError("a period range is an interval of day or month precision with start and end")
         return self
 
@@ -303,12 +302,11 @@ class PeriodField(Strict):
 
 
 def _decimal(field, name):
-    import re as _re
     if field.state == "stated":
         v = field.value or ""
         digits = sum(c.isdigit() for c in v)
         decimals = len(v.split(".")[1]) if "." in v else 0
-        if not _re.match(DECIMAL, v) or digits > measurement_rules.MAX_DIGITS or decimals > measurement_rules.MAX_DECIMALS:
+        if not re.match(DECIMAL, v) or digits > measurement_rules.MAX_DIGITS or decimals > measurement_rules.MAX_DECIMALS:
             raise ValueError(f"{name}: a canonical decimal string of at most 18 digits and 6 decimals")
 
 

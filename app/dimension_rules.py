@@ -24,7 +24,7 @@ import re
 from extraction_contract import normalize as norm
 
 from . import item_rules, measurement_rules
-from .item_rules import outcome, squash
+from .item_rules import outcome, written_as
 
 CONTRACT_VERSION = "extraction_consistency.v3"
 # Bump whenever a role grammar, a phrase rule or a normalisation function changes (docs/decisions/0001).
@@ -116,11 +116,8 @@ _JOIN_RIGHT = re.compile(r"^\s*(?:和|与|及|、|或|以及|跟|同|以外|之�
 def qualifier_kept(text, start, end):
     """Whether text[start:end] is its phrase's own member as written: nothing in the phrase before it negates or
     excludes it, and no conjunction joins it with another member on either side."""
-    left = text[:start]
-    cut = max((m.end() for m in _PHRASE_END.finditer(left)), default=0)
-    before = left[cut:]
-    m = _PHRASE_END.search(text, end)
-    after = text[end:m.start() if m else len(text)]
+    ps, pe, _mark = _bounds(text, start, end)
+    before, after = text[ps:start], text[end:pe]
     if _NEGATION.search(before) or _NEGATION.match(after.strip()):
         return False
     return not (_JOIN_LEFT.search(before) or _JOIN_RIGHT.search(after))
@@ -267,7 +264,7 @@ def dims_of(item, P):
         if written is None:
             out[d["kind"]] = outcome("mismatch", "dim_span_outside_passage")
             continue
-        if squash(written).casefold() != squash(d["value"]).casefold():
+        if not written_as(written, d["value"]):
             out[d["kind"]] = outcome("mismatch", "dim_differs_from_span")
             continue
         p = P.by_id[span["passage"]]

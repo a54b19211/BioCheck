@@ -15,7 +15,8 @@ from decimal import Decimal
 from extraction_contract import normalize as norm
 
 from . import item_rules
-from .item_rules import ContractError, outcome, squash
+from .claims import squash
+from .item_rules import ContractError, ends, outcome, written_as
 
 CONTRACT_VERSION = "extraction_consistency.v2"
 # Bump whenever a rule, a word list, the unit table or canonical_period changes (docs/decisions/0001).
@@ -25,7 +26,6 @@ CHECKER_VERSION = "biocheck.extraction_rules.v10"
 NORMALIZE_VERSION = norm.NORMALIZE_V3
 FIELDS = ("object", "metric", "value", "unit", "period", "scope", "denominator", "measure_kind", "qualifier",
           "modality")
-CANONICAL_DECIMAL = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?")
 MAX_DIGITS, MAX_DECIMALS = 18, 6
 
 MONTHS = {m: i for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july", "august",
@@ -238,8 +238,7 @@ class Local:
     def numbers(self, a, b, exclude=()):
         """Numbers in [a, b) that are not dates and not inside any excluded span."""
         text = self.text(a, b)
-        blank = lambda m: " " * len(m.group())  # noqa: E731
-        text = EN_DATE.sub(blank, item_rules.DATE.sub(blank, item_rules.TIMESTAMP.sub(blank, text)))
+        text = EN_DATE.sub(item_rules.spaces, item_rules.blank_dates(text))
         out = []
         for ms, me in norm.number_tokens(text):
             s, e = a + ms, a + me
@@ -260,7 +259,7 @@ TOTAL = re.compile(r"(?:\b[Nn]\s*=\s*|共\s*|总计\s*|合计\s*)" + _N)
 
 def ratios_in(clause_text, offset):
     """item_rules.ratios_in with the shared number form: [(num_start, num_end, num, den_start, den_end, den)]."""
-    text = item_rules.DATE.sub(lambda m: " " * len(m.group()), item_rules.TIMESTAMP.sub(lambda m: " " * len(m.group()), clause_text))
+    text = item_rules.blank_dates(clause_text)
     out = []
     for pattern, n, d in RATIOS:
         for m in pattern.finditer(text):
@@ -291,7 +290,7 @@ def bound_unit(P, f, unit, vspan, unit_head=None):
     if not item_rules.stated(metric) or len({vspan["passage"], unit["span"]["passage"], metric["span"]["passage"]}) != 1:
         return False
     mtext = P.text(metric["span"])
-    if mtext is None or squash(mtext).casefold() != squash(metric["value"]).casefold():
+    if not written_as(mtext, metric["value"]):
         return False
     p = P.by_id[vspan["passage"]]
     b = p["start"]
@@ -487,17 +486,6 @@ class Measure:
         return any(c["start"] <= pos < c["end"] for c in self.cover)
 
 
-def locator_result(item, P):
-    """The short quote must be exactly the text at its locator; nothing else is read otherwise."""
-    quote = P.text(item["locator"])
-    if quote is None:
-        return outcome("mismatch", "locator_outside_passage")
-    if squash(quote) == squash(item["quote"]):
-        return outcome("match", span=item["locator"])
-    anywhere = any(squash(item["quote"]) in squash(p["text"]) for p in P.by_id.values())
-    return outcome("mismatch", "quote_elsewhere_in_passages" if anywhere else "quote_not_in_passages")
-
-
 def value_result(item, P, vtext):
     """The value span is one whole written number inside the quote, equal to the stated canonical decimal."""
     vf = item["fields"]["value"]
@@ -523,7 +511,7 @@ def unit_result(m, unit_head):
             return outcome("match", "no_unit_at_value")  # only punctuation follows the number
         return outcome("unsupported", "unrecognized_text_after_value")  # not proven unitless
     utext = m.P.text(unit["span"])
-    if utext is None or squash(utext).casefold() != squash(unit["value"]).casefold():
+    if not written_as(utext, unit["value"]):
         return outcome("mismatch", "unit_differs_from_span")
     span = unit["span"]
     if at_value and (span["passage"], span["start"], span["end"]) == (
@@ -534,10 +522,6 @@ def unit_result(m, unit_head):
     if bound_unit(m.P, m.f, unit, m.vspan, unit_head):
         return outcome("match", "unit_in_bound_metric", span)
     return outcome("unsupported", "unit_not_at_value_or_not_in_table")
-
-
-def _ends(span):
-    return span["start"], span["end"]
 
 
 def _ratio_partners(ratios):
@@ -552,8 +536,8 @@ def _stated_denominator(m, own_ratios, mine):
     if dtext is None or norm.decimal_text(dtext) is None or Decimal(norm.decimal_text(dtext)) != Decimal(
             den["value"]):
         return outcome("mismatch", "denominator_differs_from_span"), []
-    of_den = [r for r in own_ratios if (r[3], r[4]) == _ends(den["span"])]
-    if any((r[3], r[4]) == _ends(den["span"]) for r in mine) or (
+    of_den = [r for r in own_ratios if (r[3], r[4]) == ends(den["span"])]
+    if any((r[3], r[4]) == ends(den["span"]) for r in mine) or (
             m.percent_written and any(next_to(m.ptext, m.pbase, r, m.vspan) for r in of_den)):
         return outcome("match", span=den["span"]), _ratio_partners(of_den)
     return outcome("unsupported", "denominator_relation_not_rule_checkable"), []
@@ -564,7 +548,7 @@ def _unknown_denominator(m, ratios, mine):
     L = m.L
     # a total word of the value's own group (国家药监局共批准…318个) is the value itself, not another total
     other_total = [t for t in TOTAL.finditer(L.text())
-                   if (L.start + t.start(1), L.start + t.end(1)) != _ends(m.vspan)]
+                   if (L.start + t.start(1), L.start + t.end(1)) != ends(m.vspan)]
     if mine:
         return outcome("mismatch", "the_value_has_a_stated_denominator")
     if ratios or other_total:
@@ -579,7 +563,7 @@ def denominator_result(m):
     L = m.L
     ratios = ratios_in(L.text(), L.start)
     own_ratios = [r for r in ratios if L.g_start <= min(r[0], r[3]) and max(r[1], r[4]) <= L.g_end]
-    mine = [r for r in own_ratios if (r[0], r[1]) == _ends(m.vspan)]
+    mine = [r for r in own_ratios if (r[0], r[1]) == ends(m.vspan)]
     if item_rules.stated(m.f["denominator"]):
         result, partners = _stated_denominator(m, own_ratios, mine)
     else:
@@ -622,7 +606,7 @@ def object_or_metric_result(m, name):
     if not item_rules.stated(x):
         return outcome("unsupported", f"unknown_{name}_not_rule_checkable")
     text = m.P.text(x["span"])
-    if text is None or squash(text).casefold() != squash(x["value"]).casefold():
+    if not written_as(text, x["value"]):
         return outcome("mismatch", f"{name}_differs_from_span")
     if name == "object" and DEICTIC.search(squash(x["value"])):
         return outcome("unsupported", "deictic_object")
@@ -650,7 +634,7 @@ def _stated_scope(m, item_id):
     if not item_rules.stated(sf):
         raise ContractError(f"items[{item_id}]: scope_mode stated needs a stated scope")
     text = m.P.text(sf["span"])
-    if text is None or squash(text).casefold() != squash(sf["value"]).casefold():
+    if not written_as(text, sf["value"]):
         return outcome("mismatch", "scope_differs_from_span")
     place = m.place(sf["span"])
     if place in ("group", "before", "heading"):
@@ -856,7 +840,7 @@ def modality_result(m):
 def check_measurement(item, P, unit_head=None, output=False, period_whole=None):
     """Field results of one measurement item (locator checked first, as in item_rules). The field checks run in
     this order because later ones read what earlier ones established (partners, period, object and metric)."""
-    fields = {"locator": locator_result(item, P)}
+    fields = {"locator": item_rules.locator_result(item, P)}
     if fields["locator"]["result"] != "match":
         for name in FIELDS:
             fields[name] = outcome("unsupported", "no_valid_location")
@@ -895,24 +879,9 @@ def check(request, unit_head=None, output=False, period_whole=None):
     """Contract v2: measurement items only. Raises ContractError on a contract break. unit_head: the rule for
     the unit in the bound metric phrase (default extraction_normalize.v3 unit_subject_head); output: the output
     units and wording of contract v3; period_whole: the whole-period rule (default extraction_normalize.v2)."""
-    passages = request["passages"]
-    if len({p["id"] for p in passages}) != len(passages):
-        raise ContractError("passages: ids must be unique")
-    for p in passages:
-        if p["end"] - p["start"] != len(p["text"]):
-            raise ContractError(f"passages[{p['id']}]: end - start must equal the length of its text")
-    ordered = sorted(passages, key=lambda p: p["start"])
-    if any(a["end"] > b["start"] for a, b in zip(ordered, ordered[1:])):
-        raise ContractError("passages: ranges of one artifact must not overlap")
-    if sum(len(p["text"]) for p in passages) > 20000:
-        raise ContractError("passages: at most 20000 characters in all")
-    if len({i["id"] for i in request["items"]}) != len(request["items"]):
-        raise ContractError("items: ids must be unique")
-    P = item_rules.Passages(passages)
-    items = []
-    for item in request["items"]:
-        fields = check_measurement(item, P, unit_head, output, period_whole)
-        items.append({"id": item["id"], "kind": item["kind"], "status": item_rules.status(fields), "fields": fields})
-    counts = {s: sum(1 for i in items if i["status"] == s) for s in ("consistent", "inconsistent", "unchecked")}
-    return {"contract_version": CONTRACT_VERSION, "checker_version": CHECKER_VERSION,
-            "subject": request["subject"], "items": items, "counts": counts, "llm_calls": []}
+    item_rules.check_request(request, primary=False)
+
+    def one(item, P):
+        return check_measurement(item, P, unit_head, output, period_whole)
+
+    return item_rules.answer(request, one, CONTRACT_VERSION, CHECKER_VERSION)
