@@ -141,12 +141,8 @@ def generate(req, llm=chat_json):
     return {"draft": out.draft.strip(), "llm_calls": budget.calls}
 
 
-def judge(claim, answer, refs, evidence, known=frozenset()):
-    """Apply one model answer to one sentence; bad quotes downgrade only this sentence.
-
-    known: numbers written in cited sentences elsewhere in the draft; repeating them in a
-    recommendation or summary is not a new claim (the cited sentence is checked on its own)."""
-    labels = [x for x in dict.fromkeys(answer.labels) if x in C.LABELS]
+def _check_quotes(claim, answer, refs):
+    """Record each short quote on the claim: (problems, the references whose quote is really in their text)."""
     problems, good = [], set()
     for q in answer.quotes:
         where = C.locate_quote(refs[q.ref]["text"], q.quote) if q.ref in claim["citations"] else "outside"
@@ -157,22 +153,36 @@ def judge(claim, answer, refs, evidence, known=frozenset()):
             problems.append({"outside": f"quote_outside_citation: {q.ref}不是本句的引用",
                              "not_found": f"quote_not_found: 短引不在{q.ref}原文中",
                              }[where])
+    return problems, good
+
+
+def _unexplained_numbers(claim, answer, refs):
+    """Numbers of the sentence missing from its cited texts that the reason does not name. The reason must name
+    the number itself, not merely contain its digits ("E3", "2023")."""
+    return [t for t in hints(claim, refs)
+            if not re.search(r"(?<![A-Za-z0-9_.])" + re.escape(t.rstrip("%")) + r"(?![0-9])", answer.reason)]
+
+
+def judge(claim, answer, refs, evidence, known=frozenset()):
+    """Apply one model answer to one sentence; bad quotes downgrade only this sentence.
+
+    known: numbers written in cited sentences elsewhere in the draft; repeating them in a
+    recommendation or summary is not a new claim (the cited sentence is checked on its own)."""
+    labels = [x for x in dict.fromkeys(answer.labels) if x in C.LABELS]
+    problems, good = _check_quotes(claim, answer, refs)
     if answer.verdict == "supported":
         missing = [r for r in claim["citations"] if r not in good]
         if missing:
             problems.append("missing_quote: 缺少" + "、".join(missing) + "的有效短引")
-        # The reason must name the number itself, not merely contain its digits ("E3", "2023").
-        unexplained = [t for t in hints(claim, refs)
-                       if not re.search(r"(?<![A-Za-z0-9_.])" + re.escape(t.rstrip("%")) + r"(?![0-9])",
-                                        answer.reason)]
+        unexplained = _unexplained_numbers(claim, answer, refs)
         if unexplained:
             problems.append("numeric_unexplained: 数字" + "、".join(unexplained) + "不在所引原文中，也未说明换算")
-            labels = list(dict.fromkeys(labels + ["NUM"]))
+            labels = list(dict.fromkeys([*labels, "NUM"]))
     if answer.verdict == "no_claim" and set(C.numeric_tokens(claim["text"])) - known:
         problems.append("no_claim_with_numbers: 含具体数字的句子是可核查陈述")
     if not claim["citations"] and answer.verdict != "no_claim":
         problems.insert(0, "no_citation: 本句陈述可核查事实却没有引用，不能借用相邻句的引用")
-        labels = list(dict.fromkeys(labels + ["REF"]))
+        labels = list(dict.fromkeys([*labels, "REF"]))
     if answer.verdict == "contradicted" and not good:
         problems.append("missing_quote: 矛盾判定缺少有效短引")
     claim["verdict"] = "insufficient" if problems else answer.verdict
@@ -184,14 +194,10 @@ def judge(claim, answer, refs, evidence, known=frozenset()):
         claim["scope_span"] = answer.scope_span
 
 
-def verify(req, llm=chat_json):
-    materials(req)
-    refs, evidence = references(req), {e["id"]: e for e in req.get("evidence", [])}
-    updates = req.get("source_updates", [])
-    budget = Budget(llm, req.get("max_llm_calls", 20))
-    sentences = C.sentences(req["draft"])
-    if not sentences:
-        raise InputError("empty_draft", "draft中没有可核验的句子")
+def _triage(sentences, refs, evidence, updates):
+    """Settle what needs no model: a sentence citing an unknown id is marked here; the others are pending, each
+    with the problems of the source rules and the read requests those raise.
+    Returns (pending, any unknown ref, read requests, {index: source problems})."""
     pending, unknown_ref, reads, source_problems = [], False, [], {}
     for claim in sentences:
         claim.update(verdict="insufficient", labels=[], quotes=[], reason="")
@@ -208,48 +214,59 @@ def verify(req, llm=chat_json):
                 claim["text"], claim["citations"], evidence, updates)
             reads += found
             pending.append(claim)
+    return pending, unknown_ref, reads, source_problems
 
-    asked = set(C.numeric_tokens(req["question"]))  # e.g. a replay cutoff restated in a scope note
-    for batch in C.batches(pending):
-        cited = list(dict.fromkeys(r for c in batch for r in c["citations"]))
-        payload = {"question": req["question"],
-                   "claims": [{"index": c["index"], "text": c["text"], "citations": c["citations"],
-                               "numeric_hints": hints(c, refs),
-                               "context": context(sentences, c)} for c in batch],
-                   "references": [refs[r] for r in cited],
-                   "source_updates": [u for u in updates if u["target"] in cited or u["replacement"] in cited],
-                   "source_relations": [r for r in req.get("source_relations", [])
-                                        if r["source"] in cited or r.get("target") in cited]}
-        out, error = budget.ask("verify_claims", CLAIM_VERIFY, payload, CheckBatch)
-        if out is None:
-            reason = "unchecked: 已达max_llm_calls上限" if error == "llm_call_limit" else f"batch_failed: {error}"
-            for c in batch:
-                c["reason"] = reason
-            continue
-        answers = {}
-        for answer in out.claims:
-            answers.setdefault(answer.index, answer)  # indexes outside this batch are ignored
+
+def _claims_payload(req, batch, sentences, refs, updates):
+    cited = list(dict.fromkeys(r for c in batch for r in c["citations"]))
+    return {"question": req["question"],
+            "claims": [{"index": c["index"], "text": c["text"], "citations": c["citations"],
+                        "numeric_hints": hints(c, refs),
+                        "context": context(sentences, c)} for c in batch],
+            "references": [refs[r] for r in cited],
+            "source_updates": [u for u in updates if u["target"] in cited or u["replacement"] in cited],
+            "source_relations": [r for r in req.get("source_relations", [])
+                                 if r["source"] in cited or r.get("target") in cited]}
+
+
+def _judge_batch(batch, out, error, sentences, refs, evidence, asked):
+    """Apply one batch's model answer to its sentences; the read requests of those still lacking support."""
+    if out is None:
+        reason = "unchecked: 已达max_llm_calls上限" if error == "llm_call_limit" else f"batch_failed: {error}"
         for c in batch:
-            if c["index"] in answers:
-                known = asked | {t for o in sentences if o["citations"] and o is not c
-                                 for t in C.numeric_tokens(o["text"])}
-                judge(c, answers[c["index"]], refs, evidence, known)
-                if c["verdict"] == "insufficient" and c.get("scope_span") is None:
-                    reads += [{"ref": r, "reason": f"第{c['index']}句缺少支持，补读{r}全文或相关段落后重核"}
-                              for r in c["citations"] if r in evidence]
-            else:
-                c["reason"] = "no_answer: 模型未返回本句结论"
+            c["reason"] = reason
+        return []
+    answers, reads = {}, []
+    for answer in out.claims:
+        answers.setdefault(answer.index, answer)  # indexes outside this batch are ignored
+    for c in batch:
+        if c["index"] not in answers:
+            c["reason"] = "no_answer: 模型未返回本句结论"
+            continue
+        known = asked | {t for o in sentences if o["citations"] and o is not c for t in C.numeric_tokens(o["text"])}
+        judge(c, answers[c["index"]], refs, evidence, known)
+        if c["verdict"] == "insufficient" and c.get("scope_span") is None:
+            reads += [{"ref": r, "reason": f"第{c['index']}句缺少支持，补读{r}全文或相关段落后重核"}
+                      for r in c["citations"] if r in evidence]
+    return reads
 
+
+def _apply_source_problems(pending, source_problems):
+    """A source rule broken by a sentence makes it insufficient (a contradiction stays one), whatever the model
+    said."""
     for claim in pending:
         problems = source_problems[claim["index"]]
         if problems:
             claim.pop("scope_span", None)
-            claim["labels"] = list(dict.fromkeys(claim["labels"] + ["REF"]))
+            claim["labels"] = list(dict.fromkeys([*claim["labels"], "REF"]))
             claim["reason"] = "；".join(problems + ([claim["reason"]] if claim["reason"] else []))
             if claim["verdict"] != "contradicted":
                 claim["verdict"] = "insufficient"
 
-    # Only the text: given the sentence verdicts, the model just repeats them as coverage gaps.
+
+def _coverage(req, sentences, budget):
+    """Whether the draft answers the question. Only the text: given the sentence verdicts, the model just
+    repeats them as coverage gaps."""
     payload = {"question": req["question"], "sentences": [{"index": c["index"], "text": c["text"]} for c in sentences],
                "materials": [{"id": e["id"], "title": e.get("title", ""), "source_kind": e["source_kind"]}
                              for e in req.get("evidence", [])]
@@ -257,23 +274,122 @@ def verify(req, llm=chat_json):
                "research_scope": req.get("research_scope", {}),
                "previous_report": req.get("previous_report")}
     out, error = budget.ask("verify_coverage", VERIFY_COVERAGE, payload, CoverageOut)
-    coverage = out.model_dump() if out else {
+    return out.model_dump() if out else {
         "verdict": "uncertain",
         "reason": "unchecked: 已达max_llm_calls上限" if error == "llm_call_limit" else f"coverage_failed: {error}"}
 
+
+def _status(sentences, unknown_ref, coverage):
     if unknown_ref or any(c["verdict"] == "contradicted" for c in sentences):
-        status = "FAIL"
-    elif any(c["verdict"] not in ("supported", "no_claim") for c in sentences) or coverage["verdict"] != "complete":
-        status = "REVIEW"
-    else:
-        status = "PASS"
+        return "FAIL"
+    if any(c["verdict"] not in ("supported", "no_claim") for c in sentences) or coverage["verdict"] != "complete":
+        return "REVIEW"
+    return "PASS"
+
+
+def verify(req, llm=chat_json):
+    materials(req)
+    refs, evidence = references(req), {e["id"]: e for e in req.get("evidence", [])}
+    updates = req.get("source_updates", [])
+    budget = Budget(llm, req.get("max_llm_calls", 20))
+    sentences = C.sentences(req["draft"])
+    if not sentences:
+        raise InputError("empty_draft", "draft中没有可核验的句子")
+    pending, unknown_ref, reads, source_problems = _triage(sentences, refs, evidence, updates)
+    asked = set(C.numeric_tokens(req["question"]))  # e.g. a replay cutoff restated in a scope note
+    for batch in C.batches(pending):
+        payload = _claims_payload(req, batch, sentences, refs, updates)
+        out, error = budget.ask("verify_claims", CLAIM_VERIFY, payload, CheckBatch)
+        reads += _judge_batch(batch, out, error, sentences, refs, evidence, asked)
+    _apply_source_problems(pending, source_problems)
+    coverage = _coverage(req, sentences, budget)
     read_requests = {}
     for request in reads:
         read_requests.setdefault(request["ref"], request)  # first reason per ref wins
     for claim in sentences:
         claim.pop("paragraph")
-    return {"status": status, "claims": sentences, "coverage": coverage,
+    return {"status": _status(sentences, unknown_ref, coverage), "claims": sentences, "coverage": coverage,
             "read_requests": list(read_requests.values()), "llm_calls": budget.calls}
+
+
+_NOT_OVERREACH = ("no_citation", "unknown_ref", "unchecked", "batch_failed")
+
+
+def _revision_target(old, now, current, refs):
+    """What revising one reviewed sentence takes: ("model", the sentence to send), ("scope", its scope revision),
+    or None."""
+    overreach = (old["verdict"] == "insufficient" and now["citations"] and old["labels"]
+                 and not old["reason"].startswith(_NOT_OVERREACH))
+    if (old["verdict"] == "contradicted" and any(q["found"] for q in old["quotes"])) or (
+            overreach and not old.get("scope_span")):
+        offered = alternatives(now, refs) if "REF" in old["labels"] else []
+        return "model", dict(now, verdict=old["verdict"], labels=old["labels"], reason=old["reason"],
+                             quotes=old["quotes"], alternatives=offered)
+    if old["verdict"] == "insufficient" and C.scope_span_ok(now["text"], old.get("scope_span")):
+        return "scope", C.scope_revision(now["text"], old["scope_span"])
+    if old["verdict"] == "insufficient" and not now["citations"] and old["reason"].startswith("no_citation"):
+        # An uncited fact may take a citation from its neighbours, and only from them.
+        near = [current.get(now["index"] + d) for d in (-1, 1)]
+        nearby = list(dict.fromkeys(r for o in near if o for r in o["citations"] if r in refs))
+        if nearby:
+            return "model", dict(now, citations=nearby, verdict=old["verdict"], labels=old["labels"],
+                                 reason=old["reason"], quotes=[], alternatives=[])
+    return None
+
+
+def _revision_targets(req, current, refs):
+    """({index: scope-revised text}, the sentences to send to the model). Raises review_mismatch when the review
+    is not of this draft."""
+    replaced, to_model = {}, []
+    for old in req["review"]["claims"]:
+        now = current.get(old["index"])
+        if now is None or (now["text"], now["start"]) != (old["text"], old["start"]):
+            raise InputError("review_mismatch", "review与draft的句子不对应，请先对这份draft重新核验", 409)
+        target = _revision_target(old, now, current, refs)
+        if target and target[0] == "model":
+            to_model.append(target[1])
+        elif target:
+            replaced[now["index"]] = target[1]
+    return replaced, to_model
+
+
+def _revision_payload(req, batch, sentences, refs):
+    cited = list(dict.fromkeys(r for c in batch for r in c["citations"] + c["alternatives"]))
+    return {"question": req["question"],
+            "claims": [{k: c[k] for k in ("index", "text", "citations", "verdict", "labels", "reason", "quotes",
+                                          "alternatives")}
+                       | {"context": context(sentences, c)} for c in batch],
+            "references": [refs[r] for r in cited if r in refs],
+            # the reviser must see which cited materials are one source reposted
+            "source_relations": [r for r in req.get("source_relations", [])
+                                 if r["source"] in cited or r.get("target") in cited]}
+
+
+def _accept_revisions(out, batch, replaced, refs):
+    """Keep each replacement that is one sentence citing its own references, or offered alternatives each backed
+    by a quote found in that material."""
+    allowed = {c["index"]: c for c in batch}
+    for item in (out.sentences if out else []):
+        old, text = allowed.get(item.index), item.text.strip()
+        if old is None or item.index in replaced or "\n" in text or len(C.sentences(text)) != 1:
+            continue
+        cites = C.citations(text)
+        new = set(cites) - set(old["citations"])
+        quoted = {q.ref for q in item.quotes
+                  if q.ref in refs and C.locate_quote(refs[q.ref]["text"], q.quote) in ("found", "ambiguous")}
+        if cites and new <= set(old["alternatives"]) & quoted:
+            replaced[item.index] = text
+
+
+def _splice(draft, current, replaced):
+    """(the draft with each replaced sentence put in its place, the changes in draft order)."""
+    changed, out_draft = [], draft
+    for index in sorted(replaced, reverse=True):
+        before, after = current[index]["text"], replaced[index]
+        if after != before:
+            out_draft = out_draft[:current[index]["start"]] + after + out_draft[current[index]["end"]:]
+            changed.insert(0, {"index": index, "before": before, "after": after})
+    return out_draft, changed
 
 
 def revise(req, llm=chat_json):
@@ -281,55 +397,10 @@ def revise(req, llm=chat_json):
     refs, draft = references(req), req["draft"]
     current = {c["index"]: c for c in C.sentences(draft)}
     sentences = list(current.values())
-    replaced, to_model = {}, []
-    for old in req["review"]["claims"]:
-        now = current.get(old["index"])
-        if now is None or (now["text"], now["start"]) != (old["text"], old["start"]):
-            raise InputError("review_mismatch", "review与draft的句子不对应，请先对这份draft重新核验", 409)
-        overreach = (old["verdict"] == "insufficient" and now["citations"] and old["labels"]
-                     and not old["reason"].startswith(("no_citation", "unknown_ref", "unchecked", "batch_failed")))
-        if (old["verdict"] == "contradicted" and any(q["found"] for q in old["quotes"])) or (
-                overreach and not old.get("scope_span")):
-            to_model.append(dict(now, verdict=old["verdict"], labels=old["labels"],
-                                 reason=old["reason"], quotes=old["quotes"],
-                                 alternatives=alternatives(now, refs) if "REF" in old["labels"] else []))
-        elif old["verdict"] == "insufficient" and C.scope_span_ok(now["text"], old.get("scope_span")):
-            replaced[now["index"]] = C.scope_revision(now["text"], old["scope_span"])
-        elif old["verdict"] == "insufficient" and not now["citations"] and old["reason"].startswith("no_citation"):
-            # An uncited fact may take a citation from its neighbours, and only from them.
-            near = [current.get(now["index"] + d) for d in (-1, 1)]
-            nearby = list(dict.fromkeys(r for o in near if o for r in o["citations"] if r in refs))
-            if nearby:
-                to_model.append(dict(now, citations=nearby, verdict=old["verdict"], labels=old["labels"],
-                                     reason=old["reason"], quotes=[], alternatives=[]))
+    replaced, to_model = _revision_targets(req, current, refs)
     budget = Budget(llm, req.get("max_llm_calls", 20))
     for batch in C.batches(sorted(to_model, key=lambda c: c["index"]), size=C.MAX_BATCH):
-        cited = list(dict.fromkeys(r for c in batch for r in c["citations"] + c["alternatives"]))
-        payload = {"question": req["question"],
-                   "claims": [{k: c[k] for k in ("index", "text", "citations", "verdict", "labels", "reason", "quotes",
-                                                 "alternatives")}
-                              | {"context": context(sentences, c)} for c in batch],
-                   "references": [refs[r] for r in cited if r in refs],
-                   # the reviser must see which cited materials are one source reposted
-                   "source_relations": [r for r in req.get("source_relations", [])
-                                        if r["source"] in cited or r.get("target") in cited]}
-        out, _ = budget.ask("revise", CLAIM_REVISE, payload, RevisionOut)
-        allowed = {c["index"]: c for c in batch}
-        for item in (out.sentences if out else []):
-            old, text = allowed.get(item.index), item.text.strip()
-            if old is None or item.index in replaced or "\n" in text or len(C.sentences(text)) != 1:
-                continue
-            cites = C.citations(text)
-            # its own references, or offered alternatives each backed by a quote found in that material
-            new = set(cites) - set(old["citations"])
-            quoted = {q.ref for q in item.quotes
-                      if q.ref in refs and C.locate_quote(refs[q.ref]["text"], q.quote) in ("found", "ambiguous")}
-            if cites and new <= set(old["alternatives"]) & quoted:
-                replaced[item.index] = text
-    changed, out_draft = [], draft
-    for index in sorted(replaced, reverse=True):
-        before, after = current[index]["text"], replaced[index]
-        if after != before:
-            out_draft = out_draft[:current[index]["start"]] + after + out_draft[current[index]["end"]:]
-            changed.insert(0, {"index": index, "before": before, "after": after})
+        out, _ = budget.ask("revise", CLAIM_REVISE, _revision_payload(req, batch, sentences, refs), RevisionOut)
+        _accept_revisions(out, batch, replaced, refs)
+    out_draft, changed = _splice(draft, current, replaced)
     return {"draft": out_draft, "changed": changed, "llm_calls": budget.calls}
