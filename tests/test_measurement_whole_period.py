@@ -2,9 +2,9 @@
 a unit in the bound metric phrase must be its head counting noun. Generic templates, not the words of a sample."""
 
 import pytest
-from test_extraction_v4 import answer, client, fields_for, synthetic  # noqa: F401
+from test_measurement_rules import answer, client, fields_for, synthetic  # noqa: F401
 
-from app import extraction_v4 as v9
+from app import measurement_rules
 
 YEAR = {"type": "interval", "precision": "year", "value": "2018"}
 
@@ -17,9 +17,9 @@ def en(client, prefix, period_text, unit="contacts", metric="close contacts", pe
 
 
 def test_the_checker_reads_with_normalize_v2_or_later():
-    # v9 on its own commit (58f7b08) read with extraction_normalize.v2; from v10 on, v3 (test_extraction_v10)
-    assert v9.CHECKER_VERSION == "biocheck.extraction_rules.v10"
-    assert v9.NORMALIZE_VERSION == "extraction_normalize.v3"
+    # v9 on its own commit (58f7b08) read with extraction_normalize.v2; from v10 on, v3 (test_measurement_unit_subject)
+    assert measurement_rules.CHECKER_VERSION == "biocheck.extraction_rules.v10"
+    assert measurement_rules.NORMALIZE_VERSION == "extraction_normalize.v3"
 
 
 @pytest.mark.parametrize("prefix,period_text", [("In 2018", "In 2018"), ("In 2018", "2018"),

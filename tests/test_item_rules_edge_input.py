@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from app.service import create_app
 from conftest import FakeLLM
-from test_extraction import Doc,SUBJECT,measurement
+from test_item_rules import Doc,SUBJECT,measurement
 
 @pytest.fixture
 def client(monkeypatch):

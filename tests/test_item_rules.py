@@ -7,7 +7,7 @@ import pytest
 from conftest import FakeLLM
 from fastapi.testclient import TestClient
 
-from app import extraction
+from app import item_rules
 from app.service import create_app
 
 TOKEN = "test-token"
@@ -56,8 +56,8 @@ def measurement(doc, pid, quote, kind="rate", **fields):
 
 
 def run(doc, *items):
-    out = extraction.check({"subject": SUBJECT, "passages": doc.passages, "items": list(items)})
-    assert out["llm_calls"] == [] and out["checker_version"] == extraction.CHECKER_VERSION
+    out = item_rules.check({"subject": SUBJECT, "passages": doc.passages, "items": list(items)})
+    assert out["llm_calls"] == [] and out["checker_version"] == item_rules.CHECKER_VERSION
     return out["items"]
 
 

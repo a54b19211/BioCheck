@@ -166,7 +166,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 - **范围**：只接受 measurement 条目，请求里必须写 `"contract_version": "extraction_consistency.v2"`。/v1（v3）的请求、回执和规则都不变；v1 不会被默认升到 v4。
 - **数值**：value 和 denominator 用规范十进制字符串传输（`318`、`21.3`、`-3`），最多 18 位数字、6 位小数，不用 JSON 数字，全程不经过 float。不规范或超出上限的返回 422。
 - **period** 是结构化的：`{"type": "point"|"interval", "precision": "day"|"month"|"quarter"|"half"|"year", "value"}`，跨越的区间用 `start`/`end` 代替 `value`。
-  - canonical_period.v1 的规范写法逐一列在 `app/extraction_v4.py`；
+  - canonical_period.v1 的规范写法逐一列在 `app/measurement_rules.py`；
   - 「截至2023年12月」是时点，「2023年12月」是区间，两者不相等；
   - 不补出原文没有的日；
   - 缺年份或相对期间都是 unsupported；
@@ -192,7 +192,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 - **比较短语**（v6）：比较词按整个短语、从长到短匹配，包括否定形式（不超过是上限）；清单里没有的否定写法给 unsupported。值前后的限定和「无单位」都在有边界的局部句里判断，会跳过空白。百分数只能用紧贴它写出的比例。
 - **谓语否定**（v7）：值所在组里，如果字段之外出现否定词（not、never、without、n't、未、没有、尚未、无、不），measure_kind 给 unsupported（negated_predicate）。否定句里的事件词不算肯定的事件依据。字段内部的否定（如 metric 里的「不合格」、已声明的「不超过」）属于该字段本身，不受影响。
 - **字段 span**：可以重叠，例如 object 落在 metric 之内；passages 仍然不能重叠。
-- **测试**：`tests/test_extraction_v4.py` 用 `tests/fixtures/p3_matrix.json`（extraction-contract 样本矩阵 v2：固定 clean_text.v11 产物的真实子句、真实偏移和逐字段原文位置），每一行都走真实 HTTP。`tests/explain_v4.py` 逐行打印状态和非 match 字段的原因，用于审查。
+- **测试**：`tests/test_measurement_rules.py` 用 `tests/fixtures/p3_matrix.json`（extraction-contract 样本矩阵 v2：固定 clean_text.v11 产物的真实子句、真实偏移和逐字段原文位置），每一行都走真实 HTTP。`tests/explain_measurement_rules.py` 逐行打印状态和非 match 字段的原因，用于审查。
 
 ## 运行测试
 

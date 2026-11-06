@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from test_extraction_v4 import MATRIX, ROWS, request_of  # noqa: E402
+from test_measurement_rules import MATRIX, ROWS, request_of  # noqa: E402
 
-from app import extraction_v4 as v4  # noqa: E402
+from app import measurement_rules  # noqa: E402
 
 for row in MATRIX["rows"]:
     if row["group"] == "negative" and row.get("kind") != "wrong_final_at_real_span":
@@ -22,6 +22,6 @@ for row in MATRIX["rows"]:
     else:
         body = request_of(row)
     body.pop("contract_version")
-    out = v4.check(body)["items"][0]
+    out = measurement_rules.check(body)["items"][0]
     print(row["id"], out["status"], json.dumps({k: v.get("reason", "") for k, v in out["fields"].items()
                                                  if v["result"] != "match"}, ensure_ascii=False))

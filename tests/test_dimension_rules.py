@@ -6,9 +6,9 @@ date basis, a number as a denominator definition) and dimensions elsewhere are u
 itself stays consistent."""
 
 import pytest
-from test_extraction_v4 import TOKEN, at, client, fields_for, synthetic  # noqa: F401
+from test_measurement_rules import TOKEN, at, client, fields_for, synthetic  # noqa: F401
 
-from app import extraction_v5 as v11
+from app import dimension_rules
 
 PERIOD = {"type": "interval", "precision": "month", "value": "2026-01"}
 
@@ -32,8 +32,8 @@ def answer(client, b):  # noqa: F811
     r = post(client, b)
     assert r.status_code == 200, r.text
     out = r.json()
-    assert (out["contract_version"], out["checker_version"]) == ("extraction_consistency.v3", v11.CHECKER_VERSION)
-    assert v11.CHECKER_VERSION == "biocheck.extraction_rules.v16"  # v11 on e98b392; its tests run unchanged here
+    assert (out["contract_version"], out["checker_version"]) == ("extraction_consistency.v3", dimension_rules.CHECKER_VERSION)
+    assert dimension_rules.CHECKER_VERSION == "biocheck.extraction_rules.v16"  # v11 on e98b392; its tests run unchanged here
     return out["items"][0]
 
 

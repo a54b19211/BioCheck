@@ -19,9 +19,8 @@ import re
 
 from extraction_contract import normalize as norm
 
-from . import extraction as v3
-from . import extraction_v4 as v10
-from .extraction import outcome, squash
+from . import item_rules, measurement_rules
+from .item_rules import outcome, squash
 
 CONTRACT_VERSION = "extraction_consistency.v3"
 # v12 (Codex r178): a dimension keeps its qualifying context - its phrase may not negate or exclude it, nor join
@@ -31,7 +30,7 @@ CONTRACT_VERSION = "extraction_consistency.v3"
 # v14 (Codex r181): only independently proven, kind-compatible neighbours bound a metric slot (composite below);
 # v13 stays as released on its own commit (978af0a)
 # v15 (Codex 783, T-24 industrial): a reporting-period date basis written as such, a magnitude-and-classifier
-# unit kept whole, output a flow only as actual output (extraction_v4 output=True); v14 stays as released on its
+# unit kept whole, output a flow only as actual output (measurement_rules output=True); v14 stays as released on its
 # own commit (2b395ae)
 # v16 (Codex r186, real NMPA): v15 with extraction_normalize.v5 for the whole written period - a complete date
 # ending the line before (a notice's 发布时间) is its own; v15 stays as released on its own commit (73e425f)
@@ -94,7 +93,7 @@ def role_proven(kind, text, start, end):
     """Whether the text gives evidence that text[start:end] is a value of the dimension `kind`."""
     value = text[start:end].strip()
     before, after = text[max(0, start - 12):start], text[end:end + 12]
-    if not value or re.fullmatch(r"[\d\s.,%]+", value) or v3.DATE.fullmatch(value):
+    if not value or re.fullmatch(r"[\d\s.,%]+", value) or item_rules.DATE.fullmatch(value):
         return False  # a bare number or a date proves no role
     if kind in ("product_or_class", "entity", "disease") and _NOT_A_ROLE.search(value):
         return False
@@ -257,7 +256,7 @@ def related(L, P, span, vspan):
         if span["start"] <= vspan["start"] and vspan["end"] <= span["end"]:
             return None  # a dimension written over the value itself
         return "dim_in_value_sentence" if not L.numbers(span["start"], span["end"], [vspan]) else None
-    if v10.heading_ancestor(P, span, vspan):
+    if measurement_rules.heading_ancestor(P, span, vspan):
         return "dim_in_heading_ancestor"
     return None
 
@@ -267,7 +266,7 @@ def dims_of(item, P):
     role, qualifier, relation); only those that pass may bound another's metric slot (v14)."""
     out, ready = {}, []
     vspan = item["fields"]["value"]["span"]
-    L = v10.Local(P, vspan)
+    L = measurement_rules.Local(P, vspan)
     for d in item.get("dims") or []:
         span = d["span"]
         written = P.text(span)
@@ -305,8 +304,8 @@ def dims_of(item, P):
 def check(request):
     """Contract v3: v10's measurement check with extraction_normalize.v4, and each stated dimension."""
     base = dict(request, items=[{k: v for k, v in i.items() if k != "dims"} for i in request["items"]])
-    out = v10.check(base, unit_head=norm.unit_subject_head_v4, output=True, period_whole=norm.period_span_whole_v5)
-    P = v3.Passages(request["passages"])
+    out = measurement_rules.check(base, unit_head=norm.unit_subject_head_v4, output=True, period_whole=norm.period_span_whole_v5)
+    P = item_rules.Passages(request["passages"])
     for answered, item in zip(out["items"], request["items"]):
         answered["dims"] = dims_of(item, P)
     out["contract_version"], out["checker_version"] = CONTRACT_VERSION, CHECKER_VERSION

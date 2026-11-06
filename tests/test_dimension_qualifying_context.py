@@ -3,8 +3,8 @@ punctuation - may not negate or exclude it nor join it with another member; else
 dim_qualifier_dropped, the value itself unchanged. Generic templates, not the words of one sample."""
 
 import pytest
-from test_extraction_v4 import client  # noqa: F401
-from test_extraction_v11 import answer, body
+from test_measurement_rules import client  # noqa: F401
+from test_dimension_rules import answer, body
 
 SENT = "2026年1月，{lead}医院A在湖北省共报告炭疽确诊病例10例。"
 

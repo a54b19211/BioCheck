@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.exceptions import HTTPException
 
-from . import core, extraction, extraction_v4, extraction_v5
+from . import core, dimension_rules, item_rules, measurement_rules
 from .llm import chat_json
 
 
@@ -308,7 +308,7 @@ def _decimal(field, name):
         v = field.value or ""
         digits = sum(c.isdigit() for c in v)
         decimals = len(v.split(".")[1]) if "." in v else 0
-        if not _re.match(DECIMAL, v) or digits > extraction_v4.MAX_DIGITS or decimals > extraction_v4.MAX_DECIMALS:
+        if not _re.match(DECIMAL, v) or digits > measurement_rules.MAX_DIGITS or decimals > measurement_rules.MAX_DECIMALS:
             raise ValueError(f"{name}: a canonical decimal string of at most 18 digits and 6 decimals")
 
 
@@ -435,22 +435,22 @@ def create_app(llm=chat_json):
     @app.post("/v2/extraction-consistency")
     def extraction_consistency_v2(req: ExtractionRequestV2):
         try:
-            return extraction_v4.check(req.model_dump(exclude={"contract_version"}, exclude_none=True))
-        except extraction.ContractError as exc:
+            return measurement_rules.check(req.model_dump(exclude={"contract_version"}, exclude_none=True))
+        except item_rules.ContractError as exc:
             return error(400, "invalid_request", str(exc))
 
     @app.post("/v3/extraction-consistency")
     def extraction_consistency_v3(req: ExtractionRequestV3):
         try:
-            return extraction_v5.check(req.model_dump(exclude={"contract_version"}, exclude_none=True))
-        except extraction.ContractError as exc:
+            return dimension_rules.check(req.model_dump(exclude={"contract_version"}, exclude_none=True))
+        except item_rules.ContractError as exc:
             return error(400, "invalid_request", str(exc))
 
     @app.post("/v1/extraction-consistency")
     def extraction_consistency(req: ExtractionRequest):
         try:
-            return extraction.check(req.model_dump())
-        except extraction.ContractError as exc:
+            return item_rules.check(req.model_dump())
+        except item_rules.ContractError as exc:
             return error(400, "invalid_request", str(exc))
 
     return app

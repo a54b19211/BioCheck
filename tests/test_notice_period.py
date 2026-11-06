@@ -2,9 +2,9 @@
 body's period part of a larger one under contract v3; contract v2 (checker v10) unchanged; other continuations
 still refuse the period."""
 
-from test_extraction_v4 import answer as answer_v2
-from test_extraction_v4 import client, fields_for, synthetic  # noqa: F401
-from test_extraction_v11 import answer
+from test_measurement_rules import answer as answer_v2
+from test_measurement_rules import client, fields_for, synthetic  # noqa: F401
+from test_dimension_rules import answer
 
 M3 = {"type": "interval", "precision": "month", "value": "2026-03"}
 NOTICE = ("关于批准注册医疗器械产品的公告（2026年3月）（2026年第38号）\n发布时间：2026-04-13\n"

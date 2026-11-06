@@ -13,7 +13,7 @@ import pytest
 from conftest import FakeLLM
 from fastapi.testclient import TestClient
 
-from app import extraction_v4 as v4
+from app import measurement_rules
 from app.service import create_app
 
 TOKEN = "test-token"
@@ -74,7 +74,7 @@ def answer(client, body):
     r = post(client, body)
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["contract_version"] == "extraction_consistency.v2" and out["checker_version"] == v4.CHECKER_VERSION
+    assert out["contract_version"] == "extraction_consistency.v2" and out["checker_version"] == measurement_rules.CHECKER_VERSION
     assert out["llm_calls"] == []
     return out["items"][0]
 
@@ -86,7 +86,7 @@ SAMPLES = [r["id"] for r in MATRIX["rows"] if r["group"] != "negative"]
 def test_real_samples_get_their_expected_status(client, sid):
     row = ROWS[sid]
     item = answer(client, request_of(row))
-    assert set(item["fields"]) == {"locator", *v4.FIELDS}
+    assert set(item["fields"]) == {"locator", *measurement_rules.FIELDS}
     assert item["status"] == row["expected"]["status"], (sid, {k: v for k, v in item["fields"].items() if v["result"] != "match"})
 
 
@@ -195,10 +195,10 @@ def test_a_planned_heading_overrules_an_actual_sentence(client):
 
 
 def test_point_and_interval_of_the_same_month_differ():
-    point, _ = v4.canonical_period("截至2023年12月")
-    interval, _ = v4.canonical_period("2023年12月")
+    point, _ = measurement_rules.canonical_period("截至2023年12月")
+    interval, _ = measurement_rules.canonical_period("2023年12月")
     assert point["value"] == interval["value"] == "2023-12" and point != interval
-    assert v4.canonical_period("截至2020年12月31日")[0] == {"type": "point", "precision": "day", "value": "2020-12-31"}
+    assert measurement_rules.canonical_period("截至2020年12月31日")[0] == {"type": "point", "precision": "day", "value": "2020-12-31"}
 
 
 @pytest.mark.parametrize("text,expected", [
@@ -210,7 +210,7 @@ def test_point_and_interval_of_the_same_month_differ():
     ("2025年第三季度", {"type": "interval", "precision": "quarter", "value": "2025Q3"}),
 ])
 def test_canonical_periods(text, expected):
-    assert v4.canonical_period(text) == (expected, None)
+    assert measurement_rules.canonical_period(text) == (expected, None)
 
 
 @pytest.mark.parametrize("text,reason", [
@@ -218,7 +218,7 @@ def test_canonical_periods(text, expected):
     ("近3年", "relative_period"), ("11 February 2020 to 22 January 2020", "range_ends_before_it_starts"),
 ])
 def test_periods_refused(text, reason):
-    assert v4.canonical_period(text) == (None, reason)
+    assert measurement_rules.canonical_period(text) == (None, reason)
 
 
 def test_past_n_days_must_match_the_stated_dates(client):

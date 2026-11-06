@@ -2,9 +2,9 @@
 subject - never a subset named after an inclusion / exclusion / example boundary. Generic templates."""
 
 import pytest
-from test_extraction_v4 import answer, client, fields_for, synthetic  # noqa: F401
+from test_measurement_rules import answer, client, fields_for, synthetic  # noqa: F401
 
-from app import extraction_v4 as v10
+from app import measurement_rules
 
 YEAR = {"type": "interval", "precision": "year", "value": "2018"}
 
@@ -16,8 +16,8 @@ def en(client, metric, unit):  # noqa: F811
 
 
 def test_the_checker_is_v10_with_normalize_v3():
-    assert v10.CHECKER_VERSION == "biocheck.extraction_rules.v10"
-    assert v10.NORMALIZE_VERSION == "extraction_normalize.v3"
+    assert measurement_rules.CHECKER_VERSION == "biocheck.extraction_rules.v10"
+    assert measurement_rules.NORMALIZE_VERSION == "extraction_normalize.v3"
 
 
 @pytest.mark.parametrize("metric,unit", [

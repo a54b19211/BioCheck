@@ -3,8 +3,8 @@ classifier unit kept whole, output a flow only as actual output; contract v2 (ch
 entity written fused with its site still unproven."""
 
 import pytest
-from test_extraction_v4 import at, client, fields_for, synthetic  # noqa: F401
-from test_extraction_v11 import answer
+from test_measurement_rules import at, client, fields_for, synthetic  # noqa: F401
+from test_dimension_rules import answer
 
 Q1 = {"type": "interval", "precision": "quarter", "value": "2026Q1"}
 HEAD = "## 甲公司\n\n### 按报告期统计\n\n"  # the entity a section of its own, the basis a heading
@@ -22,7 +22,7 @@ def ask(client, sentence, value="120", unit="万支", metric="实际产出的注
         b["items"][0]["dims"] = [{"kind": k, "state": "stated", "value": v, "span": at(text, v)} for k, v in dims]
         b["items"][0]["family"] = "capacity"
         return answer(client, b)
-    from test_extraction_v4 import answer as answer_v2
+    from test_measurement_rules import answer as answer_v2
 
     return answer_v2(client, b)
 

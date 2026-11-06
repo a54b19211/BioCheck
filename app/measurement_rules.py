@@ -14,8 +14,8 @@ from decimal import Decimal
 
 from extraction_contract import normalize as norm
 
-from . import extraction as v3
-from .extraction import ContractError, outcome, squash
+from . import item_rules
+from .item_rules import ContractError, outcome, squash
 
 CONTRACT_VERSION = "extraction_consistency.v2"
 # Bump whenever a rule, a word list, the unit table or canonical_period changes.
@@ -197,7 +197,7 @@ def canonical_period(text):
     """(period dict, None) or (None, reason). A period is {"type": point|interval, "precision": day|month|quarter|
     half|year, "value"} or, for an interval spanning several units, {"start", "end"} instead of "value". No day or
     month the text does not state is added; a period without a year or relative to an unstated date is refused."""
-    t = squash(text).translate(v3.FULLWIDTH)
+    t = squash(text).translate(item_rules.FULLWIDTH)
     for pattern, build in _PERIOD_FORMS:
         m = re.fullmatch(pattern, t)
         if m:
@@ -253,7 +253,7 @@ class Local:
         """Numbers in [a, b) that are not dates and not inside any excluded span."""
         text = self.text(a, b)
         blank = lambda m: " " * len(m.group())  # noqa: E731
-        text = EN_DATE.sub(blank, v3.DATE.sub(blank, v3.TIMESTAMP.sub(blank, text)))
+        text = EN_DATE.sub(blank, item_rules.DATE.sub(blank, item_rules.TIMESTAMP.sub(blank, text)))
         out = []
         for ms, me in norm.number_tokens(text):
             s, e = a + ms, a + me
@@ -273,8 +273,8 @@ TOTAL = re.compile(r"(?:\b[Nn]\s*=\s*|共\s*|总计\s*|合计\s*)" + _N)
 
 
 def ratios_in(clause_text, offset):
-    """v3.ratios_in with the shared number form: [(num_start, num_end, num, den_start, den_end, den)]."""
-    text = v3.DATE.sub(lambda m: " " * len(m.group()), v3.TIMESTAMP.sub(lambda m: " " * len(m.group()), clause_text))
+    """item_rules.ratios_in with the shared number form: [(num_start, num_end, num, den_start, den_end, den)]."""
+    text = item_rules.DATE.sub(lambda m: " " * len(m.group()), item_rules.TIMESTAMP.sub(lambda m: " " * len(m.group()), clause_text))
     out = []
     for pattern, n, d in RATIOS:
         for m in pattern.finditer(text):
@@ -302,7 +302,7 @@ def bound_unit(P, f, unit, vspan, unit_head=None):
     starting right after the value with nothing between the value and the unit but words
     (extraction_normalize.v3 unit_subject_head); the metric span must hold its value."""
     metric = f["metric"]
-    if not v3.stated(metric) or len({vspan["passage"], unit["span"]["passage"], metric["span"]["passage"]}) != 1:
+    if not item_rules.stated(metric) or len({vspan["passage"], unit["span"]["passage"], metric["span"]["passage"]}) != 1:
         return False
     mtext = P.text(metric["span"])
     if mtext is None or squash(mtext).casefold() != squash(metric["value"]).casefold():
@@ -396,7 +396,7 @@ def unit_after(text, pos, output=False):
     for spelling in sorted(CLASSIFIERS + MONEY, key=len, reverse=True):
         if text.startswith(spelling, p) and not text.startswith("个月", p):
             return spelling, p, p + len(spelling)
-    known = v3.unit_at(text, pos)
+    known = item_rules.unit_at(text, pos)
     if known:
         return known[0], known[1], known[2]
     q, words = p, 0
@@ -416,8 +416,8 @@ def cover_of(f, vspan, partners, ptext, pbase, L):
     ratio partners, and the words whose meaning a checked field carries - the cumulative marker of a claimed
     cumulative, the plan / forecast word of a claimed modality, the comparator of a claimed qualifier (a wrong
     claim fails that field). Event verbs never do: they belong in the metric."""
-    cover = [vspan] + [x["span"] for x in (f["object"], f["metric"], f["scope"], f["unit"]) if v3.stated(x)]
-    cover += [x["span"] for x in (f["period"], f["denominator"]) if v3.stated(x)] + list(partners)
+    cover = [vspan] + [x["span"] for x in (f["object"], f["metric"], f["scope"], f["unit"]) if item_rules.stated(x)]
+    cover += [x["span"] for x in (f["period"], f["denominator"]) if item_rules.stated(x)] + list(partners)
     markers = []
     if f["measure_kind"] == "cumulative":
         markers.append(CUMULATIVE)
@@ -457,7 +457,7 @@ class Measure:
     """One measurement item under check: its fields, the value's span and local sentence, the unit written at
     the value, and what the earlier field checks established (ratio partners, covered spans, checked period)."""
 
-    P: v3.Passages
+    P: item_rules.Passages
     f: dict
     vspan: dict
     fields: dict
@@ -492,7 +492,7 @@ class Measure:
         """The stated object, metric, scope and period spans other than `span`."""
         f = self.f
         return [x["span"] for x in (f["object"], f["metric"], f["scope"], f["period"])
-                if v3.stated(x) and x["span"] is not span]
+                if item_rules.stated(x) and x["span"] is not span]
 
     def place(self, span):
         return own_place(self.L, self.P, span, self.vspan, self.partners, self.others(span))
@@ -530,7 +530,7 @@ def unit_result(m, unit_head):
     """A stated unit is the whole unit recognised at the value, or the head of the bound metric phrase; "no unit"
     is proven only by punctuation or the sentence end after the number."""
     unit, at_value, L = m.f["unit"], m.at_value, m.L
-    if not v3.stated(unit):
+    if not item_rules.stated(unit):
         if at_value:
             return outcome("mismatch", "unit_written_at_value:" + at_value[0])
         if NO_UNIT_AFTER.match(m.ptext[m.after:L.end - m.pbase]):  # the rest of the sentence, whitespace skipped
@@ -594,7 +594,7 @@ def denominator_result(m):
     ratios = ratios_in(L.text(), L.start)
     own_ratios = [r for r in ratios if L.g_start <= min(r[0], r[3]) and max(r[1], r[4]) <= L.g_end]
     mine = [r for r in own_ratios if (r[0], r[1]) == _ends(m.vspan)]
-    if v3.stated(m.f["denominator"]):
+    if item_rules.stated(m.f["denominator"]):
         result, partners = _stated_denominator(m, own_ratios, mine)
     else:
         result, partners = _unknown_denominator(m, ratios, mine), []
@@ -606,7 +606,7 @@ def period_result(m, period_whole):
     """(result, the checked canonical period or None): the span is the whole written period, its canonical form
     is the stated one, and it stands in the value's group or before it in its sentence."""
     pf = m.f["period"]
-    if not v3.stated(pf):
+    if not item_rules.stated(pf):
         return outcome("unsupported", "period_not_stated"), None
     ptxt = m.P.text(pf["span"])
     got, why = canonical_period(ptxt or "")
@@ -633,7 +633,7 @@ def object_or_metric_result(m, name):
     """The object or metric stands in the value's group, before it in its sentence, in its nearest effective
     heading, or is the header of the value's table column."""
     x = m.f[name]
-    if not v3.stated(x):
+    if not item_rules.stated(x):
         return outcome("unsupported", f"unknown_{name}_not_rule_checkable")
     text = m.P.text(x["span"])
     if text is None or squash(text).casefold() != squash(x["value"]).casefold():
@@ -645,7 +645,7 @@ def object_or_metric_result(m, name):
         return outcome("match", f"{name}_{place}", x["span"])
     if place == "several":
         return outcome("unsupported", "several_quantities_in_value_sentence")
-    column = v3.header_column(m.P, x["span"], m.vspan)
+    column = item_rules.header_column(m.P, x["span"], m.vspan)
     if column is True:
         return outcome("match", "header_of_value_column", x["span"])
     if column in ("another_column", "another_table"):
@@ -661,7 +661,7 @@ def _blank_covered(text, offset, covered):
 
 def _stated_scope(m, item_id):
     sf = m.f["scope"]
-    if not v3.stated(sf):
+    if not item_rules.stated(sf):
         raise ContractError(f"items[{item_id}]: scope_mode stated needs a stated scope")
     text = m.P.text(sf["span"])
     if text is None or squash(text).casefold() != squash(sf["value"]).casefold():
@@ -677,15 +677,15 @@ def _object_metric_total(m, item_id):
     no restriction outside the fields - nor in an effective heading over the value (# 湖北省内) unless that
     heading names the object itself and nothing narrower."""
     f, L = m.f, m.L
-    if v3.stated(f["scope"]):
+    if item_rules.stated(f["scope"]):
         raise ContractError(f"items[{item_id}]: scope_mode object_metric_total states no scope")
-    covered = [x["span"] for x in (f["object"], f["metric"]) if v3.stated(x)] + [m.vspan]
-    if f["period"] and v3.stated(f["period"]):
+    covered = [x["span"] for x in (f["object"], f["metric"]) if item_rules.stated(x)] + [m.vspan]
+    if f["period"] and item_rules.stated(f["period"]):
         covered.append(f["period"]["span"])
     rest = _blank_covered(L.text(L.g_start, L.g_end), L.g_start, covered)
     lead_rest = _blank_covered(L.text(L.start, L.g_start), L.start, covered)
     total = TOTAL_WORD.search(rest)
-    obj = squash(f["object"]["value"]) if v3.stated(f["object"]) else ""
+    obj = squash(f["object"]["value"]) if item_rules.stated(f["object"]) else ""
     if m.fields["object"]["result"] != "match" or m.fields["metric"]["result"] != "match":
         return outcome("unsupported", "object_metric_total_needs_checked_object_and_metric")
     if not total:
@@ -742,7 +742,7 @@ def _rate(m):
     before = m.ptext[max(0, m.vspan["start"] - m.pbase - 12):m.vspan["start"] - m.pbase]
     if CHANGE.search(before):
         return outcome("unsupported", "percent_change")
-    ratio_shown = m.fields["denominator"]["result"] == "match" and v3.stated(m.f["denominator"])
+    ratio_shown = m.fields["denominator"]["result"] == "match" and item_rules.stated(m.f["denominator"])
     if m.fields["value"]["result"] == "match" and (m.percent_written or ratio_shown):
         return outcome("match", "rate_with_percentage_or_ratio")
     return outcome("unsupported", "measure_kind_not_rule_checkable")
@@ -774,7 +774,7 @@ def _flow(m, output):
 
 def _cumulative(m, output):
     pf = m.f["period"]
-    own = m.vgroup + " " + ((m.P.text(pf["span"]) or "") if v3.stated(pf) else "")
+    own = m.vgroup + " " + ((m.P.text(pf["span"]) or "") if item_rules.stated(pf) else "")
     if CUMULATIVE.search(own):
         return outcome("match", "cumulative_wording")
     return outcome("unsupported", "no_cumulative_wording")
@@ -831,8 +831,8 @@ def _exact_by_position(m, gap):
     """Exactness is proven, not presumed: what stands right before the value is the start of its group, the end
     of one of the item's own field spans or a neutral connector."""
     f = m.f
-    field_ends = {x["span"]["end"] for x in (f["object"], f["metric"], f["scope"]) if v3.stated(x)}
-    if v3.stated(f["period"]):
+    field_ends = {x["span"]["end"] for x in (f["object"], f["metric"], f["scope"]) if item_rules.stated(x)}
+    if item_rules.stated(f["period"]):
         field_ends.add(f["period"]["span"]["end"])
     word = re.search(r"([A-Za-z-]+)$", gap)
     if not gap.strip(" ，,、（(|") or m.L.g_start + len(gap) in field_ends or gap[-1] in CN_CONNECT \
@@ -921,11 +921,11 @@ def check(request, unit_head=None, output=False, period_whole=None):
         raise ContractError("passages: at most 20000 characters in all")
     if len({i["id"] for i in request["items"]}) != len(request["items"]):
         raise ContractError("items: ids must be unique")
-    P = v3.Passages(passages)
+    P = item_rules.Passages(passages)
     items = []
     for item in request["items"]:
         fields = check_v4(item, P, unit_head, output, period_whole)
-        items.append({"id": item["id"], "kind": item["kind"], "status": v3.status(fields), "fields": fields})
+        items.append({"id": item["id"], "kind": item["kind"], "status": item_rules.status(fields), "fields": fields})
     counts = {s: sum(1 for i in items if i["status"] == s) for s in ("consistent", "inconsistent", "unchecked")}
     return {"contract_version": CONTRACT_VERSION, "checker_version": CHECKER_VERSION,
             "subject": request["subject"], "items": items, "counts": counts, "llm_calls": []}

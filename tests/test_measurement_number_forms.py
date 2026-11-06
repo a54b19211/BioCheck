@@ -2,9 +2,9 @@
 single years, the unit inside the bound metric phrase - and their negatives; v7's own tests run unchanged."""
 
 import pytest
-from test_extraction_v4 import answer, at, client, fields_for, synthetic  # noqa: F401
+from test_measurement_rules import answer, at, client, fields_for, synthetic  # noqa: F401
 
-from app import extraction_v4 as v8
+from app import measurement_rules
 
 TEXT = "From September 2022 to January 2023, {v} suspected cases were recorded at the post."
 
@@ -19,9 +19,9 @@ def run(client, text, value, **kw):  # noqa: F811
 
 
 def test_the_checker_reads_with_the_shared_normalization():
-    # v8 on its own commit (43dba74) read with extraction_normalize.v1; from v9 on, v2 (test_extraction_v9)
-    assert v8.CHECKER_VERSION == "biocheck.extraction_rules.v10"
-    assert v8.NORMALIZE_VERSION == "extraction_normalize.v3"
+    # v8 on its own commit (43dba74) read with extraction_normalize.v1; from v9 on, v2 (test_measurement_whole_period)
+    assert measurement_rules.CHECKER_VERSION == "biocheck.extraction_rules.v10"
+    assert measurement_rules.NORMALIZE_VERSION == "extraction_normalize.v3"
 
 
 @pytest.mark.parametrize("written,canonical", [("1 444", "1444"), ("1 444", "1444"), ("1 444", "1444"),
@@ -62,19 +62,19 @@ def test_a_wrongly_grouped_run_is_not_one_value(client, written):  # noqa: F811
 
 
 def test_a_space_grouped_ratio_is_read_whole_not_split():
-    out = v8.ratios_in("56% (1 923/3 432) were female", 0)
+    out = measurement_rules.ratios_in("56% (1 923/3 432) were female", 0)
     assert [(r[2], r[5]) for r in out] == [(1923, 3432)]
-    assert v8.ratios_in("78 51/2", 0)[0][2] == 51  # a wrong group is not one numerator
+    assert measurement_rules.ratios_in("78 51/2", 0)[0][2] == 51  # a wrong group is not one numerator
 
 
 @pytest.mark.parametrize("text,year", [("2018", "2018"), ("In 2018", "2018"), ("in 2023", "2023")])
 def test_an_english_single_year_is_a_year_period(text, year):
-    assert v8.canonical_period(text) == ({"type": "interval", "precision": "year", "value": year}, None)
+    assert measurement_rules.canonical_period(text) == ({"type": "interval", "precision": "year", "value": year}, None)
 
 
 @pytest.mark.parametrize("text", ["in 2018 and 2019", "since 2012", "2018-2019"])
 def test_other_year_forms_stay_unsupported(text):
-    period, why = v8.canonical_period(text)
+    period, why = measurement_rules.canonical_period(text)
     assert period is None and why
 
 
@@ -112,6 +112,6 @@ def test_a_unit_word_without_a_stated_metric_is_not_bound(client):  # noqa: F811
 
 
 def test_s19_a_known_positive_stays_consistent(client):  # noqa: F811
-    from test_extraction_v4 import ROWS, request_of
+    from test_measurement_rules import ROWS, request_of
     out = answer(client, request_of(ROWS["S19"]))
     assert out["status"] == "consistent"  # answer() checks the checker is v8

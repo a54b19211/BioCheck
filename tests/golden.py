@@ -19,16 +19,16 @@ FIXTURE = ROOT / "tests" / "fixtures" / "checker_golden.jsonl"
 
 def checkers():
     """name -> (module, function name) of every frozen entry point."""
-    from app import claims, extraction, extraction_v4, extraction_v5
+    from app import claims, dimension_rules, item_rules, measurement_rules
 
-    return {"contract_v1": (extraction, "check"), "contract_v2": (extraction_v4, "check"),
-            "contract_v3": (extraction_v5, "check"), "canonical_period": (extraction_v4, "canonical_period"),
+    return {"contract_v1": (item_rules, "check"), "contract_v2": (measurement_rules, "check"),
+            "contract_v3": (dimension_rules, "check"), "canonical_period": (measurement_rules, "canonical_period"),
             "sentences": (claims, "sentences")}
 
 
 def answer(name, request):
     """The checker's answer to a frozen request, as JSON-ready data (a contract break is an answer too)."""
-    from app import claims, extraction
+    from app import claims, item_rules
 
     module, function = checkers()[name]
     run = getattr(module, function)
@@ -38,7 +38,7 @@ def answer(name, request):
         if name == "sentences":
             return [dict(s, numbers=claims.numeric_tokens(s["text"])) for s in run(request["draft"])]
         return run(copy.deepcopy(request))
-    except extraction.ContractError as exc:
+    except item_rules.ContractError as exc:
         return {"contract_error": str(exc)}
 
 
@@ -85,7 +85,7 @@ def _suite_requests():
 def _matrix_requests():
     """Every p3 matrix row and wrong-final negative, as the v2 request a correct client builds, and under v3."""
     sys.path.insert(0, str(ROOT / "tests"))
-    from test_extraction_v4 import MATRIX, ROWS, request_of
+    from test_measurement_rules import MATRIX, ROWS, request_of
 
     out = []
     for row in MATRIX["rows"]:
