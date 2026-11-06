@@ -1,4 +1,4 @@
-"""Extraction consistency (v3 6.2): a product corresponds to its fixed passages field by field, each field at
+"""Contract v1 (design v3 §6.2): a product corresponds to its fixed passages field by field, each field at
 its own span and tied to the same quantity, or it does not; what the rules cannot prove stays unchecked.
 Texts are short real-shaped passages: an NMPA sampling table (header + row), trial result sentences."""
 import copy
@@ -141,7 +141,7 @@ def test_denominators_only_from_this_numbers_ratio():
                                 denominator=d.field("p", "120"), period=d.field("p", "2021-06-30"),
                                 scope=d.field("p", "adults")))
     assert results(got)["denominator"] == results(got)["period"] == "match"
-    # "adults" is in the group before the comma: v2 cannot prove it is this quantity's population
+    # "adults" is in the group before the comma: the rules cannot prove it is this quantity's population
     assert got["fields"]["scope"]["reason"] == "scope_not_in_value_group" and got["status"] == "unchecked"
     d2 = Doc(p="截至2021/6/30，报告32例。")
     (got,) = run(d2, measurement(d2, "p", "报告32例", value=d2.field("p", "32")))

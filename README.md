@@ -159,11 +159,11 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
  "counts": {"consistent": 0, "inconsistent": 0, "unchecked": 1}, "llm_calls": []}
 ```
 
-## 抽取一致性接口 v2（测量，checker v7，T-29 P3）
+## 抽取一致性接口 v2（测量）
 
-**POST /v2/extraction-consistency**（契约 `extraction_consistency.v2`，checker `biocheck.extraction_rules.v7`）
+**POST /v2/extraction-consistency**（契约 `extraction_consistency.v2`，checker `biocheck.extraction_rules.v10`，规则在 `app/measurement_rules.py`）
 
-- **范围**：只接受 measurement 条目，请求里必须写 `"contract_version": "extraction_consistency.v2"`。/v1（v3）的请求、回执和规则都不变；v1 不会被默认升到 v4。
+- **范围**：只接受 measurement 条目，请求里必须写 `"contract_version": "extraction_consistency.v2"`。/v1 的请求、回执和规则都不变，也不会被默认升到 v2。
 - **数值**：value 和 denominator 用规范十进制字符串传输（`318`、`21.3`、`-3`），最多 18 位数字、6 位小数，不用 JSON 数字，全程不经过 float。不规范或超出上限的返回 422。
 - **period** 是结构化的：`{"type": "point"|"interval", "precision": "day"|"month"|"quarter"|"half"|"year", "value"}`，跨越的区间用 `start`/`end` 代替 `value`。
   - canonical_period.v1 的规范写法逐一列在 `app/measurement_rules.py`；
@@ -177,22 +177,31 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
   - `qualifier`：exact / approximate / at_least / at_most / more_than / less_than；
   - `modality`：actual / planned / projected。
 - **回执字段**：每个条目回执 11 个字段结果：locator 加上 object、metric、value、unit、period、scope、denominator、measure_kind、qualifier、modality。定位失败时同样是这 11 个，除 locator 外全部 unsupported。
-- **v7（v4 经 r135、r136、r137 修正）在 v3 上新增的规则**（证明不了的一律 unsupported）：
-  - **局部句**：值的上下文是它所在的局部句，即 v3 的子句再按英文句末切开；同一段里其他句子的数字、日期和事件词，既不能支持、也不会干扰当前的量。
+- **在 v1 规则（`app/item_rules.py`）之上新增的规则**（证明不了的一律 unsupported）：
+  - **局部句**：值的上下文是它所在的局部句，即 v1 的子句再按英文句末切开；同一段里其他句子的数字、日期和事件词，既不能支持、也不会干扰当前的量。
   - **flow**：period 是区间，同时有事件词。
   - **cumulative**：要有明确的累计语义（累计、cumulative、前N月……）；单纯的 from…to 时间范围、「a total of」或「共」都不算。
   - **stock**：截至时点加状态词。
-  - **rate**：沿用 v3；百分比变化（下降6.1%）不算 rate。
+  - **rate**：沿用 v1；百分比变化（下降6.1%）不算 rate。
   - **scope**：object_metric_total 要求 object 已核且不是指称词、metric 已核、有明确的总量词，并且各字段之外没有限制词。
   - **字段位置**：可以在值之前的同一局部句里（中间没有别的数量），也可以在有效的 markdown 祖先标题里（遇到同级或更高级标题即结束，列出多个名称的标题不算）。
   - **qualifier**：看值前后的标记词。
   - **modality**：看局部句、有效标题和表格标题。
-  - **单位**：中文量词、英文计数名词（之前最多两个白名单修饰词）、%、金额，外加 v3 的单位表；空格分隔的千分位不支持。
-- **数量短语完整**（v6）：值所在组里，数量自己的短语必须被本条目的字段覆盖。英文从值到第一个助动词；中文是整组，只允许列出的虚词留在字段外。介词和冠词可以连接字段；事件动词只有在 metric 之后（作谓语）才不需要字段。已核字段所对应的标记词（声明 cumulative 时的「累计」、声明 planned 时的「计划」、声明非 exact 时的比较词）算作已覆盖。漏掉的限定语（suspected、in humans、批准注册、表格行的类别）会让 metric 给 unsupported。
-- **比较短语**（v6）：比较词按整个短语、从长到短匹配，包括否定形式（不超过是上限）；清单里没有的否定写法给 unsupported。值前后的限定和「无单位」都在有边界的局部句里判断，会跳过空白。百分数只能用紧贴它写出的比例。
-- **谓语否定**（v7）：值所在组里，如果字段之外出现否定词（not、never、without、n't、未、没有、尚未、无、不），measure_kind 给 unsupported（negated_predicate）。否定句里的事件词不算肯定的事件依据。字段内部的否定（如 metric 里的「不合格」、已声明的「不超过」）属于该字段本身，不受影响。
+  - **单位**：中文量词、英文计数名词（之前最多两个白名单修饰词）、%、金额，外加 v1 的单位表；数值后没有单位时，也可以是绑定在 metric 短语主语上的计数名词（`14 close contacts`），但包含/排除/举例之后点名的子集不算单位。
+  - **数字和期间的读法**用共享契约包的 `extraction_contract.normalize`（与 Radar 同一份）：千分位可以用逗号、空格、不换行空格分组；英文单独年份（`in 2018`）是年度区间；period 的 span 必须是完整写出的期间，后面还接着月、日、区间或起点的不算（`In January 2018` 里的 `2018` 不是期间）。
+- **数量短语完整**：值所在组里，数量自己的短语必须被本条目的字段覆盖。英文从值到第一个助动词；中文是整组，只允许列出的虚词留在字段外。介词和冠词可以连接字段；事件动词只有在 metric 之后（作谓语）才不需要字段。已核字段所对应的标记词（声明 cumulative 时的「累计」、声明 planned 时的「计划」、声明非 exact 时的比较词）算作已覆盖。漏掉的限定语（suspected、in humans、批准注册、表格行的类别）会让 metric 给 unsupported。
+- **比较短语**：比较词按整个短语、从长到短匹配，包括否定形式（不超过是上限）；清单里没有的否定写法给 unsupported。值前后的限定和「无单位」都在有边界的局部句里判断，会跳过空白。百分数只能用紧贴它写出的比例。
+- **谓语否定**：值所在组里，如果字段之外出现否定词（not、never、without、n't、未、没有、尚未、无、不），measure_kind 给 unsupported（negated_predicate）。否定句里的事件词不算肯定的事件依据。字段内部的否定（如 metric 里的「不合格」、已声明的「不超过」）属于该字段本身，不受影响。
 - **字段 span**：可以重叠，例如 object 落在 metric 之内；passages 仍然不能重叠。
 - **测试**：`tests/test_measurement_rules.py` 用 `tests/fixtures/p3_matrix.json`（extraction-contract 样本矩阵 v2：固定 clean_text.v11 产物的真实子句、真实偏移和逐字段原文位置），每一行都走真实 HTTP。`tests/explain_measurement_rules.py` 逐行打印状态和非 match 字段的原因，用于审查。
+
+## 抽取一致性接口 v3（测量加业务维度）
+
+**POST /v3/extraction-consistency**（契约 `extraction_consistency.v3`，checker `biocheck.extraction_rules.v16`，规则在 `app/dimension_rules.py`）
+
+- 请求与 v2 相同，另外每个测量条目可以带 `dims`（每类至多一个：disease、population、date_basis、indication、product_or_class、milestone_definition、entity、stage、denominator_definition，各自写明 value 和 span）和 `family`。
+- 测量字段和条目状态与 v2 的规则相同，只是用这一版契约的读法：metric 短语里的单位按 `extraction_normalize.v4`，完整期间按 v5（上一行以完整日期结尾，例如公告的「发布时间」，不算期间的延续）；产出类单位（`120万支` 的单位是 `万支`，数量级不丢）和「实际产出」才算 flow。
+- 每个维度另给一个结果 `dims[kind]`，只有同时满足以下几条才是 match：原文在该 span 处写着这个值；文本里有这类角色的明确依据（标签、病例名词、人群词、「按报告日统计」这类口径写法等，机构、日期和裸数字都不算）；它所在短语没有否定、排除，也没有和别的成员并列；它和值在同一局部句且中间没有别的数量，或者在值的有效祖先标题里；它填满了一个能识别的结构位置。其余一律 unsupported。维度结果不改变条目状态。
 
 ## 运行测试
 
@@ -200,11 +209,13 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 python -m pytest -q
 ```
 
+`tests/test_checker_golden.py` 用 `tests/fixtures/checker_golden.jsonl` 逐字节比对三个契约的全部样例回执；只有提升 `CHECKER_VERSION` 时才用 `PYTHONPATH=. python tests/golden.py` 重新生成。
+
 测试不联网，用 `tests/conftest.py` 里的 `FakeLLM` 代替模型。`evaluation/` 下保留 `tasks.json`（题目及 Fabric 记录版本）、`controls.json` 和 `regressions.json`（正确/错误对照句），供以后用真实材料评测。
 
-## 这次重写改了什么
+## 设计决定
 
-上一轮验收中，逐句核验开着 DeepSeek 思考模式，12k–16k 的输出额度全部用在思考上，正文为空；再加上“服务把下一次模型请求交回雷达、雷达代调再回传回执”的反向协议，以及指纹、哈希、结构纠错重放，整条链很脆。这次改成普通的同步 HTTP 服务，自己调模型；核验、覆盖和修订一律关闭思考，`max_tokens` 4096（写稿 8192）；模型只按程序给的句号回答，一句答错只影响这一句。删除了 rpc.py、合约版本与哈希、复用缓存、整稿旧核验、规划步骤、结构纠错重放和 support_audit（并入短引检查）。代码从约 2,900 行减到约 730 行。
+`docs/decisions/` 下记录了仍有用的历史：改成同步 HTTP 服务的原因（0002）、抽取 checker 的版本规则和每个版本改了什么（0001）。
 
 ## 已知限制
 

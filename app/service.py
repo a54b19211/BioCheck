@@ -121,7 +121,7 @@ class ReviseRequest(VerifyRequest):
     review: Review
 
 
-# ---- extraction consistency (v3 6.2): strict on purpose - an unknown, misplaced or missing field is a 400,
+# ---- extraction consistency (design v3 §6.2): strict on purpose - an unknown, misplaced or missing field is a 400,
 # never a silently ignored field answered with 200 as if it had been checked. Field semantics follow Fabric's
 # contracts/data_objects.py (Measurement: object, metric, value, unit, period, scope, denominator, measure_kind).
 
@@ -260,7 +260,7 @@ class ExtractionRequest(Strict):
                           Field(discriminator="kind")]] = Field(min_length=1, max_length=50)
 
 
-# ---- contract v2 (checker v4, T-29 P3): measurements only. Numbers travel as canonical decimal strings, never as
+# ---- contract v2: measurements only. Numbers travel as canonical decimal strings, never as
 # JSON numbers, so nothing passes through a float; a period is structured (type, precision, value | start..end).
 
 DECIMAL = r"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$"
@@ -387,7 +387,7 @@ def create_app(llm=chat_json):
 
     @app.middleware("http")
     async def bearer_token(request: Request, call_next):
-        if re.match(r"^/v[0-9]+/", request.url.path):  # every versioned endpoint (v1, v2), one token
+        if re.match(r"^/v[0-9]+/", request.url.path):  # every versioned endpoint, one token
             token = os.environ.get("SERVICE_TOKEN", "")
             supplied = request.headers.get("Authorization", "")
             if not token:

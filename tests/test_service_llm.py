@@ -124,7 +124,8 @@ def test_hypotheses_reach_the_writer_over_http(client):
 
 
 def test_reposts_and_origin_groups_reach_the_writer_and_the_checker_over_http(client):
-    """T-23: a field the request models do not declare is dropped silently, as hypotheses once were."""
+    """The request models drop an undeclared field silently: relations and origin groups must be declared to reach
+    the model payloads."""
     seen = {}
 
     def keep(stage, answer):

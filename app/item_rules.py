@@ -1,4 +1,4 @@
-"""Extraction consistency (v3 6.2): does a processing product correspond to the fixed text it was extracted
+"""Extraction consistency (design v3 §6.2), contract v1 (POST /v1/extraction-consistency): does a processing product correspond to the fixed text it was extracted
 from? Rules only, no model calls. It checks correspondence, never whether a fact is true.
 
 Each field of an item names its own span in one of the request's passages (bounded slices of one fixed
@@ -17,7 +17,7 @@ from .claims import DATE, TIMESTAMP
 
 CONTRACT_VERSION = "extraction_consistency.v1"
 # Bump whenever a rule, the unit table, the number conversions or the clause rule below changes.
-CHECKER_VERSION = "biocheck.extraction_rules.v3"  # v3: numbers bounded to MAX_DIGITS (Codex r107)
+CHECKER_VERSION = "biocheck.extraction_rules.v3"  # docs/decisions/0001
 
 # Units the rules know, canonical -> spellings. The longest spelling wins at a position ("mg/kg" is never "mg",
 # "mg/day" is no ratio). A unit not listed here is "unsupported", never guessed.

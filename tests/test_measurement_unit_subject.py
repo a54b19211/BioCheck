@@ -1,4 +1,4 @@
-"""Checker v10 (v9 + extraction_normalize.v3, Codex r163): the unit is the head of the metric phrase's own
+"""The unit of the metric phrase (extraction_normalize.v3): the unit is the head of the metric phrase's own
 subject - never a subset named after an inclusion / exclusion / example boundary. Generic templates."""
 
 import pytest

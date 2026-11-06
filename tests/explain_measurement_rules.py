@@ -1,4 +1,4 @@
-"""Print, for every matrix sample and wrong-final negative, the v4 status and each non-match field with its reason
+"""Print, for every matrix sample and wrong-final negative, the contract v2 status and each non-match field with its reason
 (a review aid: the status alone can be right for the wrong reason)."""
 import copy
 import json

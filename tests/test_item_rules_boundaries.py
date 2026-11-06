@@ -18,7 +18,7 @@ def checked(c,d,it):
 def rate(d,number='100',metric='响应率',object='药物A',scope='成人',unit='%'):
     return measurement(d,'p',number+unit,object=d.field('p',object),metric=d.field('p',metric),value=d.field('p',number),unit=d.field('p',unit,inside=number+unit),scope=d.field('p',scope))
 
-def test_r105_identifier_punctuation_collision_is_closed(client):
+def test_an_identifier_differing_only_in_punctuation_is_not_consistent(client):
     raw='10.12345/678';d=Doc(p=raw)
     i={'id':'i1','kind':'identifier','producer':{'name':'test','version':'1'},'locator':d.span('p',raw),'quote':raw,'fields':{'scheme':'doi','identifier':d.field('p',raw)}}
     assert checked(client,d,i)['status']=='consistent'
@@ -28,7 +28,7 @@ def test_r105_identifier_punctuation_collision_is_closed(client):
 def group_item(d,denominator='10',scope='成人'):
     return measurement(d,'p','2人有效',object=d.field('p','药物A'),metric=d.field('p','有效'),value=d.field('p','2'),unit=d.field('p','人',inside='2人'),denominator=d.field('p',denominator),scope=d.field('p',scope))
 
-def test_r105_cross_semicolon_group_is_closed(client):
+def test_a_denominator_or_scope_of_another_semicolon_group_is_not_consistent(client):
     d=Doc(p='药物A成人10人中2人有效；儿童100人中80人有效。')
     assert checked(client,d,group_item(d))['status']=='consistent'
     assert checked(client,d,group_item(d,'100','儿童'))['status']!='consistent'

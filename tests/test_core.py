@@ -230,7 +230,7 @@ def test_revise_may_give_an_uncited_sentence_a_neighbours_citation(replacement, 
 
 
 def wrong_ref_review():
-    """Codex r26: the sentence cites E1 (the trial), but what it says is in E2 (the post)."""
+    """The sentence cites E1 (the trial), but what it says is in E2 (the post)."""
     draft = "网帖称医院出现多例不明肺炎[E1]。"
     answer = lambda p: {"claims": [{"index": 1, "verdict": "insufficient", "labels": ["REF"], "quotes": [],
                                     "reason": "E1 是 DREAMM-2 试验，没有写肺炎"}]}

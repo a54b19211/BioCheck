@@ -1,6 +1,6 @@
-"""Checker v15 (Codex 783, T-24 industrial): a reporting-period date basis written as such, a magnitude-and-
-classifier unit kept whole, output a flow only as actual output; contract v2 (checker v10) unchanged, and an
-entity written fused with its site still unproven."""
+"""Output measures under contract v3: a reporting-period date basis written as such, a magnitude-and-classifier
+unit kept whole, output a flow only as actual output; contract v2 unchanged, and an entity written fused with
+its site still unproven."""
 
 import pytest
 from test_measurement_rules import at, client, fields_for, synthetic  # noqa: F401
@@ -67,7 +67,7 @@ def test_planned_output_capacity_and_inventory_are_not_actual_output(client, sen
 
 
 def test_an_entity_written_fused_with_its_site_is_still_not_proven(client):  # noqa: F811
-    # the original business sentence: the company fused with its site - kept unproven (Codex 783)
+    # the original business sentence: the company fused with its site - kept unproven
     got = ask(client, "2026年第一季度，甲公司苏州工厂实际产出的注射剂产量为120万支。", obj="甲公司苏州工厂", scope=None,
               head="## 按报告期统计\n\n")
     assert got["dims"]["entity"]["result"] == "unsupported"

@@ -1,5 +1,5 @@
-"""Checker v16 (Codex r186): the real NMPA notice shape - a 发布时间 line above the body - no longer makes the
-body's period part of a larger one under contract v3; contract v2 (checker v10) unchanged; other continuations
+"""The real NMPA notice shape - a 发布时间 line above the body - does not make the
+body's period part of a larger one under contract v3; contract v2 unchanged; other continuations
 still refuse the period."""
 
 from test_measurement_rules import answer as answer_v2

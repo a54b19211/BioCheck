@@ -1,11 +1,11 @@
-"""Extraction consistency, contract v2 / checker v4 (T-29 P3): measurements only, the v3 rules extended by the
-smallest versioned set that lets explicit wording or structure prove what v3 left unsupported - the kind of a
-count (flow / cumulative / stock), a canonical period with its type and precision, a scope stated or proven to
-be the object's own total, a value qualifier and the modality. Everything the rules cannot prove stays
-"unsupported". v3 (contract v1, /v1/extraction-consistency) is untouched and imported, not copied.
+"""Extraction consistency of measurements, contract v2 (POST /v2/extraction-consistency): item_rules (contract
+v1) extended by the smallest set of rules that lets explicit wording or structure prove what item_rules leaves
+unsupported - the kind of a count (flow / cumulative / stock / rate), a canonical period with its type and
+precision, a scope stated or proven to be the object's own total, a value qualifier and the modality. Everything
+the rules cannot prove stays "unsupported". item_rules is imported, not copied.
 
-The quantity's own context is its local sentence: the v3 clause, also cut at an English sentence end, so other
-numbers, dates or event words elsewhere in an English paragraph never support (or spoil) this value."""
+The quantity's own context is its local sentence: the item_rules clause, also cut at an English sentence end, so
+other numbers, dates or event words elsewhere in an English paragraph never support (or spoil) this value."""
 
 import dataclasses
 import re
@@ -18,23 +18,9 @@ from . import item_rules
 from .item_rules import ContractError, outcome, squash
 
 CONTRACT_VERSION = "extraction_consistency.v2"
-# Bump whenever a rule, a word list, the unit table or canonical_period changes.
-# v5 (Codex r135): exactness needs positive evidence; only the nearest effective heading may supply a field and
-# any effective heading may restrict an object total; kind evidence, ratios and units belong to the value's own
-# group; a unit span must be the whole recognized unit and "no unit" needs nothing but punctuation after it.
-# v6 (Codex r136): the value's group is covered by the item's own fields (no qualifier left outside the metric);
-# prefixes, suffixes and "no unit" are read over the bounded sentence, never a fixed short window; comparators are
-# whole phrases with their negation; a percentage takes only a ratio written right next to it.
-# v7 (Codex r137): a negation of the quantity's predicate outside the item's fields leaves the kind unproven.
-# v8: v7 + extraction_normalize.v1 (numbers grouped by space / NBSP / NNBSP, English single years, the unit in
-# the metric phrase bound to the value); v7 stays the frozen baseline on its own commit (45600af)
-# v9 (Codex r161): v8 + extraction_normalize.v2 - a period span is read only when it is the whole written period
-# (no month, day, range, start or sub-period continues it: "2018" of "In January 2018" or "Since 2018" is not the
-# year); a unit in the bound metric phrase must be the phrase's head counting noun ("close" of "14 close
-# contacts" is not a unit). v8 stays as released on its own commit (43dba74)
-# v10 (Codex r163): v9 + extraction_normalize.v3 - the unit is the head of the metric phrase's own subject: a
-# subset named after including / excluding / such as / a comma ("children" of "close contacts excluding
-# children") is never the unit. v9 stays as released on its own commit (58f7b08)
+# Bump whenever a rule, a word list, the unit table or canonical_period changes (docs/decisions/0001).
+# The normalisation functions of extraction_normalize.v3 are this version's defaults; contract v3
+# (dimension_rules) passes newer ones in.
 CHECKER_VERSION = "biocheck.extraction_rules.v10"
 NORMALIZE_VERSION = norm.NORMALIZE_V3
 FIELDS = ("object", "metric", "value", "unit", "period", "scope", "denominator", "measure_kind", "qualifier",
@@ -114,12 +100,12 @@ PLANNED = re.compile(r"计划|拟|目标|将|\b(?:plan(?:ned|s)?|target(?:ed)?)\
 PROJECTED = re.compile(r"预计|预测|预期|\b(?:expected|projected|forecast)\b", re.IGNORECASE)
 LIST_SEPARATOR = re.compile(r"、|,|，|\band\b|/|&")
 
-# Units v4 knows beyond v3's table: count classifiers and count nouns are their own canonical form (个 is not 件).
+# Units known beyond item_rules' table: count classifiers and count nouns are their own canonical form (个 is not 件).
 CLASSIFIERS = ("品种", "品规", "批次", "个", "件", "批", "例", "人", "家", "项", "条", "种")
 COUNT_NOUNS = ("cases", "deaths", "patients", "participants", "provinces", "samples")
 MONEY = ("亿元", "万元", "元")
-# checker v15 (Codex 783), only when check(output=True), contract v3: units of output - a classifier, a magnitude
-# before it kept whole with it (120万支: value 120, unit 万支) - and output wording, a flow only as actual output
+# Only with check(output=True) (contract v3): units of output - a classifier, a magnitude before it kept whole
+# with it (120万支: value 120, unit 万支) - and output wording, a flow only as actual output
 OUTPUT_CLASSIFIERS = ("人份", "支", "片", "粒", "瓶", "袋", "盒", "剂", "吨", "台", "套")
 MAGNITUDES = ("千万", "百万", "十万", "亿", "万", "千")
 OUTPUT = re.compile(r"产出|产量|生产|出产|\b(?:output|produced|production)\b", re.IGNORECASE)
@@ -231,7 +217,7 @@ class Local:
         pid, c_start, c_end, _ = P.clause(vspan)
         self.passage = P.by_id[pid]
         base, text = self.passage["start"], self.passage["text"]
-        # cut the v3 clause at English sentence ends around the value
+        # cut the item_rules clause at English sentence ends around the value
         clause = text[c_start - base:c_end - base]
         cuts = [c_start + m.end() for m in SENTENCE_END.finditer(clause)]
         self.start = max([c for c in cuts if c <= vspan["start"]], default=c_start)
@@ -262,7 +248,7 @@ class Local:
         return out
 
 
-# v3's ratio and total patterns with the shared number form (comma or space / NBSP / NNBSP groups of three)
+# item_rules' ratio and total patterns with the shared number form (comma or space / NBSP / NNBSP groups of three)
 _N = r"(\d{1,3}(?:,\d{3})+|\d{1,3}(?:[ \u00a0\u202f]\d{3})+|\d+)(?![\d,])"
 RATIOS = (
     (re.compile(_N + r"\s*/\s*" + _N), 1, 2),
@@ -285,14 +271,14 @@ def ratios_in(clause_text, offset):
 
 
 def whole_number(P, span):
-    """The span is exactly one written number of its passage - a space-grouped number is one (v8)."""
+    """The span is exactly one written number of its passage - a space-grouped number is one."""
     p = P.by_id[span["passage"]]
     return norm.is_whole_number(p["text"], span["start"] - p["start"], span["end"] - p["start"])
 
 
 def whole_period(P, span, period_whole=None):
-    """The period span is the whole written period in its passage (extraction_normalize.v2 period_span_whole;
-    checker v16 passes v5's)."""
+    """The period span is the whole written period in its passage (period_whole: the normalisation rule,
+    extraction_normalize.v2 period_span_whole by default)."""
     p = P.by_id[span["passage"]]
     return (period_whole or norm.period_span_whole)(p["text"], span["start"] - p["start"], span["end"] - p["start"])
 
@@ -379,8 +365,8 @@ def table_caption(P, vspan):
 # ---- the checker -------------------------------------------------------------------------------------------------
 
 def unit_after(text, pos, output=False):
-    """(spelling, start, end) of the unit at the value: a classifier, %, money or a v3 unit right at it, or a count
-    noun after at most two listed modifiers; None. output (v15): also an output classifier, and a magnitude with
+    """(spelling, start, end) of the unit at the value: a classifier, %, money or an item_rules unit right at it, or a
+    count noun after at most two listed modifiers; None. output: also an output classifier, and a magnitude with
     the classifier after it as one unit (万支) - the magnitude is never dropped nor folded into the value."""
     p = pos
     while p < len(text) and text[p] == " ":
@@ -868,7 +854,7 @@ def modality_result(m):
 
 
 def check_measurement(item, P, unit_head=None, output=False, period_whole=None):
-    """Field results of one measurement item under v4 (locator checked first, as v3). The field checks run in
+    """Field results of one measurement item (locator checked first, as in item_rules). The field checks run in
     this order because later ones read what earlier ones established (partners, period, object and metric)."""
     fields = {"locator": locator_result(item, P)}
     if fields["locator"]["result"] != "match":
@@ -907,7 +893,8 @@ def check_measurement(item, P, unit_head=None, output=False, period_whole=None):
 
 def check(request, unit_head=None, output=False, period_whole=None):
     """Contract v2: measurement items only. Raises ContractError on a contract break. unit_head: the rule for
-    the unit in the bound metric phrase (default extraction_normalize.v3, v10's; checker v11 passes v4's)."""
+    the unit in the bound metric phrase (default extraction_normalize.v3 unit_subject_head); output: the output
+    units and wording of contract v3; period_whole: the whole-period rule (default extraction_normalize.v2)."""
     passages = request["passages"]
     if len({p["id"] for p in passages}) != len(passages):
         raise ContractError("passages: ids must be unique")

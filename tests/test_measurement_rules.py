@@ -1,4 +1,4 @@
-"""Checker v4 / contract v2 (T-29 P3). Real samples: tests/fixtures/p3_matrix.json (matrix v2 of extraction-contract:
+"""Contract v2, measurements. Real samples: tests/fixtures/p3_matrix.json (matrix v2 of extraction-contract:
 real clauses of fixed clean_text.v11 artifacts with their real offsets, every field's literal span, the final
 values and the expected outcome). Each matrix row becomes a real HTTP request to /v2; negatives of the kind
 "wrong final value at a real span" change only the final value. Synthetic texts cover what no real sample has
@@ -290,7 +290,7 @@ def test_v1_is_unchanged(client):
     assert r.status_code in (400, 422)
 
 
-# ---- Codex r135 root causes (checker v5) ------------------------------------------------------------------------
+# ---- exactness, headings, kind evidence, ratios and units are proven, not presumed ----------------------------
 
 MONTH = {"type": "interval", "precision": "month", "value": "2026-04"}
 
@@ -392,7 +392,7 @@ def test_unrecognized_words_after_a_value_prove_no_unitlessness(client):
     assert item["fields"]["unit"]["result"] != "match" and item["status"] != "consistent"
 
 
-# ---- Codex r136 (checker v6): the quantity phrase is covered, comparators are whole, ratios adjacent -------------
+# ---- the quantity phrase is covered, comparators are whole, ratios adjacent -------------------------------------
 
 @pytest.mark.parametrize("metric", ["cases of anthrax in humans", "suspected cases of anthrax", "cases"])
 def test_s19_metric_must_keep_every_qualifier(client, metric):
@@ -461,7 +461,7 @@ def test_a_marker_of_a_claimed_kind_is_covered_but_an_event_verb_is_not(client):
     assert item["fields"]["metric"]["reason"].startswith("quantity_words_outside_the_fields")
 
 
-# ---- Codex r137 (checker v7): a negated predicate proves no event ---------------------------------------------
+# ---- a negated predicate proves no event -----------------------------------------------------------------------
 
 @pytest.mark.parametrize("predicate,ok", [("had been recorded", True), ("had not been recorded", False),
                                           ("had never been recorded", False), ("were not reported", False)])

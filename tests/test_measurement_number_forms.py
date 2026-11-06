@@ -1,5 +1,5 @@
-"""Checker v8 (v7 + extraction_normalize.v1). Generic format and attribution cases - grouped thousands, English
-single years, the unit inside the bound metric phrase - and their negatives; v7's own tests run unchanged."""
+"""Number forms and attribution read with the shared normalisation (extraction_normalize): grouped thousands,
+English single years, the unit inside the bound metric phrase - and their negatives. Generic templates."""
 
 import pytest
 from test_measurement_rules import answer, at, client, fields_for, synthetic  # noqa: F401
@@ -19,7 +19,6 @@ def run(client, text, value, **kw):  # noqa: F811
 
 
 def test_the_checker_reads_with_the_shared_normalization():
-    # v8 on its own commit (43dba74) read with extraction_normalize.v1; from v9 on, v2 (test_measurement_whole_period)
     assert measurement_rules.CHECKER_VERSION == "biocheck.extraction_rules.v10"
     assert measurement_rules.NORMALIZE_VERSION == "extraction_normalize.v3"
 
@@ -114,4 +113,4 @@ def test_a_unit_word_without_a_stated_metric_is_not_bound(client):  # noqa: F811
 def test_s19_a_known_positive_stays_consistent(client):  # noqa: F811
     from test_measurement_rules import ROWS, request_of
     out = answer(client, request_of(ROWS["S19"]))
-    assert out["status"] == "consistent"  # answer() checks the checker is v8
+    assert out["status"] == "consistent"  # answer() checks the checker version

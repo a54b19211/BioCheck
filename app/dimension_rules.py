@@ -1,19 +1,23 @@
-"""Extraction consistency, contract v3 / checker v11 (T-24 complete domain, Codex 730/740).
+"""Extraction consistency of measurements with their business dimensions, contract v3
+(POST /v3/extraction-consistency).
 
-v11 answers a measurement item exactly as v10 does (its fields, its status - with extraction_normalize.v4 for
-the unit in the bound metric phrase) and, beside them, each business dimension the request states. A
-dimension is "match" only when three things hold, each from the text alone:
+A measurement item is answered exactly as measurement_rules answers it (its fields and its status), with the
+normalisation of this contract - extraction_normalize.v4 for the unit in the bound metric phrase, v5 for the
+whole written period - and the output units and wording. Beside the fields, each business dimension the request
+states is judged. A dimension is "match" only when all of these hold, each from the text alone:
 1. its literal is written at its span;
-2. it belongs to this value: in the value's own sentence with no other quantity between them, or in an
-   effective ancestor heading of the value;
-3. the role its kind names has evidence in the text - a closed grammar of explicit labels and forms (a
-   disease named with a case or outbreak noun or a disease label; a population word or label; a date basis
-   written as such; a denominator definition with its counting noun; a product class noun; a company form;
-   an indication label or "用于…治疗"; a milestone verb; a stage word). An institution, a date or a bare number
-   proves no role.
-Anything else is "unsupported" (dim_relation_not_rule_checkable / dim_kind_not_proven) - left to the
-investigation or the graph, never guessed from a family label or the producer's own claim. The item status
-is v10's: dimensions never change it."""
+2. the role its kind names has evidence in the text - a closed grammar of explicit labels and forms (a disease
+   named with a case or outbreak noun or a disease label; a population word or label; a date basis written as
+   such; a denominator definition with its counting noun; a product class noun; a company form; an indication
+   label or "用于…治疗"; a milestone verb; a stage word). An institution, a date or a bare number proves no role;
+3. it keeps its qualifying context: nothing in its phrase negates or excludes it, no conjunction joins it with
+   another member;
+4. it belongs to this value: in the value's own sentence with no other quantity between them, or in an effective
+   ancestor heading of the value;
+5. it fills a whole slot of a recognised structure (a label's value, a phrase of its own, a heading line, or a
+   slot of the metric phrase bounded only by other dimensions that passed 1-4 on their own).
+Anything else is "unsupported" - left to the investigation or the graph, never guessed from a family label or the
+producer's own claim. Dimensions never change the item status."""
 
 import re
 
@@ -23,19 +27,9 @@ from . import item_rules, measurement_rules
 from .item_rules import outcome, squash
 
 CONTRACT_VERSION = "extraction_consistency.v3"
-# v12 (Codex r178): a dimension keeps its qualifying context - its phrase may not negate or exclude it, nor join
-# it with another member; v11 stays as released on its own commit (e98b392)
-# v13 (Codex r179): a dimension must fill a whole slot of a recognised structure (whole_phrase below); v12 stays
-# as released on its own commit (1c08f7c)
-# v14 (Codex r181): only independently proven, kind-compatible neighbours bound a metric slot (composite below);
-# v13 stays as released on its own commit (978af0a)
-# v15 (Codex 783, T-24 industrial): a reporting-period date basis written as such, a magnitude-and-classifier
-# unit kept whole, output a flow only as actual output (measurement_rules output=True); v14 stays as released on its
-# own commit (2b395ae)
-# v16 (Codex r186, real NMPA): v15 with extraction_normalize.v5 for the whole written period - a complete date
-# ending the line before (a notice's 发布时间) is its own; v15 stays as released on its own commit (73e425f)
+# Bump whenever a role grammar, a phrase rule or a normalisation function changes (docs/decisions/0001).
 CHECKER_VERSION = "biocheck.extraction_rules.v16"
-NORMALIZE_VERSION = norm.NORMALIZE_V4
+NORMALIZE_VERSION = norm.NORMALIZE_V4  # the bound-unit rule; the whole-period rule is v5's
 
 _LABEL = r"[:：]\s*$"
 _BEFORE = {
@@ -62,7 +56,7 @@ _SELF = {
     "date_basis": re.compile(
         r"^(?:按|以)?(?:报告|发病|采样|入院|诊断|死亡|就诊|检测)(?:日期|日|时间)(?:统计|计)?$|"
         r"^by (?:date of )?(?:report(?:ing)?|onset|sampling|admission|diagnosis|death)(?: date)?$|"
-        # v15: a reporting period stated as the basis (never a bare 报告期, never a production or shipping date)
+        # a reporting period stated as the basis (never a bare 报告期, never a production or shipping date)
         r"^(?:按|以)报告期(?:统计|计)?$|^by reporting period$",
         re.IGNORECASE,
     ),
@@ -121,7 +115,7 @@ _JOIN_RIGHT = re.compile(r"^\s*(?:和|与|及|、|或|以及|跟|同|以外|之�
 
 def qualifier_kept(text, start, end):
     """Whether text[start:end] is its phrase's own member as written: nothing in the phrase before it negates or
-    excludes it, and no conjunction joins it with another member on either side (Codex r178)."""
+    excludes it, and no conjunction joins it with another member on either side."""
     left = text[:start]
     cut = max((m.end() for m in _PHRASE_END.finditer(left)), default=0)
     before = left[cut:]
@@ -263,7 +257,7 @@ def related(L, P, span, vspan):
 
 def dims_of(item, P):
     """{kind: result} for every dimension the item states. Each dimension is first checked on its own (literal,
-    role, qualifier, relation); only those that pass may bound another's metric slot (v14)."""
+    role, qualifier, relation); only those that pass may bound another's metric slot."""
     out, ready = {}, []
     vspan = item["fields"]["value"]["span"]
     L = measurement_rules.Local(P, vspan)
@@ -281,7 +275,7 @@ def dims_of(item, P):
             out[d["kind"]] = outcome("unsupported", "dim_kind_not_proven")  # the role first: never implied
             continue
         if not qualifier_kept(p["text"], span["start"] - p["start"], span["end"] - p["start"]):
-            # negated, excluded or one member of a joined group: not the value as written (v12)
+            # negated, excluded or one member of a joined group: not the value as written
             out[d["kind"]] = outcome("unsupported", "dim_qualifier_dropped")
             continue
         place = related(L, P, span, vspan)
@@ -289,12 +283,12 @@ def dims_of(item, P):
             out[d["kind"]] = outcome("unsupported", "dim_relation_not_rule_checkable")
             continue
         ready.append((d, p, place))
-    for d, p, place in ready:  # the whole slot, bounded only by independently proven neighbours (v14)
+    for d, p, place in ready:  # the whole slot, bounded only by independently proven neighbours
         span = d["span"]
         members = [(o["span"]["start"] - p["start"], o["span"]["end"] - p["start"], o["kind"])
                    for o, q, _ in ready if o is not d and o["span"]["passage"] == span["passage"]]
         if not whole_phrase(d["kind"], p["text"], span["start"] - p["start"], span["end"] - p["start"], members):
-            # not a whole slot of a recognised structure: a part of a longer qualified phrase (v13/v14)
+            # not a whole slot of a recognised structure: a part of a longer qualified phrase
             out[d["kind"]] = outcome("unsupported", "dim_phrase_not_whole")
             continue
         out[d["kind"]] = outcome("match", place, span)
@@ -302,7 +296,7 @@ def dims_of(item, P):
 
 
 def check(request):
-    """Contract v3: v10's measurement check with extraction_normalize.v4, and each stated dimension."""
+    """Contract v3: the measurement check with this contract's normalisation, and each stated dimension."""
     base = dict(request, items=[{k: v for k, v in i.items() if k != "dims"} for i in request["items"]])
     out = measurement_rules.check(base, unit_head=norm.unit_subject_head_v4, output=True, period_whole=norm.period_span_whole_v5)
     P = item_rules.Passages(request["passages"])

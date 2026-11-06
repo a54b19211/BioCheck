@@ -1,5 +1,5 @@
-"""Checker v11 under contract v3 (Codex 730/740): v10's fields and status unchanged, and each stated dimension
-judged on three things from the text - its literal, its relation to the value (same sentence without another
+"""Contract v3, business dimensions: the measurement's fields and status as contract v2 answers them, and each
+stated dimension judged on three things from the text - its literal, its relation to the value (same sentence without another
 quantity between - nor a subset mark or a later quantity after it - or an effective ancestor heading) and
 evidence of the role its kind names. Role mismatches (an institution as a product or disease, a date value as a
 date basis, a number as a denominator definition) and dimensions elsewhere are unsupported while the value
@@ -33,7 +33,7 @@ def answer(client, b):  # noqa: F811
     assert r.status_code == 200, r.text
     out = r.json()
     assert (out["contract_version"], out["checker_version"]) == ("extraction_consistency.v3", dimension_rules.CHECKER_VERSION)
-    assert dimension_rules.CHECKER_VERSION == "biocheck.extraction_rules.v16"  # v11 on e98b392; its tests run unchanged here
+    assert dimension_rules.CHECKER_VERSION == "biocheck.extraction_rules.v16"
     return out["items"][0]
 
 
@@ -114,4 +114,4 @@ def test_v11_reads_a_single_letter_in_the_metric_subject(client):  # noqa: F811
                    obj="Hospital B", metric="hepatitis E cases", mode="object_metric_total")
     b = synthetic(text, text, f)
     b["contract_version"] = "extraction_consistency.v3"
-    assert answer(client, b)["fields"]["unit"]["result"] == "match"  # v10 cuts at the letter E
+    assert answer(client, b)["fields"]["unit"]["result"] == "match"  # extraction_normalize.v3 cut at the letter E

@@ -1,4 +1,4 @@
-"""Checker v14 (Codex r181): a neighbour bounds a dimension's metric slot only when it is independently proven
+"""A neighbour bounds a dimension's metric slot only when it is independently proven
 and of a compatible kind; a wrong extra dimension never helps another one pass, and nothing proves itself in a
 cycle. Generic templates; the value itself stays consistent."""
 

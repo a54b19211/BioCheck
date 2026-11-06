@@ -1,4 +1,4 @@
-"""Checker v9 (v8 + extraction_normalize.v2, Codex r161): a period span is read only as the whole written period;
+"""Whole periods and head nouns (extraction_normalize.v2 and later): a period span is read only as the whole written period;
 a unit in the bound metric phrase must be its head counting noun. Generic templates, not the words of a sample."""
 
 import pytest
@@ -17,7 +17,6 @@ def en(client, prefix, period_text, unit="contacts", metric="close contacts", pe
 
 
 def test_the_checker_reads_with_normalize_v2_or_later():
-    # v9 on its own commit (58f7b08) read with extraction_normalize.v2; from v10 on, v3 (test_measurement_unit_subject)
     assert measurement_rules.CHECKER_VERSION == "biocheck.extraction_rules.v10"
     assert measurement_rules.NORMALIZE_VERSION == "extraction_normalize.v3"
 

@@ -1,4 +1,4 @@
-"""Checker v13 (Codex r179): a dimension fills a whole slot of a recognised structure - a positive label's
+"""A dimension fills a whole slot of a recognised structure - a positive label's
 value, a phrase of its own (or "在X中"), a heading line, or a slot of the metric phrase - never a part of a
 longer qualified phrase. Generic templates; the value itself stays consistent."""
 

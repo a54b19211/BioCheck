@@ -1,4 +1,4 @@
-"""Checker v12 (Codex r178): a dimension keeps its qualifying context. Its phrase - bounded by clause
+"""A dimension keeps its qualifying context. Its phrase - bounded by clause
 punctuation - may not negate or exclude it nor join it with another member; else unsupported
 dim_qualifier_dropped, the value itself unchanged. Generic templates, not the words of one sample."""
 
