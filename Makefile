@@ -29,12 +29,19 @@ lint: venv
 check: test lint check-lock
 check-install:
 	UV=$(UV) PYTHON=$(PYTHON) EXTRACTION_CONTRACT_WHEELS=$(EXTRACTION_CONTRACT_WHEELS) sh scripts/check_clean_install.sh
-# the lock is re-resolved with itself as the preference: unchanged inputs give the same pins
+# the lock is re-resolved with itself as the preference: unchanged inputs give the same pins.
+# make reports Error 1: resolved, and the lock differs (stale); Error 2: the resolution itself failed (no
+# index or network, or inputs that do not resolve), so nothing was compared - that is no reason to re-lock
 check-lock:
 	@tmp=$$(mktemp -d) && trap 'rm -rf $$tmp' EXIT && cp requirements.lock $$tmp/lock && \
-	$(UV) pip compile --quiet $(LOCK_INPUTS) $(LOCK_FLAGS) -o $$tmp/lock && \
+	if ! $(UV) pip compile --quiet $(LOCK_INPUTS) $(LOCK_FLAGS) -o $$tmp/lock; then \
+	  echo 'check-lock did not run: resolving $(LOCK_INPUTS) failed (see the uv error above: package index or' \
+	    'network unreachable - on zktest see the README for the proxy - or inputs that do not resolve);' \
+	    'requirements.lock was not compared.' >&2; \
+	  exit 2; \
+	fi; \
 	grep -v '^#' requirements.lock > $$tmp/a && grep -v '^#' $$tmp/lock > $$tmp/b && \
-	{ cmp -s $$tmp/a $$tmp/b && echo 'requirements.lock is current'; } || \
-	{ diff $$tmp/a $$tmp/b; echo 'requirements.lock is stale: run make lock'; exit 1; }
+	if cmp -s $$tmp/a $$tmp/b; then echo 'requirements.lock is current'; \
+	else diff $$tmp/a $$tmp/b; echo 'requirements.lock is stale: run make lock'; exit 1; fi
 lock:
 	$(UV) pip compile $(LOCK_INPUTS) $(LOCK_FLAGS) -o requirements.lock
