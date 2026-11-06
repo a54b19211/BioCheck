@@ -85,8 +85,8 @@ def test_a_percentage_tied_to_its_stated_ratio_is_consistent():
 
 def test_fields_of_another_group_are_rejected_not_matched_by_the_sentence():
     d = Doc(p=AGES)
-    wrong = measurement(d, "p", "成人10人中2人有效", kind="stock", value=d.field("p", "2"), unit=d.field("p", "人", n=2),
-                        denominator=d.field("p", "100"), scope=d.field("p", "儿童"))
+    wrong = measurement(d, "p", "成人10人中2人有效", kind="stock", value=d.field("p", "2"),
+                        unit=d.field("p", "人", n=2), denominator=d.field("p", "100"), scope=d.field("p", "儿童"))
     wrong["locator"], wrong["quote"] = d.span("p", AGES.rstrip("。")), AGES.rstrip("。")
     (got,) = run(d, wrong)
     assert got["status"] == "inconsistent"
@@ -105,7 +105,7 @@ def test_a_table_value_is_tied_to_its_own_column_header():
                     value=apart.field("r", "100"), unit=apart.field("r", "mg"))
     (got,) = run(apart, m)
     assert got["fields"]["metric"]["reason"] == "header_table_not_provable"
-    base = dict(object=d.field("r", "利巴韦林片"), value=d.field("r", "100"), unit=d.field("r", "mg"))
+    base = {"object": d.field("r", "利巴韦林片"), "value": d.field("r", "100"), "unit": d.field("r", "mg")}
     good = measurement(d, "r", "100mg", kind="stock", metric=d.field("r", "药品规格"), **base)
     (got,) = run(d, good)
     assert got["fields"]["metric"] == {"result": "match", "reason": "header_of_value_column",

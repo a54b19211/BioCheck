@@ -3,8 +3,8 @@ value, a phrase of its own (or "在X中"), a heading line, or a slot of the metr
 longer qualified phrase. Generic templates; the value itself stays consistent."""
 
 import pytest
-from test_measurement_rules import client  # noqa: F401
 from test_dimension_rules import answer, body
+from test_measurement_rules import client  # noqa: F401
 
 SENT = "2026年1月，{lead}医院A在湖北省共报告炭疽确诊病例10例。"
 

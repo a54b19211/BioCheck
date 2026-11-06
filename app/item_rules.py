@@ -1,5 +1,6 @@
-"""Extraction consistency (design v3 §6.2), contract v1 (POST /v1/extraction-consistency): does a processing product correspond to the fixed text it was extracted
-from? Rules only, no model calls. It checks correspondence, never whether a fact is true.
+"""Extraction consistency (design v3 §6.2), contract v1 (POST /v1/extraction-consistency): does a processing
+product correspond to the fixed text it was extracted from? Rules only, no model calls. It checks
+correspondence, never whether a fact is true.
 
 Each field of an item names its own span in one of the request's passages (bounded slices of one fixed
 artifact, each with its own offsets - a table's header and a data row are two passages, never one invented
@@ -10,6 +11,7 @@ clause), and a table metric's header must head the value's column. Whatever the 
 "unsupported", which makes the item "unchecked", never "consistent"."""
 
 import dataclasses
+import itertools
 import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 
@@ -168,7 +170,8 @@ class Passages:
         return any(m.span() == (a, b) for m in NUMBER.finditer(text))
 
     def inside(self, inner, outer):
-        return inner["passage"] == outer["passage"] and outer["start"] <= inner["start"] and inner["end"] <= outer["end"]
+        return (inner["passage"] == outer["passage"] and outer["start"] <= inner["start"]
+                and inner["end"] <= outer["end"])
 
 
 def unit_at(text, pos):
@@ -484,8 +487,9 @@ def _claim_results(item, P, fields):
     f = item["fields"]
     field = f["statement"]
     text = P.text(field["span"])
-    fields["statement"] = (outcome("match", span=field["span"]) if text is not None
-                           and squash(text) == squash(field["value"]) else outcome("mismatch", "statement_differs_from_span"))
+    fields["statement"] = (outcome("match", span=field["span"])
+                           if text is not None and squash(text) == squash(field["value"])
+                           else outcome("mismatch", "statement_differs_from_span"))
     fields["polarity"] = outcome("unsupported", "polarity_is_semantic")
     if f.get("qualifiers"):
         fields["qualifiers"] = outcome("unsupported", "qualifiers_are_semantic")
@@ -528,7 +532,7 @@ def check_request(request, primary=True):
         if p["end"] - p["start"] != len(p["text"]):
             raise ContractError(f"passages[{p['id']}]: end - start must equal the length of its text")
     ordered = sorted(passages, key=lambda p: p["start"])
-    if any(a["end"] > b["start"] for a, b in zip(ordered, ordered[1:])):
+    if any(a["end"] > b["start"] for a, b in itertools.pairwise(ordered)):
         raise ContractError("passages: ranges of one artifact must not overlap")
     if sum(len(p["text"]) for p in passages) > 20000:
         raise ContractError("passages: at most 20000 characters in all")

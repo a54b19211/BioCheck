@@ -1,4 +1,5 @@
-"""Whole periods and head nouns (extraction_normalize.v2 and later): a period span is read only as the whole written period;
+"""Whole periods and head nouns (extraction_normalize.v2 and later): a period span is read only as the whole
+written period;
 a unit in the bound metric phrase must be its head counting noun. Generic templates, not the words of a sample."""
 
 import pytest
@@ -48,8 +49,10 @@ def cn(client, text, period_text, period):  # noqa: F811
     return answer(client, synthetic(text, text, f))
 
 
-@pytest.mark.parametrize("text", ["2018年1月，医院B共报告新增病例23例。", "2018年第一季度，医院B共报告新增病例23例。",
-                                  "2018年上半年，医院B共报告新增病例23例。", "2017年至2018年，医院B共报告新增病例23例。",
+@pytest.mark.parametrize("text", ["2018年1月，医院B共报告新增病例23例。",
+                                  "2018年第一季度，医院B共报告新增病例23例。",
+                                  "2018年上半年，医院B共报告新增病例23例。",
+                                  "2017年至2018年，医院B共报告新增病例23例。",
                                   "2018年以来，医院B共报告新增病例23例。"])
 def test_a_chinese_year_that_is_part_of_another_period_is_not_the_period(client, text):  # noqa: F811
     i = text.index("2018年")

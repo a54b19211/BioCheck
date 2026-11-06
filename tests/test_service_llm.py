@@ -2,12 +2,12 @@ import json
 
 import httpx
 import pytest
+from conftest import FakeLLM, request, supported
 from fastapi.testclient import TestClient
 
 from app.core import CheckBatch, CoverageOut
 from app.llm import chat_json
 from app.service import create_app
-from conftest import FakeLLM, request, supported
 
 TOKEN = "test-token"
 
@@ -15,7 +15,10 @@ TOKEN = "test-token"
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("SERVICE_TOKEN", TOKEN)
-    return lambda llm=FakeLLM(): TestClient(create_app(llm))
+    def make(llm=None):
+        return TestClient(create_app(FakeLLM() if llm is None else llm))
+
+    return make
 
 
 def auth(token=TOKEN):

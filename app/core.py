@@ -1,7 +1,7 @@
 """generate / verify / revise. Requests are plain dicts (see service.py); the model caller is injected."""
 import json
-import re
 import os
+import re
 from typing import Literal
 
 from pydantic import BaseModel
@@ -231,7 +231,8 @@ def verify(req, llm=chat_json):
             answers.setdefault(answer.index, answer)  # indexes outside this batch are ignored
         for c in batch:
             if c["index"] in answers:
-                known = asked | {t for o in sentences if o["citations"] and o is not c for t in C.numeric_tokens(o["text"])}
+                known = asked | {t for o in sentences if o["citations"] and o is not c
+                                 for t in C.numeric_tokens(o["text"])}
                 judge(c, answers[c["index"]], refs, evidence, known)
                 if c["verdict"] == "insufficient" and c.get("scope_span") is None:
                     reads += [{"ref": r, "reason": f"第{c['index']}句缺少支持，补读{r}全文或相关段落后重核"}

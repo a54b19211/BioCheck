@@ -13,17 +13,19 @@ MAX_BATCH = 4
 # Wording a sentence needs when it cites an unverified or social-media source.
 ATTRIBUTION = re.compile(r"网传|网帖|据称|传言|帖|贴文|声称|自称|称|所述|转发|转述|转载|社媒|微博|账号|"
                          r"报道|通报|声明|来源|说法|匿名|"
-                         r"reported|post|alleged|claim|rumou?r|according to", re.I)
+                         r"reported|post|alleged|claim|rumou?r|according to", re.IGNORECASE)
 UNCERTAIN = re.compile(r"未证实|未经证实|未获证实|未核实|未经核实|无法核实|难以核实|无法核验|无可核|不可核|"
                        r"未能证实|难以证实|待核|待验证|尚待|尚需|有待|"
                        r"尚未确认|未经确认|无法确认|不能确认|无法证实|不能证实|真实性不明|存疑|疑似|假设|"
                        r"置信低|可信度低|"
-                       r"unconfirmed|unverified|alleged|hypothes", re.I)
-HYPOTHESIS = re.compile(r"假设|待验证|hypothes", re.I)
-EVENT = re.compile(r"删帖|删除|辟谣|处罚|澄清|delet|denial|penalt|censor", re.I)
+                       r"unconfirmed|unverified|alleged|hypothes", re.IGNORECASE)
+HYPOTHESIS = re.compile(r"假设|待验证|hypothes", re.IGNORECASE)
+EVENT = re.compile(r"删帖|删除|辟谣|处罚|澄清|delet|denial|penalt|censor", re.IGNORECASE)
 SOURCE_NUMBER = re.compile(r"[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")  # sources glue numbers: CI0.4%
 TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:?\d{2}|Z)?")
-DATE = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|(?:\d{4}年)?\d{1,2}月(?:\d{1,2}日)?(?:\d{1,2}时)?|\d{4}年|(?<=[至到~～-])\d{1,2}日")  # dates come from metadata; the model checks them
+# dates come from metadata; the model checks them
+DATE = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|(?:\d{4}年)?\d{1,2}月(?:\d{1,2}日)?(?:\d{1,2}时)?|\d{4}年|"
+                  r"(?<=[至到~～-])\d{1,2}日")
 
 
 def squash(text):
@@ -39,7 +41,7 @@ def citations(text):
 def paragraphs(draft):
     """(start, end) of each paragraph; paragraphs are separated by blank lines."""
     spans = []
-    for m in re.finditer(r".+?(?=\n[ \t]*\n|\Z)", draft, re.S):
+    for m in re.finditer(r".+?(?=\n[ \t]*\n|\Z)", draft, re.DOTALL):
         text = m.group()
         start, end = m.start() + len(text) - len(text.lstrip()), m.end() - (len(text) - len(text.rstrip()))
         if start < end:
@@ -150,7 +152,7 @@ def scope_span_ok(text, span):
     """The span the model says turns 'not reported' into 'not done' must be exact, unique and local."""
     return (isinstance(span, str) and span.strip() == span and span and text.count(span) == 1
             and not CITE.search(span) and not re.search(r"[。！？!?\n]", span)
-            and re.search(r"未|没|无|不|非|not|no\b|never", span, re.I) is not None)
+            and re.search(r"未|没|无|不|非|not|no\b|never", span, re.IGNORECASE) is not None)
 
 
 def scope_revision(text, span):

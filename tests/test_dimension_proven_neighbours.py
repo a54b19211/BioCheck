@@ -2,8 +2,8 @@
 and of a compatible kind; a wrong extra dimension never helps another one pass, and nothing proves itself in a
 cycle. Generic templates; the value itself stays consistent."""
 
-from test_measurement_rules import client  # noqa: F401
 from test_dimension_rules import answer, body
+from test_measurement_rules import client  # noqa: F401
 
 Q = "2026年1月，{lead}医院A在湖北省共报告{metric}10例。"
 

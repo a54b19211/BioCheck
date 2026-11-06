@@ -42,8 +42,8 @@ _BEFORE = {
     "indication": re.compile(r"(?:适应症|适应证|indication)\s*(?:为|是|[:：])\s*$", re.IGNORECASE),
 }
 _AFTER = {
-    "disease": re.compile(r"^(?:疫情|病例|确诊病例|疑似病例|确诊|疑似|患者|感染者|感染|死亡病例|\s*(?:outbreak|cases?\b|"
-                          r"infections?\b|deaths?\b))", re.IGNORECASE),
+    "disease": re.compile(r"^(?:疫情|病例|确诊病例|疑似病例|确诊|疑似|患者|感染者|感染|死亡病例|"
+                          r"\s*(?:outbreak|cases?\b|infections?\b|deaths?\b))", re.IGNORECASE),
 }
 _SELF = {
     "population": re.compile(
@@ -97,9 +97,7 @@ def role_proven(kind, text, start, end):
         return True
     if kind in _SELF and _SELF[kind].search(value):
         return True
-    if kind == "indication" and _INDICATION_FORM.search(before) and _INDICATION_TAIL.search(after):
-        return True
-    return False
+    return kind == "indication" and bool(_INDICATION_FORM.search(before)) and bool(_INDICATION_TAIL.search(after))
 
 
 _SUBSET = re.compile(r"其中|包括|包含|含|另有|以及|及|和|including|of whom|of which|among them|and\b", re.IGNORECASE)
@@ -138,8 +136,8 @@ _LABELS = {
 }
 _HEADING_MARK = re.compile(r"^\s*#{1,6}\s*")
 _VERB_BEFORE = re.compile(r"(?:报告|新增|累计|共|发现|出现|确诊|批准|注册|获批|受理|上市|投运|建成|在建|计划)$")
-_CASE_AFTER = re.compile(r"^(?:确诊病例|疑似病例|死亡病例|病例|确诊|疑似|患者|感染者|感染|疫情|死亡|\s*(?:cases?|deaths?|"
-                         r"infections?|outbreak)\b)", re.IGNORECASE)
+_CASE_AFTER = re.compile(r"^(?:确诊病例|疑似病例|死亡病例|病例|确诊|疑似|患者|感染者|感染|疫情|死亡|"
+                         r"\s*(?:cases?|deaths?|infections?|outbreak)\b)", re.IGNORECASE)
 _NUMBER_AFTER = re.compile(r"^\s*[\d０-９]")
 _FRAME = re.compile(r"^(?:在|于)?(?P<x>.+?)(?:中|内|里|之中)?$")
 
@@ -295,7 +293,8 @@ def dims_of(item, P):
 def check(request):
     """Contract v3: the measurement check with this contract's normalisation, and each stated dimension."""
     base = dict(request, items=[{k: v for k, v in i.items() if k != "dims"} for i in request["items"]])
-    out = measurement_rules.check(base, unit_head=norm.unit_subject_head_v4, output=True, period_whole=norm.period_span_whole_v5)
+    out = measurement_rules.check(base, unit_head=norm.unit_subject_head_v4, output=True,
+                                  period_whole=norm.period_span_whole_v5)
     P = item_rules.Passages(request["passages"])
     for answered, item in zip(out["items"], request["items"]):
         answered["dims"] = dims_of(item, P)

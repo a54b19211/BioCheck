@@ -1,4 +1,5 @@
-"""Print, for every matrix sample and wrong-final negative, the contract v2 status and each non-match field with its reason
+"""Print, for every matrix sample and wrong-final negative, the contract v2 status and each non-match field
+with its reason
 (a review aid: the status alone can be right for the wrong reason)."""
 import copy
 import json
@@ -6,9 +7,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from test_measurement_rules import MATRIX, ROWS, request_of  # noqa: E402
+from test_measurement_rules import MATRIX, ROWS, request_of
 
-from app import measurement_rules  # noqa: E402
+from app import measurement_rules
 
 for row in MATRIX["rows"]:
     if row["group"] == "negative" and row.get("kind") != "wrong_final_at_real_span":

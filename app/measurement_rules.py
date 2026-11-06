@@ -16,7 +16,7 @@ from extraction_contract import normalize as norm
 
 from . import item_rules
 from .claims import squash
-from .item_rules import ContractError, ends, outcome, written_as
+from .item_rules import ContractError, ends, outcome, stated, written_as
 
 CONTRACT_VERSION = "extraction_consistency.v2"
 # Bump whenever a rule, a word list, the unit table or canonical_period changes (docs/decisions/0001).
@@ -37,8 +37,8 @@ SENTENCE_END = re.compile(r"(?<=[a-z0-9\)\]%])\.\s+(?=[A-Z(\[])")
 # Word lists (versioned with CHECKER_VERSION).
 EVENT = re.compile(r"批准|获批|注册|受理|发布|报告|新增|新发|发生|上市|\b(?:recorded|reported|notified|approved|new)\b",
                    re.IGNORECASE)
-CUMULATIVE = re.compile(r"累计|累积|\bcumulative(?:ly)?\b|\byear-to-date\b|年初至今|前\d{1,2}个?月|1\s*(?:至|-|—|~)\s*\d{1,2}月",
-                        re.IGNORECASE)
+CUMULATIVE = re.compile(r"累计|累积|\bcumulative(?:ly)?\b|\byear-to-date\b|年初至今|前\d{1,2}个?月|"
+                        r"1\s*(?:至|-|—|~)\s*\d{1,2}月", re.IGNORECASE)
 AS_OF = re.compile(r"截至|截止|\bas of\b", re.IGNORECASE)
 STATE = re.compile(r"现有|正在|在研|活跃|在册|有效|\b(?:active|currently|ongoing)\b", re.IGNORECASE)
 TOTAL_WORD = re.compile(r"共|合计|总计|全部|\bin total\b", re.IGNORECASE)
@@ -51,7 +51,7 @@ CHANGE = re.compile(r"(?:下降|增长|上升|减少|提高|降低|增加|同比
 # or the end of one of the item's own field spans) - a closed list of neutral connectors
 CN_CONNECT = set("共为是有达计了：:，,、（( |")
 EN_CONNECT = {"of", "total", "is", "was", "were", "are", "reached", "reported", "recorded", "had", "has", "have",
-              "been", "with", "at", "in", "from", "and", "were", "registered", "confirmed", "notified"}
+              "been", "with", "at", "in", "from", "and", "registered", "confirmed", "notified"}
 # "no unit" is proven only by punctuation or the end of the sentence after the number (whitespace skipped)
 NO_UNIT_AFTER = re.compile(r"^\s*(?:$|[，。；;,.!?！？)）\]】|/])")
 # the quantity's own phrase must be covered by the item's fields (versioned word lists):
@@ -221,8 +221,8 @@ class Local:
         clause = text[c_start - base:c_end - base]
         cuts = [c_start + m.end() for m in SENTENCE_END.finditer(clause)]
         self.start = max([c for c in cuts if c <= vspan["start"]], default=c_start)
-        ends = [c_start + m.start() + 1 for m in SENTENCE_END.finditer(clause) if c_start + m.start() + 1 >= vspan["end"]]
-        self.end = min(ends, default=c_end)
+        stops = [c_start + m.start() + 1 for m in SENTENCE_END.finditer(clause)]
+        self.end = min([s for s in stops if s >= vspan["end"]], default=c_end)
         g_start, g_end = P.group(vspan)
         self.g_start, self.g_end = max(g_start, self.start), min(g_end, self.end)
         self.pid, self.base = pid, base
@@ -287,15 +287,16 @@ def bound_unit(P, f, unit, vspan, unit_head=None):
     starting right after the value with nothing between the value and the unit but words
     (extraction_normalize.v3 unit_subject_head); the metric span must hold its value."""
     metric = f["metric"]
-    if not item_rules.stated(metric) or len({vspan["passage"], unit["span"]["passage"], metric["span"]["passage"]}) != 1:
+    if not stated(metric) or len({vspan["passage"], unit["span"]["passage"], metric["span"]["passage"]}) != 1:
         return False
     mtext = P.text(metric["span"])
     if not written_as(mtext, metric["value"]):
         return False
     p = P.by_id[vspan["passage"]]
     b = p["start"]
-    return (unit_head or norm.unit_subject_head)(p["text"], vspan["end"] - b, unit["span"]["start"] - b, unit["span"]["end"] - b,
-                           metric["span"]["start"] - b, metric["span"]["end"] - b)
+    rule = unit_head or norm.unit_subject_head
+    return rule(p["text"], vspan["end"] - b, unit["span"]["start"] - b, unit["span"]["end"] - b,
+                metric["span"]["start"] - b, metric["span"]["end"] - b)
 
 
 def heading_ancestor(P, span, vspan):
@@ -364,9 +365,10 @@ def table_caption(P, vspan):
 # ---- the checker -------------------------------------------------------------------------------------------------
 
 def unit_after(text, pos, output=False):
-    """(spelling, start, end) of the unit at the value: a classifier, %, money or an item_rules unit right at it, or a
-    count noun after at most two listed modifiers; None. output: also an output classifier, and a magnitude with
-    the classifier after it as one unit (万支) - the magnitude is never dropped nor folded into the value."""
+    """(spelling, start, end) of the unit at the value: a classifier, %, money or an item_rules unit right at
+    it, or a count noun after at most two listed modifiers; None. output: also an output classifier, and a
+    magnitude with the classifier after it as one unit (万支) - the magnitude is never dropped nor folded into the
+    value."""
     p = pos
     while p < len(text) and text[p] == " ":
         p += 1
@@ -401,8 +403,8 @@ def cover_of(f, vspan, partners, ptext, pbase, L):
     ratio partners, and the words whose meaning a checked field carries - the cumulative marker of a claimed
     cumulative, the plan / forecast word of a claimed modality, the comparator of a claimed qualifier (a wrong
     claim fails that field). Event verbs never do: they belong in the metric."""
-    cover = [vspan] + [x["span"] for x in (f["object"], f["metric"], f["scope"], f["unit"]) if item_rules.stated(x)]
-    cover += [x["span"] for x in (f["period"], f["denominator"]) if item_rules.stated(x)] + list(partners)
+    cover = [vspan] + [x["span"] for x in (f["object"], f["metric"], f["scope"], f["unit"]) if stated(x)]
+    cover += [x["span"] for x in (f["period"], f["denominator"]) if stated(x)] + list(partners)
     markers = []
     if f["measure_kind"] == "cumulative":
         markers.append(CUMULATIVE)
@@ -477,7 +479,7 @@ class Measure:
         """The stated object, metric, scope and period spans other than `span`."""
         f = self.f
         return [x["span"] for x in (f["object"], f["metric"], f["scope"], f["period"])
-                if item_rules.stated(x) and x["span"] is not span]
+                if stated(x) and x["span"] is not span]
 
     def place(self, span):
         return own_place(self.L, self.P, span, self.vspan, self.partners, self.others(span))
@@ -504,7 +506,7 @@ def unit_result(m, unit_head):
     """A stated unit is the whole unit recognised at the value, or the head of the bound metric phrase; "no unit"
     is proven only by punctuation or the sentence end after the number."""
     unit, at_value, L = m.f["unit"], m.at_value, m.L
-    if not item_rules.stated(unit):
+    if not stated(unit):
         if at_value:
             return outcome("mismatch", "unit_written_at_value:" + at_value[0])
         if NO_UNIT_AFTER.match(m.ptext[m.after:L.end - m.pbase]):  # the rest of the sentence, whitespace skipped
@@ -564,7 +566,7 @@ def denominator_result(m):
     ratios = ratios_in(L.text(), L.start)
     own_ratios = [r for r in ratios if L.g_start <= min(r[0], r[3]) and max(r[1], r[4]) <= L.g_end]
     mine = [r for r in own_ratios if (r[0], r[1]) == ends(m.vspan)]
-    if item_rules.stated(m.f["denominator"]):
+    if stated(m.f["denominator"]):
         result, partners = _stated_denominator(m, own_ratios, mine)
     else:
         result, partners = _unknown_denominator(m, ratios, mine), []
@@ -576,7 +578,7 @@ def period_result(m, period_whole):
     """(result, the checked canonical period or None): the span is the whole written period, its canonical form
     is the stated one, and it stands in the value's group or before it in its sentence."""
     pf = m.f["period"]
-    if not item_rules.stated(pf):
+    if not stated(pf):
         return outcome("unsupported", "period_not_stated"), None
     ptxt = m.P.text(pf["span"])
     got, why = canonical_period(ptxt or "")
@@ -603,7 +605,7 @@ def object_or_metric_result(m, name):
     """The object or metric stands in the value's group, before it in its sentence, in its nearest effective
     heading, or is the header of the value's table column."""
     x = m.f[name]
-    if not item_rules.stated(x):
+    if not stated(x):
         return outcome("unsupported", f"unknown_{name}_not_rule_checkable")
     text = m.P.text(x["span"])
     if not written_as(text, x["value"]):
@@ -631,7 +633,7 @@ def _blank_covered(text, offset, covered):
 
 def _stated_scope(m, item_id):
     sf = m.f["scope"]
-    if not item_rules.stated(sf):
+    if not stated(sf):
         raise ContractError(f"items[{item_id}]: scope_mode stated needs a stated scope")
     text = m.P.text(sf["span"])
     if not written_as(text, sf["value"]):
@@ -647,15 +649,15 @@ def _object_metric_total(m, item_id):
     no restriction outside the fields - nor in an effective heading over the value (# 湖北省内) unless that
     heading names the object itself and nothing narrower."""
     f, L = m.f, m.L
-    if item_rules.stated(f["scope"]):
+    if stated(f["scope"]):
         raise ContractError(f"items[{item_id}]: scope_mode object_metric_total states no scope")
-    covered = [x["span"] for x in (f["object"], f["metric"]) if item_rules.stated(x)] + [m.vspan]
-    if f["period"] and item_rules.stated(f["period"]):
+    covered = [x["span"] for x in (f["object"], f["metric"]) if stated(x)] + [m.vspan]
+    if f["period"] and stated(f["period"]):
         covered.append(f["period"]["span"])
     rest = _blank_covered(L.text(L.g_start, L.g_end), L.g_start, covered)
     lead_rest = _blank_covered(L.text(L.start, L.g_start), L.start, covered)
     total = TOTAL_WORD.search(rest)
-    obj = squash(f["object"]["value"]) if item_rules.stated(f["object"]) else ""
+    obj = squash(f["object"]["value"]) if stated(f["object"]) else ""
     if m.fields["object"]["result"] != "match" or m.fields["metric"]["result"] != "match":
         return outcome("unsupported", "object_metric_total_needs_checked_object_and_metric")
     if not total:
@@ -712,7 +714,7 @@ def _rate(m):
     before = m.ptext[max(0, m.vspan["start"] - m.pbase - 12):m.vspan["start"] - m.pbase]
     if CHANGE.search(before):
         return outcome("unsupported", "percent_change")
-    ratio_shown = m.fields["denominator"]["result"] == "match" and item_rules.stated(m.f["denominator"])
+    ratio_shown = m.fields["denominator"]["result"] == "match" and stated(m.f["denominator"])
     if m.fields["value"]["result"] == "match" and (m.percent_written or ratio_shown):
         return outcome("match", "rate_with_percentage_or_ratio")
     return outcome("unsupported", "measure_kind_not_rule_checkable")
@@ -744,7 +746,7 @@ def _flow(m, output):
 
 def _cumulative(m, output):
     pf = m.f["period"]
-    own = m.vgroup + " " + ((m.P.text(pf["span"]) or "") if item_rules.stated(pf) else "")
+    own = m.vgroup + " " + ((m.P.text(pf["span"]) or "") if stated(pf) else "")
     if CUMULATIVE.search(own):
         return outcome("match", "cumulative_wording")
     return outcome("unsupported", "no_cumulative_wording")
@@ -801,8 +803,8 @@ def _exact_by_position(m, gap):
     """Exactness is proven, not presumed: what stands right before the value is the start of its group, the end
     of one of the item's own field spans or a neutral connector."""
     f = m.f
-    field_ends = {x["span"]["end"] for x in (f["object"], f["metric"], f["scope"]) if item_rules.stated(x)}
-    if item_rules.stated(f["period"]):
+    field_ends = {x["span"]["end"] for x in (f["object"], f["metric"], f["scope"]) if stated(x)}
+    if stated(f["period"]):
         field_ends.add(f["period"]["span"]["end"])
     word = re.search(r"([A-Za-z-]+)$", gap)
     if not gap.strip(" ，,、（(|") or m.L.g_start + len(gap) in field_ends or gap[-1] in CN_CONNECT \

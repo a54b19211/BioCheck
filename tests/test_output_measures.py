@@ -3,8 +3,8 @@ unit kept whole, output a flow only as actual output; contract v2 unchanged, and
 its site still unproven."""
 
 import pytest
-from test_measurement_rules import at, client, fields_for, synthetic  # noqa: F401
 from test_dimension_rules import answer
+from test_measurement_rules import at, client, fields_for, synthetic  # noqa: F401
 
 Q1 = {"type": "interval", "precision": "quarter", "value": "2026Q1"}
 HEAD = "## 甲公司\n\n### 按报告期统计\n\n"  # the entity a section of its own, the basis a heading

@@ -1,9 +1,9 @@
 """Contract v3, business dimensions: the measurement's fields and status as contract v2 answers them, and each
-stated dimension judged on three things from the text - its literal, its relation to the value (same sentence without another
-quantity between - nor a subset mark or a later quantity after it - or an effective ancestor heading) and
-evidence of the role its kind names. Role mismatches (an institution as a product or disease, a date value as a
-date basis, a number as a denominator definition) and dimensions elsewhere are unsupported while the value
-itself stays consistent."""
+stated dimension judged on three things from the text - its literal, its relation to the value (same sentence
+without another quantity between - nor a subset mark or a later quantity after it - or an effective ancestor
+heading) and evidence of the role its kind names. Role mismatches (an institution as a product or disease, a
+date value as a date basis, a number as a denominator definition) and dimensions elsewhere are unsupported while
+the value itself stays consistent."""
 
 import pytest
 from test_measurement_rules import TOKEN, at, client, fields_for, synthetic  # noqa: F401
@@ -32,7 +32,8 @@ def answer(client, b):  # noqa: F811
     r = post(client, b)
     assert r.status_code == 200, r.text
     out = r.json()
-    assert (out["contract_version"], out["checker_version"]) == ("extraction_consistency.v3", dimension_rules.CHECKER_VERSION)
+    assert out["contract_version"] == "extraction_consistency.v3"
+    assert out["checker_version"] == dimension_rules.CHECKER_VERSION
     assert dimension_rules.CHECKER_VERSION == "biocheck.extraction_rules.v16"
     return out["items"][0]
 
@@ -62,8 +63,8 @@ def test_dimensions_written_with_their_role_by_the_value_match_and_the_status_is
     ("denominator_definition", "10"),  # a number is no denominator definition
     ("population", "炭疽"),  # a disease is no population
 ])
-def test_a_role_without_evidence_in_the_text_is_unsupported_and_the_value_stays_consistent(client, kind,
-                                                                                           value):  # noqa: F811
+def test_a_role_without_evidence_in_the_text_is_unsupported_and_the_value_stays_consistent(client, kind,  # noqa: F811
+                                                                                           value):
     item = answer(client, body(PLAIN, PLAIN[:-1], [(kind, value)]))
     assert item["status"] == "consistent"
     assert (item["dims"][kind]["result"], item["dims"][kind]["reason"]) == ("unsupported", "dim_kind_not_proven")

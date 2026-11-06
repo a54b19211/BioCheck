@@ -283,8 +283,9 @@ class PeriodValue(Strict):
         if self.value is not None:
             if self.start is not None or self.end is not None or not re.match(form, self.value):
                 raise ValueError("a period has a value of its precision, or start and end, not both")
-        elif self.start is None or self.end is None or self.type != "interval" or self.precision not in ("day", "month") \
-                or not re.match(form, self.start) or not re.match(form, self.end):
+        elif (self.start is None or self.end is None or self.type != "interval"
+              or self.precision not in ("day", "month")
+              or not re.match(form, self.start) or not re.match(form, self.end)):
             raise ValueError("a period range is an interval of day or month precision with start and end")
         return self
 
@@ -306,7 +307,8 @@ def _decimal(field, name):
         v = field.value or ""
         digits = sum(c.isdigit() for c in v)
         decimals = len(v.split(".")[1]) if "." in v else 0
-        if not re.match(DECIMAL, v) or digits > measurement_rules.MAX_DIGITS or decimals > measurement_rules.MAX_DECIMALS:
+        if (not re.match(DECIMAL, v) or digits > measurement_rules.MAX_DIGITS
+                or decimals > measurement_rules.MAX_DECIMALS):
             raise ValueError(f"{name}: a canonical decimal string of at most 18 digits and 6 decimals")
 
 

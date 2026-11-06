@@ -29,7 +29,8 @@ class FakeLLM:
     def __call__(self, stage, system, payload, model_cls, **options):
         self.payloads.append((stage, copy.deepcopy(payload), options))
         call = {"stage": stage, "model": "fake", "finish_reason": "stop", "usage": {}, "seconds": 0.0, "error": None}
-        answer = self.answers.get(stage, lambda p: {"verdict": "complete", "reason": "ok"} if stage == "verify_coverage" else None)
+        default = (lambda p: {"verdict": "complete", "reason": "ok"}) if stage == "verify_coverage" else None
+        answer = self.answers.get(stage, default)
         data = answer(payload) if answer else None
         if data is None:
             return None, dict(call, error="invalid_output")

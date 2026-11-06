@@ -66,15 +66,21 @@ def request_of(row, final=None):
                         "raw_sha256": row["raw_sha256"], "is_demo": row["is_demo"],
                         "artifact": {"processor_version": row["processor"], "text_sha256": row["text_sha256"]}},
             "passages": [{"id": "p1", "role": "primary", "start": c0, "end": c1, "text": row["clause"]}],
-            "items": [{"id": row["id"], "kind": "measurement", "producer": {"name": "bioradar.triage", "version": "test"},
+            "items": [{"id": row["id"], "kind": "measurement",
+                       "producer": {"name": "bioradar.triage", "version": "test"},
                        "locator": {"passage": "p1", "start": a, "end": b}, "quote": row["sentence"], "fields": fields}]}
+
+
+def not_matched(item):
+    return {k: v for k, v in item["fields"].items() if v["result"] != "match"}
 
 
 def answer(client, body):
     r = post(client, body)
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["contract_version"] == "extraction_consistency.v2" and out["checker_version"] == measurement_rules.CHECKER_VERSION
+    assert out["contract_version"] == "extraction_consistency.v2"
+    assert out["checker_version"] == measurement_rules.CHECKER_VERSION
     assert out["llm_calls"] == []
     return out["items"][0]
 
@@ -87,7 +93,7 @@ def test_real_samples_get_their_expected_status(client, sid):
     row = ROWS[sid]
     item = answer(client, request_of(row))
     assert set(item["fields"]) == {"locator", *measurement_rules.FIELDS}
-    assert item["status"] == row["expected"]["status"], (sid, {k: v for k, v in item["fields"].items() if v["result"] != "match"})
+    assert item["status"] == row["expected"]["status"], (sid, not_matched(item))
 
 
 WRONG = [r["id"] for r in MATRIX["rows"] if r["group"] == "negative" and r["kind"] == "wrong_final_at_real_span"]
@@ -101,7 +107,7 @@ def test_a_wrong_final_value_at_a_real_span_is_never_consistent(client, nid):
     for key, value in neg["change"].items():
         final[key.split(".", 1)[1]] = value
     item = answer(client, request_of(base, final))
-    assert item["status"] == neg["expected"]["status"], (nid, {k: v for k, v in item["fields"].items() if v["result"] != "match"})
+    assert item["status"] == neg["expected"]["status"], (nid, not_matched(item))
 
 
 def test_monthly_flow_series_points_and_their_evidence(client):
@@ -145,10 +151,14 @@ def at(text, piece, n=0, start=1000):
 
 def fields_for(text, value, unit, period_text, period, kind="flow", obj=None, metric=None, scope=None,
                mode="unknown", qualifier="exact", modality="actual", n=0):
-    st = lambda piece, val=None, k=0: {"state": "stated", "value": val or piece, "span": at(text, piece, k)}  # noqa: E731
-    return {"object": st(obj) if obj else {"state": "unknown"}, "metric": st(metric) if metric else {"state": "unknown"},
+    def st(piece, val=None, k=0):
+        return {"state": "stated", "value": val or piece, "span": at(text, piece, k)}
+
+    return {"object": st(obj) if obj else {"state": "unknown"},
+            "metric": st(metric) if metric else {"state": "unknown"},
             "value": st(value, None, n), "unit": st(unit) if unit else {"state": "unknown"},
-            "period": {"state": "stated", "value": period, "span": at(text, period_text)} if period_text else {"state": "unknown"},
+            "period": ({"state": "stated", "value": period, "span": at(text, period_text)} if period_text
+                       else {"state": "unknown"}),
             "scope": st(scope) if scope else {"state": "unknown"}, "scope_mode": "stated" if scope else mode,
             "denominator": {"state": "unknown"}, "measure_kind": kind, "qualifier": qualifier, "modality": modality}
 
@@ -186,25 +196,31 @@ def test_a_heading_listing_several_places_proves_no_scope(client):
 
 def test_a_planned_heading_overrules_an_actual_sentence(client):
     text = "# 2026年建设计划\n\n2026年4月，国家药监局共批准注册医疗器械产品318个。\n"
-    base = dict(obj="国家药监局", metric="批准注册医疗器械产品", mode="object_metric_total")
+    base = {"obj": "国家药监局", "metric": "批准注册医疗器械产品", "mode": "object_metric_total"}
     period = {"type": "interval", "precision": "month", "value": "2026-04"}
     actual = fields_for(text, "318", "个", "2026年4月", period, **base)
-    assert answer(client, synthetic(text, "国家药监局共批准注册医疗器械产品318个", actual))["fields"]["modality"]["result"] == "mismatch"
+    got = answer(client, synthetic(text, "国家药监局共批准注册医疗器械产品318个", actual))
+    assert got["fields"]["modality"]["result"] == "mismatch"
     planned = fields_for(text, "318", "个", "2026年4月", period, modality="planned", **base)
-    assert answer(client, synthetic(text, "国家药监局共批准注册医疗器械产品318个", planned))["fields"]["modality"]["result"] == "match"
+    got = answer(client, synthetic(text, "国家药监局共批准注册医疗器械产品318个", planned))
+    assert got["fields"]["modality"]["result"] == "match"
 
 
 def test_point_and_interval_of_the_same_month_differ():
     point, _ = measurement_rules.canonical_period("截至2023年12月")
     interval, _ = measurement_rules.canonical_period("2023年12月")
     assert point["value"] == interval["value"] == "2023-12" and point != interval
-    assert measurement_rules.canonical_period("截至2020年12月31日")[0] == {"type": "point", "precision": "day", "value": "2020-12-31"}
+    point = {"type": "point", "precision": "day", "value": "2020-12-31"}
+    assert measurement_rules.canonical_period("截至2020年12月31日")[0] == point
 
 
 @pytest.mark.parametrize("text,expected", [
-    ("22 December to 11 January 2021", {"type": "interval", "precision": "day", "start": "2020-12-22", "end": "2021-01-11"}),
-    ("from September 2022 to January 2023", {"type": "interval", "precision": "month", "start": "2022-09", "end": "2023-01"}),
-    ("1 February to 29 February 2024", {"type": "interval", "precision": "day", "start": "2024-02-01", "end": "2024-02-29"}),
+    ("22 December to 11 January 2021",
+     {"type": "interval", "precision": "day", "start": "2020-12-22", "end": "2021-01-11"}),
+    ("from September 2022 to January 2023",
+     {"type": "interval", "precision": "month", "start": "2022-09", "end": "2023-01"}),
+    ("1 February to 29 February 2024",
+     {"type": "interval", "precision": "day", "start": "2024-02-01", "end": "2024-02-29"}),
     ("2023年前5月", {"type": "interval", "precision": "month", "start": "2023-01", "end": "2023-05"}),
     ("2021年上半年", {"type": "interval", "precision": "half", "value": "2021H1"}),
     ("2025年第三季度", {"type": "interval", "precision": "quarter", "value": "2025Q3"}),
@@ -224,10 +240,13 @@ def test_periods_refused(text, reason):
 def test_past_n_days_must_match_the_stated_dates(client):
     text = "In the past 21 days (22 January to 11 February 2020), 12 confirmed cases were reported in Beni."
     period = {"type": "interval", "precision": "day", "start": "2020-01-22", "end": "2020-02-11"}
-    good = fields_for(text, "12", "cases", "22 January to 11 February 2020", period, scope="Beni", metric="confirmed cases")
-    assert answer(client, synthetic(text, "12 confirmed cases were reported in Beni", good))["fields"]["period"]["result"] == "match"
+    good = fields_for(text, "12", "cases", "22 January to 11 February 2020", period, scope="Beni",
+                      metric="confirmed cases")
+    got = answer(client, synthetic(text, "12 confirmed cases were reported in Beni", good))
+    assert got["fields"]["period"]["result"] == "match"
     wrong = text.replace("past 21 days", "past 20 days")
-    bad = fields_for(wrong, "12", "cases", "22 January to 11 February 2020", period, scope="Beni", metric="confirmed cases")
+    bad = fields_for(wrong, "12", "cases", "22 January to 11 February 2020", period, scope="Beni",
+                     metric="confirmed cases")
     item = answer(client, synthetic(wrong, "12 confirmed cases were reported in Beni", bad))
     assert item["fields"]["period"]["reason"] == "past_n_days_disagrees_with_dates"
 
@@ -252,7 +271,8 @@ def test_a_monthly_stock_is_not_a_flow(client):
 
 def test_a_total_word_alone_is_not_cumulation(client):
     text = "As of 19 May 2020, ICH reported a total of 3462 cases."
-    f = fields_for(text, "3462", "cases", "As of 19 May 2020", {"type": "point", "precision": "day", "value": "2020-05-19"},
+    as_of = {"type": "point", "precision": "day", "value": "2020-05-19"}
+    f = fields_for(text, "3462", "cases", "As of 19 May 2020", as_of,
                    kind="cumulative", obj="ICH")
     item = answer(client, synthetic(text, "a total of 3462 cases", f))
     assert item["fields"]["measure_kind"]["reason"] == "no_cumulative_wording"
@@ -387,7 +407,8 @@ def test_a_unit_span_is_the_whole_unit_and_nothing_more(client):
 def test_unrecognized_words_after_a_value_prove_no_unitlessness(client):
     text = "From September 2022 to January 2023, WHO reported 42 EVD cases in Beni."
     period = {"type": "interval", "precision": "month", "start": "2022-09", "end": "2023-01"}
-    f = fields_for(text, "42", "", "September 2022 to January 2023", period, obj="WHO", metric="EVD cases", scope="Beni")
+    f = fields_for(text, "42", "", "September 2022 to January 2023", period, obj="WHO", metric="EVD cases",
+                   scope="Beni")
     item = answer(client, synthetic(text, text, f))
     assert item["fields"]["unit"]["result"] != "match" and item["status"] != "consistent"
 
@@ -467,7 +488,8 @@ def test_a_marker_of_a_claimed_kind_is_covered_but_an_event_verb_is_not(client):
                                           ("had never been recorded", False), ("were not reported", False)])
 def test_a_negated_predicate_is_no_event(client, predicate, ok):
     period = {"type": "interval", "precision": "month", "start": "2022-09", "end": "2023-01"}
-    text = f"From September 2022 to January 2023, 42 suspected cases of anthrax in humans {predicate} at the Dengeza Health Post."
+    text = (f"From September 2022 to January 2023, 42 suspected cases of anthrax in humans {predicate} at the "
+            "Dengeza Health Post.")
     f = fields_for(text, "42", "cases", "September 2022 to January 2023", period, obj="anthrax",
                    metric="suspected cases of anthrax in humans", scope="Dengeza Health Post")
     item = answer(client, synthetic(text, text, f))
@@ -476,7 +498,8 @@ def test_a_negated_predicate_is_no_event(client, predicate, ok):
 
 def test_a_chinese_negated_predicate_is_no_event(client):
     text = "2026年4月，国家药监局未批准注册医疗器械产品318个。"
-    assert answer(client, cn(text, metric="批准注册医疗器械产品"))["fields"]["measure_kind"]["reason"].startswith("negated_predicate")
+    got = answer(client, cn(text, metric="批准注册医疗器械产品"))
+    assert got["fields"]["measure_kind"]["reason"].startswith("negated_predicate")
 
 
 def test_a_negation_inside_a_field_is_part_of_that_field(client):

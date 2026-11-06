@@ -39,7 +39,8 @@ def test_numeric_hints_list_only_numbers_missing_from_cited_text():
 def test_scope_revision_wraps_only_the_over_reaching_assertion():
     text = "该研究未进行随机化，ORR为32%[E1]。"
     assert C.scope_span_ok(text, "未进行随机化")
-    assert C.scope_revision(text, "未进行随机化") == "该研究本次引用材料不足以确认“未进行随机化”这一说法，ORR为32%[E1]。"
+    assert C.scope_revision(text, "未进行随机化") == (
+        "该研究本次引用材料不足以确认“未进行随机化”这一说法，ORR为32%[E1]。")
     assert not C.scope_span_ok(text, "ORR为32%")          # not a negative assertion
     assert not C.scope_span_ok(text, "ORR为32%[E1]")      # contains a citation
     assert not C.scope_span_ok(text, "未做的事")           # not in the sentence
@@ -71,7 +72,8 @@ def test_product_codes_are_not_numbers_to_check():
 
 
 def test_a_corrected_source_is_flagged_only_until_its_correction_is_read():
-    evidence = {"E1": {"source_kind": "official", "verified": True}, "E4": {"source_kind": "official", "verified": True}}
+    evidence = {"E1": {"source_kind": "official", "verified": True},
+                "E4": {"source_kind": "official", "verified": True}}
     updates = [{"target": "E1", "replacement": "E4", "kind": "correction"}]
     # Read: whether a changed part is used as current is the model's call; unchanged content may stand alone.
     assert C.source_use_problems("初稿披露医护患病未证实[E1]。", ["E1"], evidence, updates)[0] == []
