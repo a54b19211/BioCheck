@@ -30,7 +30,10 @@ CONTRACT_VERSION = "extraction_consistency.v3"
 # as released on its own commit (1c08f7c)
 # v14 (Codex r181): only independently proven, kind-compatible neighbours bound a metric slot (composite below);
 # v13 stays as released on its own commit (978af0a)
-CHECKER_VERSION = "biocheck.extraction_rules.v14"
+# v15 (Codex 783, T-24 industrial): a reporting-period date basis written as such, a magnitude-and-classifier
+# unit kept whole, output a flow only as actual output (extraction_v4 output=True); v14 stays as released on its
+# own commit (2b395ae)
+CHECKER_VERSION = "biocheck.extraction_rules.v15"
 NORMALIZE_VERSION = norm.NORMALIZE_V4
 
 _LABEL = r"[:：]\s*$"
@@ -57,7 +60,9 @@ _SELF = {
     ),
     "date_basis": re.compile(
         r"^(?:按|以)?(?:报告|发病|采样|入院|诊断|死亡|就诊|检测)(?:日期|日|时间)(?:统计|计)?$|"
-        r"^by (?:date of )?(?:report(?:ing)?|onset|sampling|admission|diagnosis|death)(?: date)?$",
+        r"^by (?:date of )?(?:report(?:ing)?|onset|sampling|admission|diagnosis|death)(?: date)?$|"
+        # v15: a reporting period stated as the basis (never a bare 报告期, never a production or shipping date)
+        r"^(?:按|以)报告期(?:统计|计)?$|^by reporting period$",
         re.IGNORECASE,
     ),
     "denominator_definition": re.compile(
@@ -278,7 +283,7 @@ def dims_of(item, P):
 def check(request):
     """Contract v3: v10's measurement check with extraction_normalize.v4, and each stated dimension."""
     base = dict(request, items=[{k: v for k, v in i.items() if k != "dims"} for i in request["items"]])
-    out = v10.check(base, unit_head=norm.unit_subject_head_v4)
+    out = v10.check(base, unit_head=norm.unit_subject_head_v4, output=True)
     P = v3.Passages(request["passages"])
     for answered, item in zip(out["items"], request["items"]):
         answered["dims"] = dims_of(item, P)

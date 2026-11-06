@@ -117,6 +117,13 @@ LIST_SEPARATOR = re.compile(r"、|,|，|\band\b|/|&")
 CLASSIFIERS = ("品种", "品规", "批次", "个", "件", "批", "例", "人", "家", "项", "条", "种")
 COUNT_NOUNS = ("cases", "deaths", "patients", "participants", "provinces", "samples")
 MONEY = ("亿元", "万元", "元")
+# checker v15 (Codex 783), only when check(output=True), contract v3: units of output - a classifier, a magnitude
+# before it kept whole with it (120万支: value 120, unit 万支) - and output wording, a flow only as actual output
+OUTPUT_CLASSIFIERS = ("人份", "支", "片", "粒", "瓶", "袋", "盒", "剂", "吨", "台", "套")
+MAGNITUDES = ("千万", "百万", "十万", "亿", "万", "千")
+OUTPUT = re.compile(r"产出|产量|生产|出产|\b(?:output|produced|production)\b", re.IGNORECASE)
+CAPACITY = re.compile(r"产能|生产能力|设计能力|\bcapacity\b", re.IGNORECASE)
+INVENTORY = re.compile(r"库存|存货|结存|\binventor(?:y|ies)\b|\bstocks?\b", re.IGNORECASE)
 MODIFIERS = ("suspected", "confirmed", "probable", "laboratory-confirmed", "new", "human", "associated")
 
 
@@ -351,12 +358,21 @@ def table_caption(P, vspan):
 
 # ---- the checker -------------------------------------------------------------------------------------------------
 
-def unit_after(text, pos):
+def unit_after(text, pos, output=False):
     """(spelling, start, end) of the unit at the value: a classifier, %, money or a v3 unit right at it, or a count
-    noun after at most two listed modifiers; None."""
+    noun after at most two listed modifiers; None. output (v15): also an output classifier, and a magnitude with
+    the classifier after it as one unit (万支) - the magnitude is never dropped nor folded into the value."""
     p = pos
     while p < len(text) and text[p] == " ":
         p += 1
+    if output:
+        for mag in MAGNITUDES + ("",):
+            if not text.startswith(mag, p):
+                continue
+            for spelling in sorted(OUTPUT_CLASSIFIERS + CLASSIFIERS, key=len, reverse=True):
+                q = p + len(mag)
+                if text.startswith(spelling, q) and not text.startswith("个月", q):
+                    return mag + spelling, p, q + len(spelling)
     for spelling in sorted(CLASSIFIERS + MONEY, key=len, reverse=True):
         if text.startswith(spelling, p) and not text.startswith("个月", p):
             return spelling, p, p + len(spelling)
@@ -416,7 +432,7 @@ def own_place(L, P, span, vspan, partners, exclude):
     return "outside"
 
 
-def check_v4(item, P, unit_head=None):
+def check_v4(item, P, unit_head=None, output=False):
     """Field results of one measurement item under v4 (locator checked first, as v3)."""
     fields = {}
     quote = P.text(item["locator"])
@@ -454,7 +470,7 @@ def check_v4(item, P, unit_head=None):
     ptext, pbase = L.passage["text"], L.base
     after = vspan["end"] - pbase
     # unit
-    at_value = unit_after(ptext, after)
+    at_value = unit_after(ptext, after, output)
     unit = f["unit"]
     if v3.stated(unit):
         utext = P.text(unit["span"])
@@ -660,6 +676,16 @@ def check_v4(item, P, unit_head=None):
             fields["measure_kind"] = outcome("unsupported", "cumulative_or_as_of_wording")
         elif EVENT.search(vgroup):
             fields["measure_kind"] = outcome("match", "event_in_interval")
+        elif output and (OUTPUT.search(vgroup) or CAPACITY.search(vgroup) or INVENTORY.search(vgroup)):
+            # output in an interval is a flow only as actual output (v15): never a plan, a capacity or a stock
+            if PLANNED.search(vgroup):
+                fields["measure_kind"] = outcome("unsupported", "output_planned_not_actual")
+            elif CAPACITY.search(vgroup):
+                fields["measure_kind"] = outcome("unsupported", "output_capacity_not_actual")
+            elif INVENTORY.search(vgroup):
+                fields["measure_kind"] = outcome("mismatch", "inventory_is_not_a_flow")
+            else:
+                fields["measure_kind"] = outcome("match", "actual_output_in_interval")
         else:
             fields["measure_kind"] = outcome("unsupported", "no_event_wording")
     elif kind == "cumulative":
@@ -717,7 +743,7 @@ def check_v4(item, P, unit_head=None):
     return fields
 
 
-def check(request, unit_head=None):
+def check(request, unit_head=None, output=False):
     """Contract v2: measurement items only. Raises ContractError on a contract break. unit_head: the rule for
     the unit in the bound metric phrase (default extraction_normalize.v3, v10's; checker v11 passes v4's)."""
     passages = request["passages"]
@@ -736,7 +762,7 @@ def check(request, unit_head=None):
     P = v3.Passages(passages)
     items = []
     for item in request["items"]:
-        fields = check_v4(item, P, unit_head)
+        fields = check_v4(item, P, unit_head, output)
         items.append({"id": item["id"], "kind": item["kind"], "status": v3.status(fields), "fields": fields})
     counts = {s: sum(1 for i in items if i["status"] == s) for s in ("consistent", "inconsistent", "unchecked")}
     return {"contract_version": CONTRACT_VERSION, "checker_version": CHECKER_VERSION,
