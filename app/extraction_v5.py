@@ -24,7 +24,9 @@ from . import extraction_v4 as v10
 from .extraction import outcome, squash
 
 CONTRACT_VERSION = "extraction_consistency.v3"
-CHECKER_VERSION = "biocheck.extraction_rules.v11"
+# v12 (Codex r178): a dimension keeps its qualifying context - its phrase may not negate or exclude it, nor join
+# it with another member; v11 stays as released on its own commit (e98b392)
+CHECKER_VERSION = "biocheck.extraction_rules.v12"
 NORMALIZE_VERSION = norm.NORMALIZE_V4
 
 _LABEL = r"[:：]\s*$"
@@ -99,6 +101,27 @@ def role_proven(kind, text, start, end):
 _SUBSET = re.compile(r"其中|包括|包含|含|另有|以及|及|和|including|of whom|of which|among them|and\b", re.IGNORECASE)
 
 
+# the phrase a dimension stands in: bounded by clause punctuation and line ends ("、" joins, it does not bound)
+_PHRASE_END = re.compile(r"[，。；;,:：()（）\n!?！？]")
+_NEGATION = re.compile(r"非|不|未|无|排除|除去|去除|剔除|除了|除|不含|不包括|不计|以外|之外|"
+                       r"\bnon-?|\bnot\b|\bno\b|excluding|except|other than|without", re.IGNORECASE)
+_JOIN_LEFT = re.compile(r"(?:和|与|及|、|或|以及|跟|同|\band|\bor|\bplus|&|/)\s*$", re.IGNORECASE)
+_JOIN_RIGHT = re.compile(r"^\s*(?:和|与|及|、|或|以及|跟|同|以外|之外|除外|外|and\b|or\b|plus\b|&|/)", re.IGNORECASE)
+
+
+def qualifier_kept(text, start, end):
+    """Whether text[start:end] is its phrase's own member as written: nothing in the phrase before it negates or
+    excludes it, and no conjunction joins it with another member on either side (Codex r178)."""
+    left = text[:start]
+    cut = max((m.end() for m in _PHRASE_END.finditer(left)), default=0)
+    before = left[cut:]
+    m = _PHRASE_END.search(text, end)
+    after = text[end:m.start() if m else len(text)]
+    if _NEGATION.search(before) or _NEGATION.match(after.strip()):
+        return False
+    return not (_JOIN_LEFT.search(before) or _JOIN_RIGHT.search(after))
+
+
 def related(L, P, span, vspan):
     """How the dimension span stands to the value, or None: the value's own sentence with no other quantity
     between them, or an effective ancestor heading. After the value, a subset mark between them, or another
@@ -139,6 +162,10 @@ def dims_of(item, P):
         p = P.by_id[span["passage"]]
         if not role_proven(d["kind"], p["text"], span["start"] - p["start"], span["end"] - p["start"]):
             out[d["kind"]] = outcome("unsupported", "dim_kind_not_proven")  # the role first: never implied
+            continue
+        if not qualifier_kept(p["text"], span["start"] - p["start"], span["end"] - p["start"]):
+            # negated, excluded or one member of a joined group: not the value as written (v12)
+            out[d["kind"]] = outcome("unsupported", "dim_qualifier_dropped")
             continue
         place = related(L, P, span, vspan)
         if place is None:

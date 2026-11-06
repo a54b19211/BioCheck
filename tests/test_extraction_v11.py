@@ -33,6 +33,7 @@ def answer(client, b):  # noqa: F811
     assert r.status_code == 200, r.text
     out = r.json()
     assert (out["contract_version"], out["checker_version"]) == ("extraction_consistency.v3", v11.CHECKER_VERSION)
+    assert v11.CHECKER_VERSION == "biocheck.extraction_rules.v12"  # v11 on e98b392; its tests run unchanged here
     return out["items"][0]
 
 
