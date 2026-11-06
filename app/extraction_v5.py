@@ -28,7 +28,9 @@ CONTRACT_VERSION = "extraction_consistency.v3"
 # it with another member; v11 stays as released on its own commit (e98b392)
 # v13 (Codex r179): a dimension must fill a whole slot of a recognised structure (whole_phrase below); v12 stays
 # as released on its own commit (1c08f7c)
-CHECKER_VERSION = "biocheck.extraction_rules.v13"
+# v14 (Codex r181): only independently proven, kind-compatible neighbours bound a metric slot (composite below);
+# v13 stays as released on its own commit (978af0a)
+CHECKER_VERSION = "biocheck.extraction_rules.v14"
 NORMALIZE_VERSION = norm.NORMALIZE_V4
 
 _LABEL = r"[:：]\s*$"
@@ -154,9 +156,15 @@ def _bounds(text, start, end):
     return cut, (m.start() if m else len(text)), (text[cut - 1] if cut else "")
 
 
-def whole_phrase(kind, text, start, end, others):
-    """Whether text[start:end] fills a whole slot of a recognised structure for `kind`. others: the [start, end)
-    of the item's other stated dimensions in the same passage (a metric slot may border one)."""
+# the composites of the metric phrase: the kinds a run may hold, in order, and what must follow it
+_CASE_RUN = ("population", "disease")
+_NUMBER_RUN = ("product_or_class", "stage")
+
+
+def whole_phrase(kind, text, start, end, members):
+    """Whether text[start:end] fills a whole slot of a recognised structure for `kind`. members: (start, end,
+    kind) of the item's OTHER dimensions in the same passage that are independently proven (v14) - the only
+    ones a metric slot may border."""
     ps, pe, mark = _bounds(text, start, end)
     phrase = text[ps:pe].strip()
     value = text[start:end].strip()
@@ -177,18 +185,30 @@ def whole_phrase(kind, text, start, end, others):
     frame = _FRAME.match(phrase)
     if phrase == value or (frame and frame.group("x") == value and kind == "population"):
         return bool(form and form.search(value))  # a phrase of its own, or "在X中": the whole has the form
-    # a slot of the metric phrase
-    before, after = text[ps:start], text[end:pe]
-    ends_other = any(b == start for _a, b in others)
-    starts_other = any(a == end for a, _b in others)
-    if not (_VERB_BEFORE.search(before) or ends_other):
+    # a slot of the metric phrase: the contiguous run of independently proven members holding this span
+    run = [(start, end, kind)]
+    while True:
+        left = next((m for m in members if m[1] == run[0][0] and m not in run), None)
+        if left is None:
+            break
+        run.insert(0, left)
+    while True:
+        right = next((m for m in members if m[0] == run[-1][1] and m not in run), None)
+        if right is None:
+            break
+        run.append(right)
+    kinds = [k for _a, _b, k in run]
+    before, after = text[ps:run[0][0]], text[run[-1][1]:pe]
+    if not _VERB_BEFORE.search(before):
         return False
-    if kind == "disease":
-        return bool(_CASE_AFTER.match(after) or starts_other)
-    if kind == "population":
-        return bool(form and form.search(value)) and bool(_CASE_AFTER.match(after) or starts_other)
-    if kind in ("product_or_class", "stage"):
-        return bool(form and form.search(value)) and bool(_NUMBER_AFTER.match(after) or starts_other)
+    if all(k in _CASE_RUN for k in kinds) and kinds == sorted(set(kinds), key=_CASE_RUN.index):
+        if "population" in kinds:
+            pa, pb, _ = run[kinds.index("population")]
+            if not (_SELF["population"].search(text[pa:pb].strip())):
+                return False
+        return bool(_CASE_AFTER.match(after))
+    if kinds == [kind] and kind in _NUMBER_RUN:
+        return bool(form and form.search(value)) and bool(_NUMBER_AFTER.match(after))
     return False
 
 
@@ -216,8 +236,9 @@ def related(L, P, span, vspan):
 
 
 def dims_of(item, P):
-    """{kind: result} for every dimension the item states."""
-    out = {}
+    """{kind: result} for every dimension the item states. Each dimension is first checked on its own (literal,
+    role, qualifier, relation); only those that pass may bound another's metric slot (v14)."""
+    out, ready = {}, []
     vspan = item["fields"]["value"]["span"]
     L = v10.Local(P, vspan)
     for d in item.get("dims") or []:
@@ -241,10 +262,13 @@ def dims_of(item, P):
         if place is None:
             out[d["kind"]] = outcome("unsupported", "dim_relation_not_rule_checkable")
             continue
-        others = [(o["span"]["start"] - p["start"], o["span"]["end"] - p["start"]) for o in item.get("dims") or []
-                  if o is not d and o["span"]["passage"] == span["passage"]]
-        if not whole_phrase(d["kind"], p["text"], span["start"] - p["start"], span["end"] - p["start"], others):
-            # not a whole slot of a recognised structure: a part of a longer qualified phrase (v13)
+        ready.append((d, p, place))
+    for d, p, place in ready:  # the whole slot, bounded only by independently proven neighbours (v14)
+        span = d["span"]
+        members = [(o["span"]["start"] - p["start"], o["span"]["end"] - p["start"], o["kind"])
+                   for o, q, _ in ready if o is not d and o["span"]["passage"] == span["passage"]]
+        if not whole_phrase(d["kind"], p["text"], span["start"] - p["start"], span["end"] - p["start"], members):
+            # not a whole slot of a recognised structure: a part of a longer qualified phrase (v13/v14)
             out[d["kind"]] = outcome("unsupported", "dim_phrase_not_whole")
             continue
         out[d["kind"]] = outcome("match", place, span)

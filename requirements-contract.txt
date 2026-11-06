@@ -1,5 +1,5 @@
-# The shared extraction-consistency contract and normalization (extraction-contract 1.10.0: checker v13 under contract v3, v10 under
+# The shared extraction-consistency contract and normalization (extraction-contract 1.11.0: checker v14 under contract v3, v10 under
 # contract v2, extraction_normalize.v3), pinned by the sha256 of its reproducible wheel. checkers v10 and v11 import
 # extraction_contract.normalize; install it explicitly next to requirements.txt (README):
 #   uv pip install --no-index --find-links "${EXTRACTION_CONTRACT_WHEELS:-../extraction-contract/dist}" --require-hashes -r requirements-contract.txt
-extraction-contract==1.10.0 --hash=sha256:75a9f8e84fcda270271805a28e563f9ede34227b423a16a2a10c36a11c6d713e
+extraction-contract==1.11.0 --hash=sha256:8891e18c82ff4bb0fd8a8c59bdb470ba0a1ce0e27f23280ab7645370d625cda6
