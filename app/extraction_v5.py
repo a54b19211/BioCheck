@@ -26,7 +26,9 @@ from .extraction import outcome, squash
 CONTRACT_VERSION = "extraction_consistency.v3"
 # v12 (Codex r178): a dimension keeps its qualifying context - its phrase may not negate or exclude it, nor join
 # it with another member; v11 stays as released on its own commit (e98b392)
-CHECKER_VERSION = "biocheck.extraction_rules.v12"
+# v13 (Codex r179): a dimension must fill a whole slot of a recognised structure (whole_phrase below); v12 stays
+# as released on its own commit (1c08f7c)
+CHECKER_VERSION = "biocheck.extraction_rules.v13"
 NORMALIZE_VERSION = norm.NORMALIZE_V4
 
 _LABEL = r"[:：]\s*$"
@@ -122,6 +124,74 @@ def qualifier_kept(text, start, end):
     return not (_JOIN_LEFT.search(before) or _JOIN_RIGHT.search(after))
 
 
+# the positive labels of each kind, matched as the WHOLE text before the colon / 为 (a prefix makes it another
+# label: "不纳入人群" is no population label)
+_LABELS = {
+    "disease": r"病种|疾病|病名|传染病|disease",
+    "population": r"人群|对象|研究人群|纳入人群|研究对象|队列|population|cohort",
+    "date_basis": r"日期口径|统计口径|统计方式|date basis",
+    "denominator_definition": r"分母|denominator",
+    "product_or_class": r"产品|类别|品种|产品类别|product|class",
+    "entity": r"企业|公司|单位|主体|entity|company",
+    "indication": r"适应症|适应证|indication",
+    "stage": r"阶段|状态|stage",
+    "milestone_definition": r"里程碑|事项|milestone",
+}
+_HEADING_MARK = re.compile(r"^\s*#{1,6}\s*")
+_VERB_BEFORE = re.compile(r"(?:报告|新增|累计|共|发现|出现|确诊|批准|注册|获批|受理|上市|投运|建成|在建|计划)$")
+_CASE_AFTER = re.compile(r"^(?:确诊病例|疑似病例|死亡病例|病例|确诊|疑似|患者|感染者|感染|疫情|死亡|\s*(?:cases?|deaths?|"
+                         r"infections?|outbreak)\b)", re.IGNORECASE)
+_NUMBER_AFTER = re.compile(r"^\s*[\d０-９]")
+_FRAME = re.compile(r"^(?:在|于)?(?P<x>.+?)(?:中|内|里|之中)?$")
+
+
+def _bounds(text, start, end):
+    """[ps, pe) of the phrase holding text[start:end] (clause marks and line ends bound it; 、 does not), and the
+    mark just before it ("" at the start)."""
+    left = text[:start]
+    cut = max((m.end() for m in _PHRASE_END.finditer(left)), default=0)
+    m = _PHRASE_END.search(text, end)
+    return cut, (m.start() if m else len(text)), (text[cut - 1] if cut else "")
+
+
+def whole_phrase(kind, text, start, end, others):
+    """Whether text[start:end] fills a whole slot of a recognised structure for `kind`. others: the [start, end)
+    of the item's other stated dimensions in the same passage (a metric slot may border one)."""
+    ps, pe, mark = _bounds(text, start, end)
+    phrase = text[ps:pe].strip()
+    value = text[start:end].strip()
+    form = _SELF.get(kind)
+    if mark and mark in ":：":
+        # a labelled value: the label is the whole phrase before the colon, the value the whole phrase after it
+        lps, _lpe, _ = _bounds(text, ps - 1, ps - 1)
+        label = _HEADING_MARK.sub("", text[lps:ps - 1]).strip()
+        return phrase == value and bool(re.fullmatch(_LABELS.get(kind, r"(?!)"), label, re.IGNORECASE))
+    m = re.match(r"^(?:" + _LABELS.get(kind, r"(?!)") + r")\s*(?:为|是)\s*(?P<v>.+)$", phrase, re.IGNORECASE)
+    if m:
+        return m.group("v").strip() == value  # "人群为成人", "分母为检测人数"
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    line = text[line_start:len(text) if line_end < 0 else line_end]
+    if _HEADING_MARK.match(line) and line.lstrip().startswith("#"):
+        return _HEADING_MARK.sub("", line).strip() == value and bool(form and form.search(value))
+    frame = _FRAME.match(phrase)
+    if phrase == value or (frame and frame.group("x") == value and kind == "population"):
+        return bool(form and form.search(value))  # a phrase of its own, or "在X中": the whole has the form
+    # a slot of the metric phrase
+    before, after = text[ps:start], text[end:pe]
+    ends_other = any(b == start for _a, b in others)
+    starts_other = any(a == end for a, _b in others)
+    if not (_VERB_BEFORE.search(before) or ends_other):
+        return False
+    if kind == "disease":
+        return bool(_CASE_AFTER.match(after) or starts_other)
+    if kind == "population":
+        return bool(form and form.search(value)) and bool(_CASE_AFTER.match(after) or starts_other)
+    if kind in ("product_or_class", "stage"):
+        return bool(form and form.search(value)) and bool(_NUMBER_AFTER.match(after) or starts_other)
+    return False
+
+
 def related(L, P, span, vspan):
     """How the dimension span stands to the value, or None: the value's own sentence with no other quantity
     between them, or an effective ancestor heading. After the value, a subset mark between them, or another
@@ -170,6 +240,12 @@ def dims_of(item, P):
         place = related(L, P, span, vspan)
         if place is None:
             out[d["kind"]] = outcome("unsupported", "dim_relation_not_rule_checkable")
+            continue
+        others = [(o["span"]["start"] - p["start"], o["span"]["end"] - p["start"]) for o in item.get("dims") or []
+                  if o is not d and o["span"]["passage"] == span["passage"]]
+        if not whole_phrase(d["kind"], p["text"], span["start"] - p["start"], span["end"] - p["start"], others):
+            # not a whole slot of a recognised structure: a part of a longer qualified phrase (v13)
+            out[d["kind"]] = outcome("unsupported", "dim_phrase_not_whole")
             continue
         out[d["kind"]] = outcome("match", place, span)
     return out
