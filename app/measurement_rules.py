@@ -867,7 +867,7 @@ def modality_result(m):
             else outcome("mismatch", "modality_is_" + found))
 
 
-def check_v4(item, P, unit_head=None, output=False, period_whole=None):
+def check_measurement(item, P, unit_head=None, output=False, period_whole=None):
     """Field results of one measurement item under v4 (locator checked first, as v3). The field checks run in
     this order because later ones read what earlier ones established (partners, period, object and metric)."""
     fields = {"locator": locator_result(item, P)}
@@ -924,7 +924,7 @@ def check(request, unit_head=None, output=False, period_whole=None):
     P = item_rules.Passages(passages)
     items = []
     for item in request["items"]:
-        fields = check_v4(item, P, unit_head, output, period_whole)
+        fields = check_measurement(item, P, unit_head, output, period_whole)
         items.append({"id": item["id"], "kind": item["kind"], "status": item_rules.status(fields), "fields": fields})
     counts = {s: sum(1 for i in items if i["status"] == s) for s in ("consistent", "inconsistent", "unchecked")}
     return {"contract_version": CONTRACT_VERSION, "checker_version": CHECKER_VERSION,
