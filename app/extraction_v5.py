@@ -33,7 +33,9 @@ CONTRACT_VERSION = "extraction_consistency.v3"
 # v15 (Codex 783, T-24 industrial): a reporting-period date basis written as such, a magnitude-and-classifier
 # unit kept whole, output a flow only as actual output (extraction_v4 output=True); v14 stays as released on its
 # own commit (2b395ae)
-CHECKER_VERSION = "biocheck.extraction_rules.v15"
+# v16 (Codex r186, real NMPA): v15 with extraction_normalize.v5 for the whole written period - a complete date
+# ending the line before (a notice's 发布时间) is its own; v15 stays as released on its own commit (73e425f)
+CHECKER_VERSION = "biocheck.extraction_rules.v16"
 NORMALIZE_VERSION = norm.NORMALIZE_V4
 
 _LABEL = r"[:：]\s*$"
@@ -283,7 +285,7 @@ def dims_of(item, P):
 def check(request):
     """Contract v3: v10's measurement check with extraction_normalize.v4, and each stated dimension."""
     base = dict(request, items=[{k: v for k, v in i.items() if k != "dims"} for i in request["items"]])
-    out = v10.check(base, unit_head=norm.unit_subject_head_v4, output=True)
+    out = v10.check(base, unit_head=norm.unit_subject_head_v4, output=True, period_whole=norm.period_span_whole_v5)
     P = v3.Passages(request["passages"])
     for answered, item in zip(out["items"], request["items"]):
         answered["dims"] = dims_of(item, P)

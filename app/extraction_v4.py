@@ -271,10 +271,11 @@ def whole_number(P, span):
     return norm.is_whole_number(p["text"], span["start"] - p["start"], span["end"] - p["start"])
 
 
-def whole_period(P, span):
-    """The period span is the whole written period in its passage (extraction_normalize.v2 period_span_whole)."""
+def whole_period(P, span, period_whole=None):
+    """The period span is the whole written period in its passage (extraction_normalize.v2 period_span_whole;
+    checker v16 passes v5's)."""
     p = P.by_id[span["passage"]]
-    return norm.period_span_whole(p["text"], span["start"] - p["start"], span["end"] - p["start"])
+    return (period_whole or norm.period_span_whole)(p["text"], span["start"] - p["start"], span["end"] - p["start"])
 
 
 def bound_unit(P, f, unit, vspan, unit_head=None):
@@ -432,7 +433,7 @@ def own_place(L, P, span, vspan, partners, exclude):
     return "outside"
 
 
-def check_v4(item, P, unit_head=None, output=False):
+def check_v4(item, P, unit_head=None, output=False, period_whole=None):
     """Field results of one measurement item under v4 (locator checked first, as v3)."""
     fields = {}
     quote = P.text(item["locator"])
@@ -538,7 +539,7 @@ def check_v4(item, P, unit_head=None, output=False):
             fields["period"] = outcome("mismatch", "period_span_outside_passage")
         elif got is None:
             fields["period"] = outcome("unsupported", why)
-        elif not whole_period(P, pf["span"]):
+        elif not whole_period(P, pf["span"], period_whole):
             fields["period"] = outcome("unsupported", "period_span_not_the_whole_period")
         elif got != pf["value"]:
             fields["period"] = outcome("mismatch", "period_differs_from_canonical_span")
@@ -743,7 +744,7 @@ def check_v4(item, P, unit_head=None, output=False):
     return fields
 
 
-def check(request, unit_head=None, output=False):
+def check(request, unit_head=None, output=False, period_whole=None):
     """Contract v2: measurement items only. Raises ContractError on a contract break. unit_head: the rule for
     the unit in the bound metric phrase (default extraction_normalize.v3, v10's; checker v11 passes v4's)."""
     passages = request["passages"]
@@ -762,7 +763,7 @@ def check(request, unit_head=None, output=False):
     P = v3.Passages(passages)
     items = []
     for item in request["items"]:
-        fields = check_v4(item, P, unit_head, output)
+        fields = check_v4(item, P, unit_head, output, period_whole)
         items.append({"id": item["id"], "kind": item["kind"], "status": v3.status(fields), "fields": fields})
     counts = {s: sum(1 for i in items if i["status"] == s) for s in ("consistent", "inconsistent", "unchecked")}
     return {"contract_version": CONTRACT_VERSION, "checker_version": CHECKER_VERSION,
