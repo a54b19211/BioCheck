@@ -270,7 +270,7 @@ def whole_period(P, span):
     return norm.period_span_whole(p["text"], span["start"] - p["start"], span["end"] - p["start"])
 
 
-def bound_unit(P, f, unit, vspan):
+def bound_unit(P, f, unit, vspan, unit_head=None):
     """The stated unit is the head of the stated metric phrase's own subject, a counting noun, the phrase
     starting right after the value with nothing between the value and the unit but words
     (extraction_normalize.v3 unit_subject_head); the metric span must hold its value."""
@@ -282,7 +282,7 @@ def bound_unit(P, f, unit, vspan):
         return False
     p = P.by_id[vspan["passage"]]
     b = p["start"]
-    return norm.unit_subject_head(p["text"], vspan["end"] - b, unit["span"]["start"] - b, unit["span"]["end"] - b,
+    return (unit_head or norm.unit_subject_head)(p["text"], vspan["end"] - b, unit["span"]["start"] - b, unit["span"]["end"] - b,
                            metric["span"]["start"] - b, metric["span"]["end"] - b)
 
 
@@ -416,7 +416,7 @@ def own_place(L, P, span, vspan, partners, exclude):
     return "outside"
 
 
-def check_v4(item, P):
+def check_v4(item, P, unit_head=None):
     """Field results of one measurement item under v4 (locator checked first, as v3)."""
     fields = {}
     quote = P.text(item["locator"])
@@ -465,7 +465,7 @@ def check_v4(item, P):
             fields["unit"] = outcome("match", "unit_at_value", unit["span"])  # the whole recognized unit, exactly
         elif at_value:
             fields["unit"] = outcome("mismatch", "unit_span_is_not_the_unit_at_value:" + at_value[0])
-        elif bound_unit(P, f, unit, vspan):
+        elif bound_unit(P, f, unit, vspan, unit_head):
             fields["unit"] = outcome("match", "unit_in_bound_metric", unit["span"])
         else:
             fields["unit"] = outcome("unsupported", "unit_not_at_value_or_not_in_table")
@@ -717,8 +717,9 @@ def check_v4(item, P):
     return fields
 
 
-def check(request):
-    """Contract v2: measurement items only. Raises ContractError on a contract break."""
+def check(request, unit_head=None):
+    """Contract v2: measurement items only. Raises ContractError on a contract break. unit_head: the rule for
+    the unit in the bound metric phrase (default extraction_normalize.v3, v10's; checker v11 passes v4's)."""
     passages = request["passages"]
     if len({p["id"] for p in passages}) != len(passages):
         raise ContractError("passages: ids must be unique")
@@ -735,7 +736,7 @@ def check(request):
     P = v3.Passages(passages)
     items = []
     for item in request["items"]:
-        fields = check_v4(item, P)
+        fields = check_v4(item, P, unit_head)
         items.append({"id": item["id"], "kind": item["kind"], "status": v3.status(fields), "fields": fields})
     counts = {s: sum(1 for i in items if i["status"] == s) for s in ("consistent", "inconsistent", "unchecked")}
     return {"contract_version": CONTRACT_VERSION, "checker_version": CHECKER_VERSION,

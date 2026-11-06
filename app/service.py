@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.exceptions import HTTPException
 
-from . import core, extraction, extraction_v4
+from . import core, extraction, extraction_v4, extraction_v5
 from .llm import chat_json
 
 
@@ -343,6 +343,34 @@ class MeasurementItemV2(ItemBase):
     fields: MeasurementFieldsV2
 
 
+class Dim(Strict):
+    """A business dimension the producer states for a measurement (contract v3): its kind, value and span."""
+
+    kind: Literal["disease", "population", "date_basis", "indication", "product_or_class", "milestone_definition",
+                  "entity", "stage", "denominator_definition"]
+    state: Literal["stated"]
+    value: str = Field(min_length=1, max_length=300)
+    span: Span
+
+
+class MeasurementItemV3(MeasurementItemV2):
+    dims: list[Dim] = Field(default_factory=list, max_length=9)
+    family: Literal["case_count", "milestone_count", "capacity", "efficacy", ""] = ""
+
+    @model_validator(mode="after")
+    def one_dimension_per_kind(self):
+        if len({d.kind for d in self.dims}) != len(self.dims):
+            raise ValueError("dims: one dimension per kind")
+        return self
+
+
+class ExtractionRequestV3(Strict):
+    contract_version: Literal["extraction_consistency.v3"]
+    subject: Subject
+    passages: list[Passage] = Field(min_length=1, max_length=8)
+    items: list[MeasurementItemV3] = Field(min_length=1, max_length=50)
+
+
 class ExtractionRequestV2(Strict):
     contract_version: Literal["extraction_consistency.v2"]
     subject: Subject
@@ -408,6 +436,13 @@ def create_app(llm=chat_json):
     def extraction_consistency_v2(req: ExtractionRequestV2):
         try:
             return extraction_v4.check(req.model_dump(exclude={"contract_version"}, exclude_none=True))
+        except extraction.ContractError as exc:
+            return error(400, "invalid_request", str(exc))
+
+    @app.post("/v3/extraction-consistency")
+    def extraction_consistency_v3(req: ExtractionRequestV3):
+        try:
+            return extraction_v5.check(req.model_dump(exclude={"contract_version"}, exclude_none=True))
         except extraction.ContractError as exc:
             return error(400, "invalid_request", str(exc))
 
