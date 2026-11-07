@@ -31,6 +31,13 @@ def test_quote_location():
     assert C.locate_quote(text, "") == "not_found"
 
 
+def test_quote_spans_list_every_place_in_the_texts_own_offsets():
+    text = "ORR was 32%.  In the other arm ORR\twas 32%."
+    assert [text[s:e] for s, e in C.quote_spans(text, "ORR  was 32%")] == ["ORR was 32%", "ORR\twas 32%"]
+    assert C.quote_spans("aaa", "aa") == [(0, 2), (1, 3)]  # places may overlap, as for locate_quote
+    assert C.quote_spans(text, " ") == [] and C.quote_spans(text, "ORR was 33%") == []
+
+
 def test_numeric_hints_list_only_numbers_missing_from_cited_text():
     assert C.numeric_hints("纳入999人，ORR为32%[E1]。", ["ORR was 32% in 223 patients"]) == ["999"]
     assert C.numeric_hints("NCT03525678中ORR为32%[E1]。", ["ORR 32%"]) == []

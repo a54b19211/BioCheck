@@ -1,0 +1,23 @@
+{
+ "source": {
+  "run": "chain1-run1-20261106T045545Z",
+  "file": "out/chain1/chain1-run1-20261106T045545Z/12-result-private.json",
+  "sha256": "900cfba5fbb21af5a3517f3c54040f4c28df139029a09a46ab6f69ab8cf5f0f6",
+  "extract": "the sentences of 06 section 5.3 as the sealed review numbered them, assessment judgment 1, and the quotes the sealed review found in E1 (the text of E1 here is those quotes)"
+ },
+ "evidence": {
+  "id": "E1",
+  "published_at": "2020-05-07",
+  "text": "On 14 April 2020, WHO revised the risk assessment for this event from High to Moderate at the national and regional levels, while the risk level remained Low at the global level.\nGiven the long duration and large magnitude of the Ebola outbreak in Ituri, North Kivu, and South Kivu Provinces in the Democratic Republic of the Congo and the endemicity of Ebola virus in animal reservoirs in the region, there is a risk of re-emergence of the virus leading up to the declaration of the end of the outbreak, as well as beyond. In the coming weeks and months, it is crucial to maintain a strong and robust surveillance system in order to detect, isolate, test and treat new suspected cases as early as possible\nSince the resurgence of the outbreak on 10 April 2020, seven confirmed cases have been reported from Kasanga, Malepe and Kanzulinzuli Health Areas in Beni Health Zone.\nNo new cases have been reported since 27 April. The last person confirmed to have Ebola recovered and was discharged from the treatment centre on 14 May 2020.\nGiven the long duration and large magnitude of the Ebola outbreak in Ituri, North Kivu, and South Kivu Provinces in the Democratic Republic of the Congo and the endemicity of Ebola virus in animal reservoirs in the region, there is a risk of re-emergence of the virus leading up to the declaration of the end of the outbreak, as well as beyond.\nAs of 19 May 2020, a total of 3462 EVD cases, including 3317 confirmed and 145 probable cases have been reported. Of these, 2279 people died (overall case fatality ratio 66%) and 1171 survived.\nEfforts to retrieve the missing confirmed case and investigations into the origin of the recent cluster in Beni Health Zone are still ongoing.\nIn the coming weeks and months, it is crucial to maintain a strong and robust surveillance system in order to detect, isolate, test and treat new suspected cases as early as possible, to improve outcome of potential cases, and to interrupt any new chains of transmission.\nData in recent weeks are subject to delays in case confirmation and reporting, as well as ongoing data cleaning.\nExcludes n=74/3462 cases for whom onset dates not reported.\nThe risk assessment will be continuously reassessed in the coming days based on available and shared information."
+ },
+ "sentences": {
+  "1": "根据2020年5月7日发布的WHO通报[E1]，WHO在2020年4月14日将该事件的国家及区域风险评估从“高”下调至“中等”，全球风险保持为“低”，并指出鉴于疫情持续时间长、规模大及病毒在动物宿主中的地方性流行，存在疫情重新出现的风险，因此维持强有力的监测系统至关重要。",
+  "2": "WHO在2020年4月14日将该事件的国家及区域风险评估从“高”下调至“中等”，全球风险保持为“低”[E1]。",
+  "6": "截至2020年5月19日，刚果（金）共报告3462例埃博拉病例（3317例确诊，145例可能），其中2279人死亡，总体病死率为66%[E1]。",
+  "10": "首先，通报承认近期数据存在病例确诊和报告的延迟，且正在进行数据清洗，这意味着当时的病例数和死亡数可能不完全准确[E1]。",
+  "13": "下一条会改变判断的证据可能包括：1）如果通报内容被后续更正为误报或数据错误，则可能改变对疫情规模和严重性的判断[E1]。",
+  "19": "竞争解释包括：疫情规模有限，未构成跨国或重大公共卫生威胁，通报内容仅为常规监测记录，未触发高级别核查机制[E1]。",
+  "21": "如果WHO后续发布了针对该疫情的具体行动建议或资源调配指令，或宣布该疫情为PHEIC，则该假设将被证实；如果通报明确指出该疫情不符合PHEIC标准且无需国际干预，或通报内容被后续更正为误报或数据错误，则该假设将被反驳[E1]。"
+ },
+ "judgment_1": "该疫情被WHO评估为具有中等国家/区域风险和低全球风险，虽未宣布为PHEIC，但因存在复发风险和监测需求，仍构成需要持续核查和监测的公共卫生威胁。"
+}

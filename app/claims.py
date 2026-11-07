@@ -124,6 +124,16 @@ def locate_quote(text, quote):
     return "ambiguous" if text.find(quote, first + 1) >= 0 else "found"
 
 
+def quote_spans(text, quote):
+    """(start, end) of every place the quote is in the text, in the text's own offsets; a whitespace run in the
+    quote matches any whitespace run. Places may overlap."""
+    words = quote.split()
+    if not words:
+        return []
+    pattern = r"\s+".join(re.escape(word) for word in words)
+    return [(m.start(1), m.end(1)) for m in re.finditer("(?=(" + pattern + "))", text)]
+
+
 def source_use_problems(text, cited, evidence, updates):
     """Rules on corrected/retracted and unverified sources. Returns (reasons, read_requests)."""
     body, reasons, reads = CITE.sub("", text), [], []
