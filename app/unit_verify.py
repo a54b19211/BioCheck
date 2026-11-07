@@ -5,7 +5,7 @@ sentence, its neighbours and the cited texts, reports the units (a verbatim frag
 whether it believes its split is complete. The program numbers and locates the units, checks their form and sums
 the sentence verdict (unit_rules.py). That the units are all the assertions of the sentence is only ever the
 model's own report (semantic_split); nothing here guarantees it."""
-from collections import deque
+from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
@@ -18,7 +18,7 @@ from .prompts import CLAIM_VERIFY_UNITS, VERIFY_COVERAGE_UNITS
 from .segment_rules import RULES_VERSION, VisibleSource, condition_context, split_segments, time_clues
 from .unit_rules import ReportedUnit, check_sentence, coverage_view
 
-CHECKER_VERSION = "biocheck.unit_verify.v2"
+CHECKER_VERSION = "biocheck.unit_verify.v3"
 BATCH_SEGMENTS = 24  # candidate segments in one model call
 LONG_SENTENCE_SEGMENTS, LONG_SENTENCE_CHARS = 8, 300  # a sentence over either goes alone
 NO_CITATION = "no_citation: 本句陈述可核查事实却没有引用，不能借用相邻句的引用"
@@ -27,23 +27,26 @@ NO_CITATION = "no_citation: 本句陈述可核查事实却没有引用，不能�
 INFERENCE_SECTIONS = ("judgment", "gaps", "scenarios", "recommendation")
 
 
-# ---- what the model answers: flat lists, the sentence named by the program's index
-
-class UnitOut(ReportedUnit):
-    sentence: int  # the program's index of the sentence the unit belongs to
-
+# ---- what the model answers: one group per sentence, the sentence named once by the program's index
 
 class SplitOut(BaseModel):
     """The model's own report on whether the units it gave are all the assertions of the sentence."""
 
-    sentence: int
     assessment: Literal["complete", "incomplete", "uncertain"]
     reason: str = ""
 
 
+class SentenceOut(BaseModel):
+    """The units the model found in one sentence and its own report on them. The sentence is named here and in no
+    unit: a group without its number is not an answer, and a number is never filled in from the position."""
+
+    sentence: int
+    units: list[ReportedUnit]
+    split: SplitOut | None = None  # left out: the sentence stays unreported, and so pending
+
+
 class UnitBatch(BaseModel):
-    units: list[UnitOut]
-    splits: list[SplitOut]
+    claims: list[SentenceOut]
 
 
 @dataclass
@@ -194,6 +197,17 @@ def _fact_section(claim, sections):
     return False
 
 
+def _by_sentence(out):
+    """(index -> the units reported for it, index -> its split report). A sentence named by two groups has its
+    units joined and keeps the first report."""
+    units, splits = defaultdict(list), {}
+    for group in out.claims:
+        units[group.sentence] += group.units
+        if group.split:
+            splits.setdefault(group.sentence, group.split)
+    return units, splits
+
+
 def _record(batch, out, error, cut, call, inputs):
     """Apply one batch's answer to its sentences; the read requests of those left without support. call: the
     position in llm_calls of the call that carried the batch, kept on each sentence."""
@@ -205,12 +219,10 @@ def _record(batch, out, error, cut, call, inputs):
         for claim in batch:
             _unchecked(claim, reason)
         return []
-    splits = {}
-    for split in out.splits:
-        splits.setdefault(split.sentence, split)
+    units, splits = _by_sentence(out)
     reads = []
     for claim in batch:
-        mine = [unit for unit in out.units if unit.sentence == claim["index"]]  # other indexes are ignored
+        mine = units[claim["index"]]  # a sentence no group names has no units; other indexes are never read
         result = check_sentence(claim, mine, inputs.refs, known_ids=inputs.known_ids,
                                 fact_section=_fact_section(claim, inputs.req.get("sections", [])),
                                 known_numbers=_known_numbers(inputs, claim))

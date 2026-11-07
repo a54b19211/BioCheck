@@ -58,9 +58,9 @@ def test_verify_over_http_returns_claims_and_llm_calls(client):
 
 def test_v2_verify_refuses_unknown_fields_and_a_rules_version_it_does_not_have(client):
     body = dict(request(), draft="2.5 mg/kg组ORR为32%[E1]。")
-    http = client(FakeLLM(verify_claims=lambda p: {"units": [
-        {"sentence": 1, "segment": "S1", "fragment": "2.5 mg/kg组ORR为32%", "kind": "fact", "verdict": "supported",
-         "quotes": [{"ref": "E1", "quote": "ORR was 32%"}]}], "splits": [{"sentence": 1, "assessment": "complete"}]}))
+    http = client(FakeLLM(verify_claims=lambda p: {"claims": [{"sentence": 1, "units": [
+        {"segment": "S1", "fragment": "2.5 mg/kg组ORR为32%", "kind": "fact", "verdict": "supported",
+         "quotes": [{"ref": "E1", "quote": "ORR was 32%"}]}], "split": {"assessment": "complete"}}]}))
     assert http.post("/v2/verify", json=body).status_code == 401
     answer = http.post("/v2/verify", json=dict(body, labels=["evaluation label"]), headers=auth())
     assert (answer.status_code, answer.json()["error_code"]) == (400, "invalid_request")
@@ -78,7 +78,7 @@ def test_v2_verify_refuses_unknown_fields_and_a_rules_version_it_does_not_have(c
 def test_v2_verify_takes_sections_that_lie_in_the_draft_and_no_slots(client):
     draft = "2.5 mg/kg组ORR为32%[E1]。\n\n说明该剂量有效[E1]。"
     body = dict(request(), draft=draft)
-    http = client(FakeLLM(verify_claims=lambda p: {"units": [], "splits": []}))
+    http = client(FakeLLM(verify_claims=lambda p: {"claims": []}))
 
     def status(**extra):
         return http.post("/v2/verify", json=dict(body, **extra), headers=auth()).status_code
@@ -124,10 +124,10 @@ def test_the_reviser_reads_the_quotes_of_a_v2_review(client):
     draft = "3.4 mg/kg组ORR为32%[E1]。"
     quote = "In the 3.4 mg/kg arm ORR was 35%"
     llm = FakeLLM(
-        verify_claims=lambda p: {"units": [
-            {"sentence": 1, "segment": "S1", "fragment": "3.4 mg/kg组ORR为32%", "kind": "fact",
+        verify_claims=lambda p: {"claims": [{"sentence": 1, "units": [
+            {"segment": "S1", "fragment": "3.4 mg/kg组ORR为32%", "kind": "fact",
              "verdict": "contradicted", "quotes": [{"ref": "E1", "quote": quote}]}],
-            "splits": [{"sentence": 1, "assessment": "complete"}]},
+            "split": {"assessment": "complete"}}]},
         revise=revise)
     http = client(llm)
     checked = http.post("/v2/verify", json=dict(request(), draft=draft), headers=auth()).json()

@@ -91,8 +91,8 @@ time：版本日期、数据截止日期、已发生事件的时间、计划或�
 _UNITS_QUOTES = """quotes从对应reference的text中逐字复制连续短引，ref填该引用编号，不改写、不拼接、不猜引用。短引必须逐字出现在该原文中；只找到同一个数字或关键词不等于关系成立。supported和contradicted的单元各给至少一条短引，是它自己的依据；no_claim和insufficient可以为空，用field_basis的否定单元可不给短引。短引要足够长，使它在该原文中只出现一处；同一短引在原文里出现多处时，用occurrence（从1起，按出现先后）指明依据的是第几处，说不清依据哪处就判insufficient。"""
 
 _UNITS_TAIL = """每个句子的每个句段都要有单元处理：不陈述事实的句段也给一个no_claim单元并在reason里写明理由；同一段原文不要被两个单元重复覆盖，除非后一个用governed_by指向前一个所在的句段。
-splits对每个句子给一条自评：这些单元是否已涵盖该句的全部断言。complete表示已涵盖；incomplete表示你知道漏了某个断言；uncertain表示无法确定（如没有连接词的复合）。这只是你自己的说明，程序不会据此认为拆分已被保证完整。
-sentence填claims里的index；每个句子都要有自己的units和一条splits，不遗漏、不新增；reason简短具体。"""
+split是你对该句的自评：这些单元是否已涵盖该句的全部断言。complete表示已涵盖；incomplete表示你知道漏了某个断言；uncertain表示无法确定（如没有连接词的复合）。这只是你自己的说明，程序不会据此认为拆分已被保证完整。
+输出按句分组：输出的claims里，输入的每个句子恰好一组。组里的sentence填输入claims中该句的index，一组只写这一次，单元里不再写；该句的全部单元放进该组的units，自评放进该组的split。不遗漏、不新增句子；reason简短具体。"""
 
 CLAIM_VERIFY_UNITS = "\n".join([BASE, _UNITS_HEAD, _VERIFY_CONTEXT, _UNITS_JUDGING, _VERIFY_NUMBERS, _UNITS_QUOTES,
                                 _VERIFY_RULES, _UNITS_TAIL])

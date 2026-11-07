@@ -10,8 +10,9 @@ program does everything it can check.
 
 ## Decision
 
-- One model call per batch, stage `verify_claims`, through the same `llm.chat_json` as `/v1`. The answer is two flat
-  lists, `units` and `splits`, each entry naming its sentence by the program's index. The model reports the segment
+- One model call per batch, stage `verify_claims`, through the same `llm.chat_json` as `/v1`. The answer is a list of
+  sentence groups (since 0007; it was two flat lists, `units` and `splits`, each entry naming its sentence), each
+  naming its sentence once by the program's index. The model reports the segment
   numbers the program gave and verbatim fragments; it never invents a unit number or an offset. Numbering, location,
   the form check and the sentence verdict are the program's (`unit_rules.py`).
 - Batch boundary: at most 4 sentences and 24 candidate segments of one paragraph. A sentence over 8 segments or 300

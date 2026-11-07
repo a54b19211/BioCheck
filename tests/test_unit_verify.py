@@ -1,9 +1,12 @@
 """/v2/verify with a fake model: the program's side of the unit check (cutting, numbering, location, form check,
 batches, the sentence verdict). Whether a real model splits and judges well is not tested here."""
+import pytest
 from conftest import FakeLLM, request
+from pydantic import ValidationError
 
 from app import claims as C
 from app import unit_verify
+from app.llm import shape
 from app.segment_rules import RULES_VERSION, split_segments
 
 QUOTE_ORR, QUOTE_PFS = "ORR was 32%", "median PFS was 2.8 months"
@@ -17,10 +20,13 @@ def unit(sentence, segment, fragment, kind="fact", verdict="supported", quote=No
 
 
 def answers(*units, split="complete"):
-    """The model's answer for any batch: these units, and a split report for each sentence they name."""
+    """The model's answer for any batch: one group per sentence the units name, with a split report each."""
     def answer(payload):
-        named = sorted({u["sentence"] for u in units})
-        return {"units": list(units), "splits": [{"sentence": i, "assessment": split} for i in named]}
+        groups = {}
+        for u in units:
+            groups.setdefault(u["sentence"], []).append({k: v for k, v in u.items() if k != "sentence"})
+        return {"claims": [{"sentence": i, "units": grouped, "split": {"assessment": split}}
+                           for i, grouped in groups.items()]}
     return answer
 
 
@@ -28,9 +34,9 @@ def run(draft, llm, **extra):
     return unit_verify.verify(dict(request(**extra), draft=draft), llm)
 
 
-def compound(fragment="且中位PFS为2.8个月", verdict="supported", quote=QUOTE_PFS):
+def compound(fragment="且中位PFS为2.8个月", verdict="supported", quote=QUOTE_PFS, split="complete"):
     return answers(unit(1, "S1", "2.5 mg/kg组ORR为32%", quote=QUOTE_ORR),
-                   unit(1, "S2", fragment, verdict=verdict, quote=quote))
+                   unit(1, "S2", fragment, verdict=verdict, quote=quote), split=split)
 
 
 def test_a_compound_sentence_is_cut_numbered_and_judged_unit_by_unit():
@@ -56,7 +62,7 @@ def test_a_compound_sentence_is_cut_numbered_and_judged_unit_by_unit():
     bare = run(COMPOUND, FakeLLM(verify_claims=compound(quote=None)))["claims"][0]
     assert bare["verdict"] == "insufficient" and [u["verdict"] for u in bare["units"]] == ["supported", "insufficient"]
     # a split report that does not say complete holds the support back, and is recorded apart from the form check
-    unsure = run(COMPOUND, FakeLLM(verify_claims=answers(*compound()({})["units"], split="uncertain")))["claims"][0]
+    unsure = run(COMPOUND, FakeLLM(verify_claims=compound(split="uncertain")))["claims"][0]
     assert unsure["verdict"] == "insufficient" and unsure["reason"].startswith("semantic_split_uncertain")
     assert unsure["form_check"]["status"] == "passed" and unsure["semantic_split"]["assessment"] == "uncertain"
 
@@ -152,6 +158,27 @@ def test_each_sentence_names_the_call_that_carried_it():
     # a sentence unknown to the references is never sent: no call
     unknown = run("2.5 mg/kg组ORR为32%[E9]。", FakeLLM(verify_claims=both))["claims"][0]
     assert unknown["call"] is None
+
+
+def test_each_unit_goes_to_the_sentence_its_group_names_and_a_wrong_or_missing_number_is_not_repaired():
+    draft = "2.5 mg/kg组ORR为32%[E1]。3.4 mg/kg组ORR为35%[E1]。"  # one paragraph, so one batch
+    grouped = answers(unit(1, "S1", "2.5 mg/kg组ORR为32%", quote=QUOTE_ORR),
+                      unit(2, "S1", "3.4 mg/kg组ORR为35%", quote="ORR was 35%"))({})
+    first, second = grouped["claims"]
+    # in any order, and with a group for a sentence nobody asked about: the number says whose units they are
+    reordered = {"claims": [second, dict(first, sentence=9), first]}
+    one, two = run(draft, FakeLLM(verify_claims=lambda p: reordered))["claims"]
+    assert (one["verdict"], two["verdict"]) == ("supported", "supported")
+    assert [u["fragment"] for u in two["units"]] == ["3.4 mg/kg组ORR为35%"]
+    # a wrong number leaves its sentence without units, which the form check refuses; nothing is filled in by position
+    wrong = {"claims": [first, dict(second, sentence=3)]}
+    one, two = run(draft, FakeLLM(verify_claims=lambda p: wrong))["claims"]
+    assert one["verdict"] == "supported" and two["verdict"] == "insufficient" and two["units"] == []
+    assert [p["code"] for p in two["form_check"]["problems"]][:1] == ["empty_result"]
+    assert two["semantic_split"]["assessment"] == "not_reported"
+    # a group without a number is not an answer at all (the batch fails, as any invalid output does)
+    with pytest.raises(ValidationError):
+        unit_verify.UnitBatch.model_validate({"claims": [{"units": first["units"]}]})
 
 
 def plan(draft):
@@ -263,10 +290,12 @@ class Reading(FakeLLM):
         return super().__call__(stage, system, payload, model_cls, **options)
 
 
-def test_the_unit_prompt_of_contract_v2_is_named_and_reaches_the_model():
+def test_the_unit_prompt_is_named_by_the_checker_version_and_its_wording_reaches_the_model():
     llm = Reading(verify_claims=compound())
     result = run(COMPOUND, llm)
     system = next(text for stage, text in llm.systems if stage == "verify_claims")
-    assert result["checker_version"] == "biocheck.unit_verify.v2"
-    for clause in ("“原文未提及/未出现X”", "条件后果", "consequent_of"):
+    assert result["checker_version"] == "biocheck.unit_verify.v3"
+    for clause in ("“原文未提及/未出现X”", "条件后果", "consequent_of", "一组只写这一次"):
         assert clause in system
+    # the offline stand-in model tells this form from the claim check's by how the format line opens
+    assert shape(unit_verify.UnitBatch).startswith('{"claims":[{"sentence":int,"units":[{"segment":')
