@@ -1,4 +1,4 @@
-# Tool settings only: dependencies are pinned in requirements.txt and requirements-contract.txt (README).
+# Tool settings only: dependencies are pinned in requirements.txt, requirements-contract.txt and requirements-transport.txt (README).
 [tool.ruff]
 line-length = 120
 target-version = "py310"

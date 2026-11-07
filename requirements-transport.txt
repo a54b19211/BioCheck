@@ -1,0 +1,5 @@
+# The HTTP side of one model call (provider body, send, request count), shared with the other model-calling
+# services, pinned to 0.1.1 by the sha256 of its reproducible wheel. Install it next to requirements.txt from a wheel
+# directory (the sibling llm-transport checkout's dist/), without an index:
+#   uv pip install --no-index --find-links "${LLM_TRANSPORT_WHEELS:-../llm-transport/dist}" --require-hashes -r requirements-transport.txt
+zk-llm-transport==0.1.1 --hash=sha256:7ef33b7230e99adfbc16e420e20a74d8d9114b4bdc04682f6cb8e115c1f05770
