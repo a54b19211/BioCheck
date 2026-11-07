@@ -16,7 +16,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from . import claims as C
-from .segment_rules import RULES_VERSION, Segment, find_markers, split_segments
+from .segment_rules import RULES_VERSION, Segment, split_segments
 
 Kind = Literal["fact", "negated_fact", "condition", "inference", "time", "no_claim"]
 Verdict = Literal["supported", "contradicted", "insufficient", "no_claim"]
@@ -189,15 +189,10 @@ def _field_holds(basis, citations, refs):
     return _same_value(node, basis.value)
 
 
-def _negation_grounded(usable, basis):
-    """A negated fact stands on a located quote that itself holds a negation, or on a structured field whose
-    path and value check out (death count 0). Which of them it is about is the semantic check's."""
-    return bool(basis and basis["holds"]) or any(
-        m.kind == "negation" for q in usable for m in find_markers(q["quote"]))
-
-
 def _ground_problems(item, unit, usable):
-    """A supported or contradicted unit needs a located quote (or, for a negation, a field that checks out)."""
+    """A supported or contradicted unit needs a located quote (or, for a negation, a field that checks out).
+    What the evidence is about, a negation's object and scope included, is the semantic check's: a death count of
+    0 supports "no deaths" without a negation word in it, so none is asked for."""
     problems = [BAD_QUOTE[q["status"]].format(ref=q["ref"]) for q in unit.quotes if q["status"] in BAD_QUOTE]
     basis = unit.field_basis
     if basis and not basis["holds"]:
@@ -208,10 +203,8 @@ def _ground_problems(item, unit, usable):
     return problems
 
 
-def _kind_problems(item, unit, usable, fact_section):
+def _kind_problems(item, unit, fact_section):
     problems = []
-    if item.verdict == "supported" and item.kind == "negated_fact" and not _negation_grounded(usable, unit.field_basis):
-        problems.append("negation_without_basis: 否定的依据既不是含否定表述的短引，也不是核对通过的结构字段")
     if item.verdict == "supported" and item.kind == "inference" and fact_section:
         problems.append("inference_in_fact_section: 推断或判断写在事实部分，不能算已支持的事实")
     if item.verdict == "no_claim" and item.kind != "condition" and C.numeric_tokens(unit.fragment):
@@ -230,7 +223,7 @@ def _judge_unit(unit, item, citations, refs, fact_section):
         unit.verdict, unit.reason = "no_claim", item.reason
         return
     usable = [q for q in unit.quotes if q["adopted"] is not None]
-    problems = _ground_problems(item, unit, usable) + _kind_problems(item, unit, usable, fact_section)
+    problems = _ground_problems(item, unit, usable) + _kind_problems(item, unit, fact_section)
     verdict = "no_claim" if item.kind == "no_claim" else item.verdict
     unit.verdict = "insufficient" if problems else verdict
     unit.reason = item.reason

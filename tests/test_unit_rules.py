@@ -4,7 +4,8 @@ from app.unit_rules import ReportedUnit, check_sentence, coverage_view
 
 QUOTE = "ORR was 32%"
 EVIDENCE = [{"id": "E1", "title": "", "source_kind": "research", "verified": True, "published_at": "2020-01-01",
-             "text": "ORR was 32% in one arm. No deaths were reported. The dose was 3 mg. The dose was 3 mg again."}]
+             "text": "ORR was 32% in one arm. No deaths were reported. The dose was 3 mg. The dose was 3 mg again. "
+             "The death count was 0."}]
 ANALYSIS = [{"id": "A1", "method": "count", "output": {"deaths": 0, "cases": [4, 5]}}]
 REFS = references({"evidence": EVIDENCE, "analysis_results": ANALYSIS})
 
@@ -66,7 +67,7 @@ def test_a_negation_dropped_between_segment_and_unit_fails_the_form_check():
     assert codes(dropped) == ["negation_unreached"] and dropped.verdict == "insufficient"
 
 
-def test_a_negation_stands_on_a_quote_with_a_negation_or_on_a_checked_field():
+def test_a_negation_stands_on_a_located_quote_or_a_checked_field_and_the_models_reading():
     text = "本次未发生死亡[A1]。"
 
     def negated(**extra):
@@ -76,11 +77,15 @@ def test_a_negation_stands_on_a_quote_with_a_negation_or_on_a_checked_field():
     assert negated(field_basis=field).verdict == "supported"
     assert negated(field_basis=dict(field, path="output.fatalities")).units[0].reason.startswith("field_basis_invalid")
     assert negated(field_basis=dict(field, value=2)).verdict == "insufficient"
-    said = unit("S1", "未发生死亡", kind="negated_fact", quote="No deaths were reported.")
-    assert check("本次未发生死亡[E1]。", said).verdict == "supported"
-    unrelated = unit("S1", "未发生死亡", kind="negated_fact")  # its quote has no negation in it
-    result = check("本次未发生死亡[E1]。", unrelated)
-    assert result.units[0].reason.startswith("negation_without_basis") and result.verdict == "insufficient"
+    sentence = "本次未发生死亡[E1]。"
+    for quote in ("No deaths were reported.", "The death count was 0"):  # the second holds no negation word
+        assert check(sentence, unit("S1", "未发生死亡", kind="negated_fact", quote=quote)).verdict == "supported"
+    missing = check(sentence, unit("S1", "未发生死亡", kind="negated_fact", quote=None))
+    assert missing.units[0].reason.startswith("missing_quote") and missing.verdict == "insufficient"
+    elsewhere = check(sentence, unit("S1", "未发生死亡", kind="negated_fact", quote="The death count was 2"))
+    assert elsewhere.units[0].reason.startswith("quote_not_found") and elsewhere.verdict == "insufficient"
+    unsure = unit("S1", "未发生死亡", kind="negated_fact", verdict="insufficient", quote="The death count was 0")
+    assert check(sentence, unsure).verdict == "insufficient"  # the program does not turn the model's doubt into support
 
 
 def test_a_repeated_quote_is_recorded_everywhere_and_never_taken_at_the_first():

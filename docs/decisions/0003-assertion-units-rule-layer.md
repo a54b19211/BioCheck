@@ -24,8 +24,10 @@ no connector word (获批进入医保) has no mark at all.
   segment and unit. It never says the units are complete; whether they are all the assertions is the model's own
   report and is recorded elsewhere. A failed form check keeps the sentence pending, except that a contradiction
   stands.
-- A negated fact is supported only by a located quote that holds a negation or by a structured field whose path and
-  value check out; a condition, and what it governs, is not a stated fact.
+- A supported or contradicted unit needs a located quote or, for a negated fact, a structured field whose path and
+  value check out. The program does not ask the quote to hold a negation word (a death count of 0 supports "no
+  deaths"); what the evidence is about, a negation's object and scope included, is the semantic check's. A
+  condition, and what it governs, is not a stated fact.
 - The negation, condition and connector word lists, and their pseudo-triggers, are cut points and hints, never proof
   of meaning (the ConText idea). They are versioned by `RULES_VERSION`. A later date in a cited text is a clue for
   the semantic check, not a verdict.

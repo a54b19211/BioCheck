@@ -63,10 +63,12 @@ def test_c1_the_negation_in_judgment_1_is_a_segment_that_needs_a_unit_and_a_basi
     skipped = answer(text, *risk)
     assert (skipped.verdict, skipped.form_check.status) == ("insufficient", "failed")
     assert [(p.code, p.segment) for p in skipped.form_check.problems] == [("segment_unhandled", s2)]
-    # with one, it is not supported on a quote that says nothing negative about it
-    on_risk = answer(text, *risk, unit(s2, "虽未宣布为PHEIC", RISK, kind="negated_fact"))
-    assert on_risk.verdict == "insufficient" and on_risk.units[3].reason.startswith("negation_without_basis")
-    # ... and is, when a located quote of E1 holds the negation itself
+    # with one, the program asks for a located quote and nothing about what it says: whether RISK is about the
+    # negation is the semantic check's (C1 is closed by the real answer: a quote that holds the negation)
+    unsure = answer(text, *risk, unit(s2, "虽未宣布为PHEIC", RISK, kind="negated_fact", verdict="insufficient"))
+    assert (unsure.verdict, unsure.form_check.status) == ("insufficient", "passed")
+    bare = answer(text, *risk, unit(s2, "虽未宣布为PHEIC", None, kind="negated_fact"))
+    assert bare.verdict == "insufficient" and bare.units[3].reason.startswith("missing_quote")
     extra = " WHO has not declared this event a PHEIC."
     stated = answer(text, *risk, unit(s2, "虽未宣布为PHEIC", extra.strip(), kind="negated_fact"), extra=extra)
     assert (stated.verdict, stated.form_check.status) == ("supported", "passed")
