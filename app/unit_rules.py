@@ -47,6 +47,7 @@ class ReportedUnit(BaseModel):
     kind: Kind
     verdict: Verdict
     quotes: list[UnitQuote] = []
+    labels: list[str] = []  # OBJ NUM TIME COND STR REF, as in claims.LABELS
     governed_by: list[str] = []  # segment of this sentence, or an identifier the request pre-assigned
     field_basis: FieldBasis | None = None
     reason: str = ""
@@ -67,6 +68,7 @@ class Unit:
     end: int | None = None
     void_reason: str | None = None
     quotes: list[dict] = field(default_factory=list)
+    labels: list[str] = field(default_factory=list)
     field_basis: dict | None = None
     governed_by: list[str] = field(default_factory=list)  # unit numbers, or the request's identifiers
     conditional: bool = False  # a condition, or governed by one: not a stated fact
@@ -133,7 +135,8 @@ def _place(reported, segments):
     placed = []
     for number, item in enumerate(reported, 1):
         fragment, segment = item.fragment.strip(), by_id.get(item.segment)
-        unit = Unit(f"U{number}", item.segment, fragment, item.kind, item.verdict)
+        unit = Unit(f"U{number}", item.segment, fragment, item.kind, item.verdict,
+                    labels=[x for x in dict.fromkeys(item.labels) if x in C.LABELS])
         unit.void_reason = _void_reason(item, fragment, segment)
         if unit.void_reason:
             unit.reason = unit.void_reason
@@ -203,16 +206,26 @@ def _ground_problems(item, unit, usable):
     return problems
 
 
-def _kind_problems(item, unit, fact_section):
+def _kind_problems(item, unit, fact_section, known_numbers):
     problems = []
     if item.verdict == "supported" and item.kind == "inference" and fact_section:
         problems.append("inference_in_fact_section: 推断或判断写在事实部分，不能算已支持的事实")
-    if item.verdict == "no_claim" and item.kind != "condition" and C.numeric_tokens(unit.fragment):
+    new_numbers = set(C.numeric_tokens(unit.fragment)) - known_numbers
+    if item.verdict == "no_claim" and item.kind != "condition" and new_numbers:
         problems.append("no_claim_with_numbers: 含具体数字的句子是可核查陈述")
     return problems
 
 
-def _judge_unit(unit, item, citations, refs, fact_section):
+def _number_problems(item, unit, citations, refs):
+    """A supported fragment's numbers are in the cited texts, or its reason names each (a conversion, a rounding)."""
+    if item.verdict != "supported":
+        return []
+    cited = C.cited_texts([r for r in citations if r in refs], refs)
+    unnamed = C.unnamed_numbers(C.numeric_hints(unit.fragment, cited), item.reason)
+    return ["numeric_unexplained: 数字" + "、".join(unnamed) + "不在所引原文中，也未说明换算"] if unnamed else []
+
+
+def _judge_unit(unit, item, citations, refs, fact_section, known_numbers):
     """Apply the rules to one located unit. What a condition governs asserts nothing, so a model verdict of
     supported or no_claim on it means "nothing stated"; insufficient (cannot tell it is only a condition) and
     contradicted still count."""
@@ -223,7 +236,10 @@ def _judge_unit(unit, item, citations, refs, fact_section):
         unit.verdict, unit.reason = "no_claim", item.reason
         return
     usable = [q for q in unit.quotes if q["adopted"] is not None]
-    problems = _ground_problems(item, unit, usable) + _kind_problems(item, unit, fact_section)
+    numbers = _number_problems(item, unit, citations, refs)
+    if numbers:
+        unit.labels = list(dict.fromkeys([*unit.labels, "NUM"]))
+    problems = _ground_problems(item, unit, usable) + _kind_problems(item, unit, fact_section, known_numbers) + numbers
     verdict = "no_claim" if item.kind == "no_claim" else item.verdict
     unit.verdict = "insufficient" if problems else verdict
     unit.reason = item.reason
@@ -309,17 +325,19 @@ def _sentence_verdict(form, units):
     return ("supported" if "supported" in verdicts else "no_claim"), ""
 
 
-def check_sentence(claim, reported, refs, *, known_ids=frozenset(), fact_section=False):
+def check_sentence(claim, reported, refs, *, known_ids=frozenset(), fact_section=False,
+                   known_numbers=frozenset()):
     """claim: a sentence of claims.sentences; reported: the model's units for it; refs: core.references.
     known_ids: identifiers the request pre-assigned, which governed_by may name. fact_section: the sentence is in
-    a part of the report where only facts belong, so a supported inference there is not accepted."""
+    a part of the report where only facts belong, so a supported inference there is not accepted.
+    known_numbers: numbers the draft already cites elsewhere; a unit that only repeats them may be no_claim."""
     segments = split_segments(claim["text"])
     placed = _place(reported, segments)
     unmapped = _map_governors(placed, reported, known_ids)
     _mark_conditional(placed)
     for unit, item in zip(placed, reported):
         if unit.located:
-            _judge_unit(unit, item, claim["citations"], refs, fact_section)
+            _judge_unit(unit, item, claim["citations"], refs, fact_section, known_numbers)
     form = _form_check(segments, reported, placed, unmapped)
     verdict, reason = _sentence_verdict(form, placed)
     return SentenceResult(claim["index"], segments, placed, form, verdict, reason)

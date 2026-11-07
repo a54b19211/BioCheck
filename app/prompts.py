@@ -27,25 +27,62 @@ evidence里带superseded_by的是已被更正或撤回的旧材料：被更正�
 有hypotheses时，正文末尾加一节「情报假设」：每条假设单独一段，以它的编号开头写成「H1 待验证的假设：……」，同一段里接着写支持和反驳它的事实（各自引用 facts 里的 ref）、竞争解释、还缺什么证据、什么信号出现会使它失效。假设本身不是事实，不能写成已证实；单条信号只能支持「某事已被提出或启动」。
 draft字段放完整中文稿件。"""
 
-CLAIM_VERIFY = BASE + """
-你是核验程序的一部分。逐条核对claims中的完整原句，只对照该句citations列出的引用；一个句子不能借用别的句子的引用。references给出这些引用的原文，分析结果给出其JSON文本。
-context中的前后句只用于理解代词；标题只帮助辨认研究/实验室/日期/人群，不能补成未引用的事实。核验中不修订原句，也不参考作者自评。
+# paragraphs the sentence-level and the unit-level verify prompts share
+_VERIFY_CONTEXT = """context中的前后句只用于理解代词；标题只帮助辨认研究/实验室/日期/人群，不能补成未引用的事实。核验中不修订原句，也不参考作者自评。
 检查六类问题：OBJ对象/研究/组别归属，NUM数值单位分母，TIME随访/截止时间，COND人群/研究条件，STR推断强度/因果/显著性，REF所引原文是否支持。labels只用这六个，正确句为空列表。
-“所引材料未报告/未提及X”这类句子：所引原文确实没有X即为supported（短引取原文里与之相邻或相关的片段）；没有引用而只说明本次读取范围的，判no_claim。
-supported表示句中所有实质要点与限定都受实际引用支持；contradicted表示实际引用明确相反；insufficient表示缺依据或无法确定；no_claim表示本句不陈述可核查的事实（过渡句、对本报告范围或方法的说明、明确标为待验证的假设或建议）。含具体数字、对象属性、事件或研究结果的句子不能判no_claim。没有引用的句子若陈述可核查事实，判insufficient并标REF。引用不支持不等于这个事实在现实世界中必然错误：正确但引用不支持判insufficient并标REF，不冒称contradicted。
-不要因一个数字正确就把整句判为supported；同句的多个数值、否定和限制都要核对。
-numeric_hints是程序列出的、在所引原文中没有原样出现的数字，只是待查疑点：正确换算、舍入、算式结果可能不在原文中。换算正确时在reason里写出该数字、算式和原文依据；不能解释就判insufficient并标NUM。不要因为数字出现就认为归属正确。
-quotes从对应reference的text中逐字复制连续短引，ref填该引用编号，不改写、不拼接、不猜引用。短引必须逐字出现在该原文中；只找到同一个数字或关键词不等于关系成立。supported须为本句每个引用各给至少一条短引；contradicted至少给一条显示相反事实的短引；insufficient可以为空。
-不要把不同地区、视角、时间的经济评价写成直接矛盾；来源的作者意见要以其意见表达。
+“所引材料未报告/未提及X”这类句子：所引原文确实没有X即为supported（短引取原文里与之相邻或相关的片段）；没有引用而只说明本次读取范围的，判no_claim。"""
+
+_VERIFY_NUMBERS = """numeric_hints是程序列出的、在所引原文中没有原样出现的数字，只是待查疑点：正确换算、舍入、算式结果可能不在原文中。换算正确时在reason里写出该数字、算式和原文依据；不能解释就判insufficient并标NUM。不要因为数字出现就认为归属正确。"""
+
+_VERIFY_RULES = """不要把不同地区、视角、时间的经济评价写成直接矛盾；来源的作者意见要以其意见表达。
 先核对每个陈述的完整原意，再给结论。不能为了把原稿判对而重新解释研究设计或术语：组数、对照类型、随机化、前瞻/回顾性分别核对；无标准治疗对照不会改变试验实际有几个组。
 来源未说做过某项检验，也未说没做过，原稿断言“未进行”时应为insufficient。小样本、病例数或摘要简短都不能推出研究采用回顾性设计。“本摘要没提对照”不支持“研究无对照”，后者属于COND/STR问题。
 保留原文医学概念的范围，不能把广义病变换成特定病理类型；翻译有歧义就保留原词并待核。
 分析数字须与所引分析结果calculation_basis中的单位、期间、总体、分母、分析单位一致；calculation_basis.operands里带着每个输入数的原文短引（quote）和来源编号（ref），引用分析结果的句子用它们核对输入，不要求同句另引原始材料；每个数字对应所选输出或明确换算，其它字段恰巧出现同一数字不能作依据，也不把计算输出当作实验原件。
 假设核对是否明确写为待验证，以及支持、反证和成立条件；不能把候选或描述性异常签成因果、显著性或业务有效性结论。
 引用未核实或社媒来源时，supported仅说明转述与原帖一致；原句须同时保留转述（网传/据称/帖子称等）和未证实限定，把传言写成事件事实判insufficient并标STR。删帖、辟谣、处罚只能叙述为信息环境事件，不能单独支撑疾病已发生或风险升高。
-source_relations 或 origin_group 标明为转载/同源的材料，被写成多个独立来源或互相印证时判 contradicted。source_updates列出已更正或撤回的来源。被更正的旧数被当作当前数时，更正通知在references中则判contradicted，否则判insufficient；被更正的那部分只有写成历史回顾（“当时披露…，后更正…”）并同时引用两端原文才可supported；旧材料中没有被更正的内容照常核对。
-只有一种insufficient可给scope_span：本句把“本次引用材料未报告/未见”越写成确定的“未实施/未进行/不存在”。此时scope_span逐字复制本句中那段错误断言（唯一、不含引用和句末标点），reason说明记录范围与现实事实的区别。一般证据不足、真实负向实验、效果不显著或相反证据不给scope_span；其它情况填null。
+source_relations 或 origin_group 标明为转载/同源的材料，被写成多个独立来源或互相印证时判 contradicted。source_updates列出已更正或撤回的来源。被更正的旧数被当作当前数时，更正通知在references中则判contradicted，否则判insufficient；被更正的那部分只有写成历史回顾（“当时披露…，后更正…”）并同时引用两端原文才可supported；旧材料中没有被更正的内容照常核对。"""
+
+_CLAIM_HEAD = """你是核验程序的一部分。逐条核对claims中的完整原句，只对照该句citations列出的引用；一个句子不能借用别的句子的引用。references给出这些引用的原文，分析结果给出其JSON文本。"""
+
+_CLAIM_JUDGING = """supported表示句中所有实质要点与限定都受实际引用支持；contradicted表示实际引用明确相反；insufficient表示缺依据或无法确定；no_claim表示本句不陈述可核查的事实（过渡句、对本报告范围或方法的说明、明确标为待验证的假设或建议）。含具体数字、对象属性、事件或研究结果的句子不能判no_claim。没有引用的句子若陈述可核查事实，判insufficient并标REF。引用不支持不等于这个事实在现实世界中必然错误：正确但引用不支持判insufficient并标REF，不冒称contradicted。
+不要因一个数字正确就把整句判为supported；同句的多个数值、否定和限制都要核对。"""
+
+_CLAIM_QUOTES = """quotes从对应reference的text中逐字复制连续短引，ref填该引用编号，不改写、不拼接、不猜引用。短引必须逐字出现在该原文中；只找到同一个数字或关键词不等于关系成立。supported须为本句每个引用各给至少一条短引；contradicted至少给一条显示相反事实的短引；insufficient可以为空。"""
+
+_CLAIM_TAIL = """只有一种insufficient可给scope_span：本句把“本次引用材料未报告/未见”越写成确定的“未实施/未进行/不存在”。此时scope_span逐字复制本句中那段错误断言（唯一、不含引用和句末标点），reason说明记录范围与现实事实的区别。一般证据不足、真实负向实验、效果不显著或相反证据不给scope_span；其它情况填null。
 每个index恰好返回一次，不遗漏、不重复、不新增；reason简短具体。"""
+
+CLAIM_VERIFY = "\n".join([BASE, _CLAIM_HEAD, _VERIFY_CONTEXT, _CLAIM_JUDGING, _VERIFY_NUMBERS, _CLAIM_QUOTES,
+                          _VERIFY_RULES, _CLAIM_TAIL])
+
+# the same checks by assertion unit (POST /v2/verify, docs/decisions/0004)
+_UNITS_HEAD = """你是核验程序的一部分。逐条核对claims中的完整原句，只对照该句citations列出的引用；一个句子不能借用别的句子的引用。references给出这些引用的原文，分析结果给出其JSON文本。
+程序已把每个句子按标点和连接词切成候选句段，列在该句的segments里（编号S1、S2……）。句段只是记账用的切分，不是判断单元：条件、否定、让步的作用域可以跨句段。你读完整原句、前后句和所引原文，把句子拆成断言单元，逐个判定。
+断言单元是一句话里能单独判真假的最小陈述。没有连接词的复合陈述（如“获批进入医保”）也要按语义拆开。每个单元给出：
+segment：该单元所在句段的编号（程序给的S编号，不要自造）。
+fragment：该单元在原句中的逐字原文片段：连续照抄，不改写、不概括、不含句末的引用方括号；整个落在所报句段之内，并在该句段里只出现一处（重复时换一个更长、能唯一定位的片段）。不报字符偏移，也不给单元编号，编号和定位由程序做。
+kind：fact事实；negated_fact否定事实（句中用未/没有/无/不等写成的否定陈述，判的是这个否定本身）；condition条件或假设（写成“如果/若/一旦……”的条件，或“假设/待验证”的设想，它不是已发生的事实）；inference推断或判断（由前提得出的结论、评估、影响或建议）；time时间陈述（版本、日期、截止时间）；no_claim不陈述可核查事实的片段（过渡语、对范围或方法的说明）。
+governed_by：该单元受哪些句段管辖（条件、否定、让步的作用域可以跨句段）。只填句段编号（如S1）或payload的pre_assigned_ids里预先给出的编号（如假设编号H1），没有就留空；不要填单元编号。"""
+
+_UNITS_JUDGING = """verdict对单元判定：supported表示该单元的所有实质要点与限定都受实际引用支持；contradicted表示实际引用明确相反；insufficient表示缺依据或无法确定；no_claim表示该片段不陈述可核查的事实（过渡语、对本报告范围或方法的说明、明确标为待验证的假设或建议）。含具体数字、对象属性、事件或研究结果的片段不能判no_claim。没有引用的句子若陈述可核查事实，判insufficient并标REF。引用不支持不等于这个事实在现实世界中必然错误：正确但引用不支持判insufficient并标REF，不冒称contradicted。
+句子的结论由程序按单元汇总，所以每个单元要有自己的依据，一个单元的短引不能代替另一个单元的。不要因一个数字正确就把整句判为supported：同句的多个数值、否定和限制分别是单元，都要核对。labels对单元标注，只用上面六类。
+各类单元怎么判：
+fact：短引逐字支持该片段的关系和限定；数字在原文中，或在reason里写出换算。
+negated_fact：判的是这个否定本身，不是它周围的事实；先分清否定的对象和范围（“未宣布为PHEIC”和“风险为中等”是两个单元）。依据必须是所引原文直接说明该否定的内容：原文明说未/没有/无，或写出结果为零（如“死亡数为0”）；分析结果里的结构字段用field_basis给出路径和值（路径从分析结果JSON正文起，用点号，列表项用序号，如output.deaths）。相邻的相关事实（风险等级、别的指标）不能当作否定的依据。句子写成“材料未报告X”的，是关于材料记录的事实（kind为fact），按上面的未报告规则判；句子写成“X未发生/未实施”的才是negated_fact，而依据只是“材料未报告X”时判insufficient。
+condition：只判它是不是写成了条件；条件本身不是已发生的事实，判no_claim。被条件管辖的结论（“则……”）用governed_by指向条件所在句段，并按它自己的kind判；结论被写成已经发生的，不要放过。句中夹带的事实另成单元，照常核验。
+inference：先判前提是否被所引原文支持，再判推断强度（因果、显著性、影响、建议）是否超过前提；前提不足或强度越过前提判insufficient。
+time：版本日期、数据截止日期、已发生事件的时间、计划或条件中的时间要分开。只核一件事：句子有没有把后来版本里的内容、或预期和条件中的事件，写成在所断言的时间已经知道或已经发生。time_clues是程序给的线索（所引文本里有比句中所写更晚的日期，附发布日期、首见时间、证明时间和回放模式）；更晚日期只是线索，合法的未来计划、多时期回顾、说明是现存版本的准确引用都不算错。哪些材料可以读由系统的回放模式另行决定，你不重复判。判不了判insufficient。"""
+
+_UNITS_QUOTES = """quotes从对应reference的text中逐字复制连续短引，ref填该引用编号，不改写、不拼接、不猜引用。短引必须逐字出现在该原文中；只找到同一个数字或关键词不等于关系成立。supported和contradicted的单元各给至少一条短引，是它自己的依据；no_claim和insufficient可以为空，用field_basis的否定单元可不给短引。短引要足够长，使它在该原文中只出现一处；同一短引在原文里出现多处时，用occurrence（从1起，按出现先后）指明依据的是第几处，说不清依据哪处就判insufficient。"""
+
+_UNITS_TAIL = """每个句子的每个句段都要有单元处理：不陈述事实的句段也给一个no_claim单元并在reason里写明理由；同一段原文不要被两个单元重复覆盖，除非后一个用governed_by指向前一个所在的句段。
+splits对每个句子给一条自评：这些单元是否已涵盖该句的全部断言。complete表示已涵盖；incomplete表示你知道漏了某个断言；uncertain表示无法确定（如没有连接词的复合）。这只是你自己的说明，程序不会据此认为拆分已被保证完整。
+sentence填claims里的index；每个句子都要有自己的units和一条splits，不遗漏、不新增；reason简短具体。"""
+
+CLAIM_VERIFY_UNITS = "\n".join([BASE, _UNITS_HEAD, _VERIFY_CONTEXT, _UNITS_JUDGING, _VERIFY_NUMBERS, _UNITS_QUOTES,
+                                _VERIFY_RULES, _UNITS_TAIL])
+
 
 VERIFY_COVERAGE = BASE + """
 检查同一份最终稿作为整体是否回答了question。只看三件事：
@@ -56,6 +93,8 @@ VERIFY_COVERAGE = BASE + """
 sentences是稿件逐句文字，不是新的原始证据。逐句的引用、措辞、数字和限定由另一步核验，这里不评价，也不因为这些问题判incomplete。
 research_scope会随报告单独展示，正文不必逐项复述哪些已查、哪些未查；只有正文的说法与research_scope相反（例如把未查写成已查无结果）才算矛盾。
 空泛短文不能算complete。reason简短指出不满足的那一项及相关句号，不重复整稿。"""
+
+VERIFY_COVERAGE_UNITS = VERIFY_COVERAGE + "\n" + """每个句子可能附带stated（该句实际陈述的事实片段）和conditional（写成条件或假设的片段，以及受条件管辖的片段）。conditional不是已陈述的事实：不能因为正文没有把它写成已发生的事实就判incomplete，也不能当作正文漏写的内容；stated才是正文已经陈述的内容。"""
 
 CLAIM_REVISE = BASE + """
 只修claims中的句子：contradicted的按所引原文纠正；insufficient的（有引用但说过头、缺限定或扩大了范围）收窄到所引原文真正支持的说法，补上必要的限定；reason为no_citation的句子原本没有引用，从citations（相邻句的引用）里补上真正支持它的那几个。每句按index返回一个完整非空的替换句。不重写整段，不改相邻句，不删掉难处理的句子，不把一句扩成多句。

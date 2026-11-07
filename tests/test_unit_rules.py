@@ -24,18 +24,18 @@ def codes(result):
 
 
 def test_one_quote_does_not_carry_a_compound_sentence():
-    text = "ORR为32%，且死亡率为5%[E1]。"
-    bare = check(text, unit("S1", "ORR为32%"), unit("S2", "且死亡率为5%", quote=None))
+    text = "ORR为32%，且死亡数为0[E1]。"
+    bare = check(text, unit("S1", "ORR为32%"), unit("S2", "且死亡数为0", quote=None))
     assert bare.verdict == "insufficient"  # the second unit has no quote of its own
     assert [u.verdict for u in bare.units] == ["supported", "insufficient"] and "missing_quote" in bare.units[1].reason
-    assert check(text, unit("S1", "ORR为32%"), unit("S2", "且死亡率为5%", quote="No deaths")).verdict == "supported"
+    assert check(text, unit("S1", "ORR为32%"), unit("S2", "且死亡数为0", quote="No deaths")).verdict == "supported"
     # a quote that is not in the cited text does not count either
-    invented = check(text, unit("S1", "ORR为32%"), unit("S2", "且死亡率为5%", quote="mortality 5%"))
+    invented = check(text, unit("S1", "ORR为32%"), unit("S2", "且死亡数为0", quote="mortality 5%"))
     assert invented.units[1].reason.startswith("quote_not_found") and invented.verdict == "insufficient"
 
 
 def test_a_segment_nobody_handled_keeps_the_sentence_pending():
-    result = check("ORR为32%，且死亡率为5%[E1]。", unit("S1", "ORR为32%"))
+    result = check("ORR为32%，且死亡数为0[E1]。", unit("S1", "ORR为32%"))
     assert (result.verdict, codes(result)) == ("insufficient", ["segment_unhandled"])
     assert result.form_check.status == "failed" and result.form_check.handled == {"S1": ["U1"], "S2": []}
     assert check("ORR为32%[E1]。").form_check.problems[0].code == "empty_result"
@@ -88,6 +88,16 @@ def test_a_negation_stands_on_a_located_quote_or_a_checked_field_and_the_models_
     assert check(sentence, unsure).verdict == "insufficient"  # the program does not turn the model's doubt into support
 
 
+def test_a_supported_number_is_in_the_cited_text_or_named_in_the_reason_and_a_repeated_one_is_no_claim():
+    text = "ORR为45%[E1]。"
+    unexplained = check(text, unit("S1", "ORR为45%"))
+    assert unexplained.units[0].reason.startswith("numeric_unexplained") and unexplained.units[0].labels == ["NUM"]
+    assert check(text, unit("S1", "ORR为45%", reason="45%为35%加10个百分点")).verdict == "supported"
+    note = unit("S1", "ORR为32%", kind="no_claim", verdict="no_claim", quote=None, reason="建议")
+    assert check("ORR为32%[E1]。", note).verdict == "insufficient"
+    assert check("ORR为32%[E1]。", note, known_numbers={"32%"}).verdict == "no_claim"
+
+
 def test_a_repeated_quote_is_recorded_everywhere_and_never_taken_at_the_first():
     text = "剂量为3 mg[E1]。"
     unresolved = check(text, unit("S1", "剂量为3 mg", quote="The dose was 3 mg"))
@@ -102,33 +112,33 @@ def test_a_repeated_quote_is_recorded_everywhere_and_never_taken_at_the_first():
 
 
 def test_governed_by_maps_a_segment_to_unit_numbers_and_refuses_what_it_cannot_map():
-    text = "如果ORR为32%，则死亡率为5%[E1]。"
+    text = "如果ORR为32%，则死亡数为0[E1]。"
     condition = unit("S1", "如果ORR为32%", kind="condition", verdict="no_claim", quote=None)
-    result = check(text, condition, unit("S2", "则死亡率为5%", verdict="supported", quote=None, governed_by=["S1"]))
+    result = check(text, condition, unit("S2", "则死亡数为0", verdict="supported", quote=None, governed_by=["S1"]))
     assert [(u.id, u.governed_by, u.conditional) for u in result.units] == [("U1", [], True), ("U2", ["U1"], True)]
     assert result.verdict == "no_claim" and coverage_view(result) == {
-        "index": 1, "stated": [], "conditional": ["如果ORR为32%", "则死亡率为5%"]}
-    nowhere = check(text, condition, unit("S2", "则死亡率为5%", quote=None, governed_by=["S7"]))
+        "index": 1, "stated": [], "conditional": ["如果ORR为32%", "则死亡数为0"]}
+    nowhere = check(text, condition, unit("S2", "则死亡数为0", quote=None, governed_by=["S7"]))
     assert codes(nowhere) == ["governed_by_unmapped"] and nowhere.verdict == "insufficient"
-    preassigned = check(text, condition, unit("S2", "则死亡率为5%", quote=None, governed_by=["H1"]), known_ids={"H1"})
+    preassigned = check(text, condition, unit("S2", "则死亡数为0", quote=None, governed_by=["H1"]), known_ids={"H1"})
     assert preassigned.units[1].governed_by == ["H1"] and preassigned.form_check.status == "passed"
 
 
 def test_a_fact_inside_a_conditional_sentence_is_checked_as_usual():
-    text = "如果ORR为32%，则获批，且死亡率为5%[E1]。"
+    text = "如果ORR为32%，则获批，且死亡数为0[E1]。"
     condition = unit("S1", "如果ORR为32%", kind="condition", verdict="no_claim", quote=None)
     consequent = unit("S2", "则获批", kind="condition", verdict="no_claim", quote=None, governed_by=["S1"])
-    assert check(text, condition, consequent, unit("S3", "且死亡率为5%", quote="No deaths")).verdict == "supported"
-    unsupported = check(text, condition, consequent, unit("S3", "且死亡率为5%", quote=None))
-    assert unsupported.verdict == "insufficient" and coverage_view(unsupported)["stated"] == ["且死亡率为5%"]
+    assert check(text, condition, consequent, unit("S3", "且死亡数为0", quote="No deaths")).verdict == "supported"
+    unsupported = check(text, condition, consequent, unit("S3", "且死亡数为0", quote=None))
+    assert unsupported.verdict == "insufficient" and coverage_view(unsupported)["stated"] == ["且死亡数为0"]
 
 
 def test_overlapping_units_must_be_declared_and_a_contradiction_outlives_a_failed_form_check():
-    text = "ORR为32%，死亡率为5%[E1]。"
-    twice = check(text, unit("S1", "ORR为32%"), unit("S1", "ORR"), unit("S2", "死亡率为5%", quote="No deaths"))
+    text = "ORR为32%，死亡数为0[E1]。"
+    twice = check(text, unit("S1", "ORR为32%"), unit("S1", "ORR"), unit("S2", "死亡数为0", quote="No deaths"))
     assert codes(twice) == ["undeclared_overlap"] and twice.verdict == "insufficient"
     declared = check(text, unit("S1", "ORR为32%"), unit("S1", "ORR", governed_by=["S1"]),
-                     unit("S2", "死亡率为5%", quote="No deaths"))
+                     unit("S2", "死亡数为0", quote="No deaths"))
     assert declared.form_check.status == "passed"
     contradicted = check(text, unit("S1", "ORR为32%", verdict="contradicted"))  # S2 never handled
     assert contradicted.form_check.status == "failed" and contradicted.verdict == "contradicted"

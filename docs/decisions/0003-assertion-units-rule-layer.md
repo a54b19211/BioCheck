@@ -34,5 +34,6 @@ no connector word (获批进入医保) has no mark at all.
 
 ## Consequences
 
-- The semantic part (prompt, output schema, batch limits) comes with `/v2/verify`; `/v1/verify` is unchanged.
+- The semantic part (prompt, output schema, batch limits) is `/v2/verify`, docs/decisions/0004; `/v1/verify` is
+  unchanged.
 - A word list that is wrong costs a pending sentence or a missed cut, never a wrong "supported" on its own.

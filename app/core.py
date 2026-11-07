@@ -1,7 +1,6 @@
 """generate / verify / revise. Requests are plain dicts (see service.py); the model caller is injected."""
 import json
 import os
-import re
 from typing import Literal
 
 from pydantic import BaseModel
@@ -84,11 +83,15 @@ def materials(req):
                                 "research_scope", "previous_report", "hypotheses") if req.get(k) is not None}
 
 
+TIME_FIELDS = ("first_seen_at", "proof_available_at", "replay_mode")
+
+
 def references(req):
     """id -> the text a citation may be checked against (analysis results as canonical JSON)."""
     refs = {e["id"]: {"ref": e["id"], "title": e.get("title", ""), "source_kind": e["source_kind"],
                       "verified": e["verified"], "published_at": e.get("published_at"),
-                      "origin_group": e.get("origin_group"), "text": e["text"]}
+                      "origin_group": e.get("origin_group"), "text": e["text"],
+                      **{k: e[k] for k in TIME_FIELDS if e.get(k)}}  # only what the request gave: v1 has none
             for e in req.get("evidence", [])}
     for a in req.get("analysis_results", []):
         body = {k: a.get(k) for k in ("method", "output", "calculation_basis", "limitations")}
@@ -119,8 +122,7 @@ def context(sentences, claim):
 
 
 def hints(claim, refs):
-    cited = [" ".join(str(refs[r].get(k) or "") for k in ("title", "published_at", "text")) for r in claim["citations"]]
-    return C.numeric_hints(claim["text"], cited)
+    return C.numeric_hints(claim["text"], C.cited_texts(claim["citations"], refs))
 
 
 def mark_superseded(evidence, updates):
@@ -159,8 +161,7 @@ def _check_quotes(claim, answer, refs):
 def _unexplained_numbers(claim, answer, refs):
     """Numbers of the sentence missing from its cited texts that the reason does not name. The reason must name
     the number itself, not merely contain its digits ("E3", "2023")."""
-    return [t for t in hints(claim, refs)
-            if not re.search(r"(?<![A-Za-z0-9_.])" + re.escape(t.rstrip("%")) + r"(?![0-9])", answer.reason)]
+    return C.unnamed_numbers(hints(claim, refs), answer.reason)
 
 
 def judge(claim, answer, refs, evidence, known=frozenset()):
@@ -194,7 +195,7 @@ def judge(claim, answer, refs, evidence, known=frozenset()):
         claim["scope_span"] = answer.scope_span
 
 
-def _triage(sentences, refs, evidence, updates):
+def triage(sentences, refs, evidence, updates):
     """Settle what needs no model: a sentence citing an unknown id is marked here; the others are pending, each
     with the problems of the source rules and the read requests those raise.
     Returns (pending, any unknown ref, read requests, {index: source problems})."""
@@ -217,7 +218,7 @@ def _triage(sentences, refs, evidence, updates):
     return pending, unknown_ref, reads, source_problems
 
 
-def _claims_payload(req, batch, sentences, refs, updates):
+def claims_payload(req, batch, sentences, refs, updates):
     cited = list(dict.fromkeys(r for c in batch for r in c["citations"]))
     return {"question": req["question"],
             "claims": [{"index": c["index"], "text": c["text"], "citations": c["citations"],
@@ -251,7 +252,7 @@ def _judge_batch(batch, out, error, sentences, refs, evidence, asked):
     return reads
 
 
-def _apply_source_problems(pending, source_problems):
+def apply_source_problems(pending, source_problems):
     """A source rule broken by a sentence makes it insufficient (a contradiction stays one), whatever the model
     said."""
     for claim in pending:
@@ -264,27 +265,38 @@ def _apply_source_problems(pending, source_problems):
                 claim["verdict"] = "insufficient"
 
 
-def _coverage(req, sentences, budget):
+def check_coverage(req, sentences, budget, prompt=VERIFY_COVERAGE, views=None):
     """Whether the draft answers the question. Only the text: given the sentence verdicts, the model just
-    repeats them as coverage gaps."""
-    payload = {"question": req["question"], "sentences": [{"index": c["index"], "text": c["text"]} for c in sentences],
+    repeats them as coverage gaps. views: more to say about a sentence, by index (what it states, what is only a
+    condition)."""
+    views = views or {}
+    payload = {"question": req["question"],
+               "sentences": [{"index": c["index"], "text": c["text"], **views.get(c["index"], {})} for c in sentences],
                "materials": [{"id": e["id"], "title": e.get("title", ""), "source_kind": e["source_kind"]}
                              for e in req.get("evidence", [])]
                             + [{"id": a["id"], "method": a.get("method", "")} for a in req.get("analysis_results", [])],
                "research_scope": req.get("research_scope", {}),
                "previous_report": req.get("previous_report")}
-    out, error = budget.ask("verify_coverage", VERIFY_COVERAGE, payload, CoverageOut)
+    out, error = budget.ask("verify_coverage", prompt, payload, CoverageOut)
     return out.model_dump() if out else {
         "verdict": "uncertain",
         "reason": "unchecked: 已达max_llm_calls上限" if error == "llm_call_limit" else f"coverage_failed: {error}"}
 
 
-def _status(sentences, unknown_ref, coverage):
+def report_status(sentences, unknown_ref, coverage):
     if unknown_ref or any(c["verdict"] == "contradicted" for c in sentences):
         return "FAIL"
     if any(c["verdict"] not in ("supported", "no_claim") for c in sentences) or coverage["verdict"] != "complete":
         return "REVIEW"
     return "PASS"
+
+
+def dedupe_reads(reads):
+    """One read request per reference, the first reason winning."""
+    unique = {}
+    for request in reads:
+        unique.setdefault(request["ref"], request)
+    return list(unique.values())
 
 
 def verify(req, llm=chat_json):
@@ -295,21 +307,18 @@ def verify(req, llm=chat_json):
     sentences = C.sentences(req["draft"])
     if not sentences:
         raise InputError("empty_draft", "draft中没有可核验的句子")
-    pending, unknown_ref, reads, source_problems = _triage(sentences, refs, evidence, updates)
+    pending, unknown_ref, reads, source_problems = triage(sentences, refs, evidence, updates)
     asked = set(C.numeric_tokens(req["question"]))  # e.g. a replay cutoff restated in a scope note
     for batch in C.batches(pending):
-        payload = _claims_payload(req, batch, sentences, refs, updates)
+        payload = claims_payload(req, batch, sentences, refs, updates)
         out, error = budget.ask("verify_claims", CLAIM_VERIFY, payload, CheckBatch)
         reads += _judge_batch(batch, out, error, sentences, refs, evidence, asked)
-    _apply_source_problems(pending, source_problems)
-    coverage = _coverage(req, sentences, budget)
-    read_requests = {}
-    for request in reads:
-        read_requests.setdefault(request["ref"], request)  # first reason per ref wins
+    apply_source_problems(pending, source_problems)
+    coverage = check_coverage(req, sentences, budget)
     for claim in sentences:
         claim.pop("paragraph")
-    return {"status": _status(sentences, unknown_ref, coverage), "claims": sentences, "coverage": coverage,
-            "read_requests": list(read_requests.values()), "llm_calls": budget.calls}
+    return {"status": report_status(sentences, unknown_ref, coverage), "claims": sentences, "coverage": coverage,
+            "read_requests": dedupe_reads(reads), "llm_calls": budget.calls}
 
 
 _NOT_OVERREACH = ("no_citation", "unknown_ref", "unchecked", "batch_failed")

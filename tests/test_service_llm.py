@@ -56,6 +56,25 @@ def test_verify_over_http_returns_claims_and_llm_calls(client):
     assert "evaluation label" not in json.dumps([p for _, p, _ in llm.payloads], ensure_ascii=False)
 
 
+def test_v2_verify_refuses_unknown_fields_and_a_rules_version_it_does_not_have(client):
+    body = dict(request(), draft="2.5 mg/kg组ORR为32%[E1]。")
+    http = client(FakeLLM(verify_claims=lambda p: {"units": [
+        {"sentence": 1, "segment": "S1", "fragment": "2.5 mg/kg组ORR为32%", "kind": "fact", "verdict": "supported",
+         "quotes": [{"ref": "E1", "quote": "ORR was 32%"}]}], "splits": [{"sentence": 1, "assessment": "complete"}]}))
+    assert http.post("/v2/verify", json=body).status_code == 401
+    answer = http.post("/v2/verify", json=dict(body, labels=["evaluation label"]), headers=auth())
+    assert (answer.status_code, answer.json()["error_code"]) == (400, "invalid_request")
+    nested = dict(body, evidence=[dict(body["evidence"][0], first_seen_at="2026-11-06T00:00:00Z", extra=1)])
+    assert http.post("/v2/verify", json=nested, headers=auth()).status_code == 400
+    stale = http.post("/v2/verify", json=dict(body, rules_version="biocheck.segment_rules.v0"), headers=auth())
+    assert (stale.status_code, stale.json()["error_code"]) == (409, "rules_version_mismatch")
+    ok = http.post("/v2/verify", json=body, headers=auth())
+    assert ok.status_code == 200, ok.text
+    claim = ok.json()["claims"][0]
+    assert ok.json()["status"] == "PASS" and {"segments", "units", "form_check", "semantic_split"} <= set(claim)
+    assert ok.json()["rules_version"] == "biocheck.segment_rules.v1" and ok.json()["checker_version"]
+
+
 def test_generate_model_failure_is_a_502_with_llm_calls(client):
     response = client(FakeLLM()).post("/v1/generate", json=request(), headers=auth())
     assert response.status_code == 502

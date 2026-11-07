@@ -84,6 +84,18 @@ def batches(claims, size=MAX_BATCH):
     return groups
 
 
+def cited_texts(citations, refs):
+    """The text of each cited material with its title and date: where a number of the sentence may come from."""
+    return [" ".join(str(refs[r].get(k) or "") for k in ("title", "published_at", "text")) for r in citations]
+
+
+def unnamed_numbers(tokens, reason):
+    """The tokens the reason does not name. It must name the number itself, not merely contain its digits ("E3",
+    "2023")."""
+    return [t for t in tokens
+            if not re.search(r"(?<![A-Za-z0-9_.])" + re.escape(t.rstrip("%")) + r"(?![0-9])", reason)]
+
+
 def numeric_tokens(text):
     text = re.sub(r"\b(?:NCT\d+|PMID\s*:?\s*\d+)\b", "", DATE.sub("", TIMESTAMP.sub("", CITE.sub("", text))))
     text = re.sub(r"[（(]\s*\d{1,2}\s*[)）]", "", text)  # list markers such as （1） are not data

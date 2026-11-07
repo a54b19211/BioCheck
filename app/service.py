@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.exceptions import HTTPException
 
-from . import core, dimension_rules, item_rules, measurement_rules
+from . import core, dimension_rules, item_rules, measurement_rules, unit_verify
 from .llm import chat_json
 
 
@@ -378,6 +378,54 @@ class ExtractionRequestV2(Strict):
     items: list[MeasurementItemV2] = Field(min_length=1, max_length=50)
 
 
+# ---- /v2/verify: strict like the extraction contracts, and the evidence carries the time facts the semantic check
+# reads (design task book 06, section 3). rules_version is the segment-rule version the caller expects.
+
+class EvidenceV2(Evidence, Strict):
+    first_seen_at: str | None = None
+    proof_available_at: str | None = None
+    replay_mode: Literal["current", "operational_replay", "public_history_reconstruction"] | None = None
+
+
+class AnalysisResultV2(AnalysisResult, Strict):
+    pass
+
+
+class SourceUpdateV2(SourceUpdate, Strict):
+    pass
+
+
+class SourceRelationV2(SourceRelation, Strict):
+    pass
+
+
+class ResearchScopeV2(ResearchScope, Strict):
+    pass
+
+
+class PreviousReportV2(PreviousReport, Strict):
+    pass
+
+
+class HypothesisFactV2(HypothesisFact, Strict):
+    pass
+
+
+class HypothesisV2(Hypothesis, Strict):
+    facts: list[HypothesisFactV2] = []
+
+
+class VerifyRequestV2(VerifyRequest, Strict):
+    evidence: list[EvidenceV2] = []
+    analysis_results: list[AnalysisResultV2] = []
+    source_updates: list[SourceUpdateV2] = []
+    source_relations: list[SourceRelationV2] = []
+    research_scope: ResearchScopeV2 = ResearchScopeV2()
+    previous_report: PreviousReportV2 | None = None
+    hypotheses: list[HypothesisV2] = []
+    rules_version: str | None = None
+
+
 def error(status, code, message, **extra):
     return JSONResponse({"error_code": code, "message": message, **extra}, status_code=status)
 
@@ -431,6 +479,10 @@ def create_app(llm=chat_json):
     @app.post("/v1/revise")
     def revise(req: ReviseRequest):
         return core.revise(req.model_dump(), llm)
+
+    @app.post("/v2/verify")
+    def verify_units(req: VerifyRequestV2):
+        return unit_verify.verify(req.model_dump(), llm)
 
     @app.post("/v2/extraction-consistency")
     def extraction_consistency_v2(req: ExtractionRequestV2):
