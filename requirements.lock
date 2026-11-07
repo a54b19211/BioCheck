@@ -24,8 +24,8 @@ click==8.5.0 \
     --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360 \
     --hash=sha256:ba0d2089de75ea0310e2dde03160e6ca10009947fb95a182f9b54021bb272e34
     # via uvicorn
-extraction-contract==1.13.0 \
-    --hash=sha256:e0876f9efd4da0cd10c75d5f1f8578a01afa7740a66439e46833e5dff77d0000
+extraction-contract==1.13.1 \
+    --hash=sha256:e8a1e14bfd9687920187324cf0e6f1c9b634d17d29fafbdc81d5b1859a75b7cf
     # via -r requirements-contract.txt
 fastapi==0.162.0 \
     --hash=sha256:3785963de305dd09912426cb81f2d230fce98ab3521cdfe97265c8d14983128c \
