@@ -42,6 +42,9 @@ The first real-model run left three things the contract had not said clearly eno
 
 - `checker_version` of a `/v2/verify` receipt is `biocheck.unit_verify.v2`; receipts of v1 and v2 are not
   comparable without that in hand.
-- Not changed: a later date in the cited text stays a clue for the time check (no rule on it); the writer prompt for
-  slots still says `gaps` states facts and the scope of the search; `question`, `uncertainty`, `visibility` and
-  `revision` sections are still fact sections.
+- Not changed: a later date in the cited text stays a clue for the time check (no rule on it); `question`,
+  `uncertainty`, `visibility` and `revision` sections are still fact sections.
+- The writer prompt for slots (`WRITE_BY_SLOT`) was aligned with the `gaps` rule right after this change (commit
+  "prompts: a gaps paragraph may explain the limits of the evidence and their grounded implications"): `evidence`
+  states the facts of the material; `gaps` may explain the limits of the evidence and their grounded implications,
+  and still never writes an inference as an established fact.
