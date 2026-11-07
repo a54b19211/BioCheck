@@ -214,6 +214,13 @@ make check-install   # 一个用完即删的新环境：按锁文件安装、逐
 make check-lock      # requirements.lock 是否仍与 requirements*.txt 一致（要访问包索引）
 ```
 
+`make lint` 的规则：所有仓库共用一份基础规则 `E4, E7, E9, F, W, I`（devtools `README.md` 的“共用的代码门槛”）。圈复杂度只由 `make metrics` 管，不开 ruff 的 C90。在基础规则之上多开规则的仓库：
+
+| 仓库 | 多开的规则 |
+|---|---|
+| BioRadar | `E`（含行宽 E501，110） |
+| BioCheck | `E`（含行宽 E501，120） |
+
 `make check-lock`、`make lock` 要访问 PyPI（`make venv`、`make check-install` 在 uv 缓存里没有的包也要下载）。zktest 上直连 PyPI 有时超时，这时只给这几条命令临时加上本机已有的 HTTP 代理（mihomo，监听 127.0.0.1:7890），例如 `HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 make check-lock`；不要把代理写进全局配置。`check-lock` 的结果有两种失败：解析本身失败（包索引或网络不可用、依赖解不出来）时报 `check-lock did not run`，make 显示 `Error 2`，锁文件没有比较过，不能因此重做锁；只有解析成功而内容不同时才报 `requirements.lock is stale`（make 显示 `Error 1`）。两种情况 make 都以非零状态结束。
 
 - 直接依赖写在 `requirements.txt`（运行 + 测试 + ruff）、`requirements-contract.txt`（契约 wheel 的版本和 sha256）和 `requirements-transport.txt`（模型调用的 HTTP 一侧，共享包 `zk-llm-transport` 0.1.1 的 wheel 哈希；wheel 在同级 `llm-transport/dist`，或 `LLM_TRANSPORT_WHEELS=<目录>`）；`requirements.lock` 是由它们解析出的完整锁，每个包都带 sha256，解析目标是 CPython 3.12、x86_64-unknown-linux-gnu（锁文件头一行写着解析命令）。改了这些文件后运行 `make lock`，再提交锁文件。

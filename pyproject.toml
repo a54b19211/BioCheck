@@ -4,16 +4,15 @@ line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
-extend-select = ["E", "W", "I", "C90"]
-# Full-width Chinese punctuation is the very text this service reads and writes.
-ignore = ["RUF001", "RUF002", "RUF003"]
+# the base rule set of every repository (devtools README): pyflakes, the pycodestyle errors that are bugs or
+# hide statements, whitespace, import order. Complexity is gated by scripts/code_metrics.py, not by C90.
+# Extra here: all of E, line length (E501) included.
+select = ["E4", "E7", "E9", "F", "W", "I"]
+extend-select = ["E"]
 
 [tool.ruff.lint.per-file-ignores]
 # one prompt instruction per line, as the model reads it
 "app/prompts.py" = ["E501"]
-
-[tool.ruff.lint.mccabe]
-max-complexity = 20
 
 [tool.code-metrics]
 # what scripts/code_metrics.py measures (that script is the same file in every repository)
