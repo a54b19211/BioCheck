@@ -75,6 +75,29 @@ def test_a_conditional_sentence_states_nothing_and_the_coverage_check_is_told_so
     assert (coverage["stated"], coverage["conditional"]) == ([], ["如果ORR为32%", "则获批"])
 
 
+def test_the_condition_travels_with_its_consequence_and_the_models_doubt_is_not_covered_up():
+    draft = "如果ORR为32%，或死亡数为0，则获批；如果PFS为2.8个月，则暂停[E1]。"
+    conditions = [unit(1, segment, fragment, kind="condition", verdict="no_claim")
+                  for segment, fragment in (("S1", "如果ORR为32%"), ("S2", "或死亡数为0"), ("S4", "如果PFS为2.8个月"))]
+
+    def consequences(first="no_claim", second="no_claim", **second_extra):
+        return [unit(1, "S3", "则获批", kind="inference", verdict=first, governed_by=["S1", "S2"]),
+                unit(1, "S5", "则暂停", kind="inference", verdict=second, governed_by=["S4"], **second_extra)]
+
+    def judged(*units):
+        return run(draft, FakeLLM(verify_claims=answers(*conditions, *units)))["claims"][0]["verdict"]
+    llm = FakeLLM(verify_claims=answers(*conditions, *consequences()))
+    claim = run(draft, llm)["claims"][0]
+    sent = next(p for stage, p, _ in llm.payloads if stage == "verify_claims")["claims"][0]
+    # a consequence is sent with the segments of the condition it answers (one condition may take several)
+    assert {s["id"]: s["consequent_of"] for s in sent["segments"] if "consequent_of" in s} == {
+        "S3": ["S1", "S2"], "S5": ["S4"]}
+    assert (claim["verdict"], [u["conditional"] for u in claim["units"]]) == ("no_claim", [True] * 5)
+    # the program reads the model's verdict on a consequence and does not replace it: doubt and contradiction stand
+    assert judged(*consequences("insufficient")) == "insufficient"
+    assert judged(*consequences("no_claim", "contradicted", quote=QUOTE_ORR)) == "contradicted"
+
+
 def test_an_incomplete_split_does_not_pass_a_sentence_as_no_claim_either():
     draft = "如果ORR为32%，则获批[E1]。"
     condition = unit(1, "S1", "如果ORR为32%", kind="condition", verdict="no_claim")
@@ -89,7 +112,7 @@ def test_an_incomplete_split_does_not_pass_a_sentence_as_no_claim_either():
 INFERRED = "2.5 mg/kg组ORR为32%，说明该剂量有效[E1]。"
 
 
-def test_an_inference_is_supported_only_in_a_judgment_scenarios_or_recommendation_section():
+def test_an_inference_is_supported_in_a_judgment_gaps_scenarios_or_recommendation_section_not_in_evidence():
     def inferring(sentence):
         return [unit(sentence, "S1", "2.5 mg/kg组ORR为32%", quote=QUOTE_ORR),
                 unit(sentence, "S2", "说明该剂量有效", kind="inference", quote=QUOTE_ORR)]
@@ -101,8 +124,14 @@ def test_an_inference_is_supported_only_in_a_judgment_scenarios_or_recommendatio
         return run(draft, FakeLLM(verify_claims=answers(*inferring(1), *inferring(2))), sections=sections)["claims"]
 
     assert [c["verdict"] for c in checked("judgment", "evidence")] == ["supported", "insufficient"]
-    assert [c["verdict"] for c in checked("gaps", "judgment")] == ["insufficient", "supported"]
+    assert [c["verdict"] for c in checked("gaps", "evidence")] == ["supported", "insufficient"]
     assert [c["verdict"] for c in checked("scenarios", "recommendation")] == ["supported", "supported"]
+    # gaps is no free pass: an inference the model did not find supported stays insufficient there
+    doubtful = [unit(1, "S1", "2.5 mg/kg组ORR为32%", quote=QUOTE_ORR),
+                unit(1, "S2", "说明该剂量有效", kind="inference", verdict="insufficient", quote=QUOTE_ORR)]
+    gaps = [{"kind": "gaps", "start": 0, "end": width}]
+    in_gaps = run(INFERRED, FakeLLM(verify_claims=answers(*doubtful)), sections=gaps)
+    assert in_gaps["claims"][0]["verdict"] == "insufficient"
     fact = checked("judgment", "evidence")[1]
     assert fact["units"][1]["reason"].startswith("inference_in_fact_section")
     assert fact["units"][0]["verdict"] == "supported"  # only the inference is held back
@@ -220,3 +249,24 @@ def test_the_time_facts_reach_the_model_and_a_later_date_is_only_a_clue():
     assert (clue["stated"], clue["later_dates"], clue["replay_mode"]) == ("2020-05-07", ["2020-05-19"], "current")
     assert [u["verdict"] for u in claim["units"]] == ["insufficient", "supported"]
     assert claim["verdict"] == "insufficient"
+
+
+class Reading(FakeLLM):
+    """Keeps the system prompt of each call as well."""
+
+    def __init__(self, **answers):
+        super().__init__(**answers)
+        self.systems = []
+
+    def __call__(self, stage, system, payload, model_cls, **options):
+        self.systems.append((stage, system))
+        return super().__call__(stage, system, payload, model_cls, **options)
+
+
+def test_the_unit_prompt_of_contract_v2_is_named_and_reaches_the_model():
+    llm = Reading(verify_claims=compound())
+    result = run(COMPOUND, llm)
+    system = next(text for stage, text in llm.systems if stage == "verify_claims")
+    assert result["checker_version"] == "biocheck.unit_verify.v2"
+    for clause in ("“原文未提及/未出现X”", "条件后果", "consequent_of"):
+        assert clause in system

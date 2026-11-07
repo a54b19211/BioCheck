@@ -23,9 +23,9 @@ take either.
   the paragraphs and drops what it cannot place, and it is the only reader that knows what a hypothesis id is.
 - **`POST /v2/verify` takes `sections`** (`[{kind, start, end}]`, characters of `draft`, strict like the rest of the
   request): inside the draft, not empty, not overlapping. A sentence that lies wholly in a section other than
-  judgment, scenarios or recommendation is a sentence of a fact section, and `check_sentence(fact_section=True)`
-  does not let an inference unit stand as supported there. Without `sections`, or for a sentence in none of them,
-  nothing changes. The model is not told the section: the rule is the program's.
+  judgment, gaps (since 0006), scenarios or recommendation is a sentence of a fact section, and
+  `check_sentence(fact_section=True)` does not let an inference unit stand as supported there. Without `sections`,
+  or for a sentence in none of them, nothing changes. The model is not told the section: the rule is the program's.
 - **Each claim of `/v2/verify` has `call`**, the position in `llm_calls` of the last `verify_claims` call that
   carried the sentence: after a cut-off split, the call of the smaller batch, and also when that call failed (the
   sentence is then unchecked and its reason says so). `null` when no call carried it.

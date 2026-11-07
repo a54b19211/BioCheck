@@ -15,14 +15,16 @@ from . import claims as C
 from . import core
 from .llm import chat_json
 from .prompts import CLAIM_VERIFY_UNITS, VERIFY_COVERAGE_UNITS
-from .segment_rules import RULES_VERSION, VisibleSource, split_segments, time_clues
+from .segment_rules import RULES_VERSION, VisibleSource, condition_context, split_segments, time_clues
 from .unit_rules import ReportedUnit, check_sentence, coverage_view
 
-CHECKER_VERSION = "biocheck.unit_verify.v1"
+CHECKER_VERSION = "biocheck.unit_verify.v2"
 BATCH_SEGMENTS = 24  # candidate segments in one model call
 LONG_SENTENCE_SEGMENTS, LONG_SENTENCE_CHARS = 8, 300  # a sentence over either goes alone
 NO_CITATION = "no_citation: 本句陈述可核查事实却没有引用，不能借用相邻句的引用"
-INFERENCE_SECTIONS = ("judgment", "scenarios", "recommendation")  # the report sections where an inference may stand
+# Where an inference may stand: gaps explains what the limits of the evidence imply, and whether that is grounded is
+# the semantic check's to say. evidence (and any section not named) states facts only.
+INFERENCE_SECTIONS = ("judgment", "gaps", "scenarios", "recommendation")
 
 
 # ---- what the model answers: flat lists, the sentence named by the program's index
@@ -85,11 +87,18 @@ def plan_batches(pending, sizes):
     return batches, too_big
 
 
+def _offered(segments):
+    """The segments as the model reads them; one that answers a condition says which segments hold it."""
+    answers = condition_context(segments)
+    return [dict(id=s.id, text=s.text, **({"consequent_of": answers[s.id]} if s.id in answers else {}))
+            for s in segments]
+
+
 def _payload(inputs, batch):
     updates = inputs.req.get("source_updates", [])
     payload = core.claims_payload(inputs.req, batch, inputs.sentences, inputs.refs, updates)
     for entry, claim in zip(payload["claims"], batch):
-        entry["segments"] = [{"id": s.id, "text": s.text} for s in split_segments(claim["text"])]
+        entry["segments"] = _offered(split_segments(claim["text"]))
         clues = time_clues(claim["text"], inputs.sources)
         if clues:
             entry["time_clues"] = clues

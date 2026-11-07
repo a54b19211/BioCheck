@@ -139,6 +139,23 @@ def find_markers(text, offset=0):
     return sorted(found, key=lambda marker: marker.start)
 
 
+# ---- the condition a consequent answers
+
+def condition_context(segments):
+    """{segment id: ids of the segments that hold the condition it answers} for each segment that opens with 则/那么
+    (in "如果A，或B，则C", S3 answers S1 and S2). A hint for the semantic check, like the markers: how far a
+    condition reaches is the model's reading of the sentence."""
+    context, opened = {}, None
+    for at, segment in enumerate(segments):
+        if CONSEQUENT.match(segment.text):
+            if opened is not None:
+                context[segment.id] = [s.id for s in segments[opened:at]]
+            opened = None
+        elif opened is None and any(m.kind == "condition" for m in segment.markers):
+            opened = at
+    return context
+
+
 # ---- time clues
 
 MONTHS = {name: number for number, names in enumerate(
