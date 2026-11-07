@@ -34,7 +34,7 @@ sections是按阅读顺序排列的段落，每个元素一个自然段（段内
 kind取judgment、evidence、gaps、scenarios之一。slot和status只用于judgment段落，其它段落填null。
 slots是程序给出的、稿件必须回答的问题，编号如J1。每个slot恰好写一个judgment段落：slot填该编号（只能用slots里给出的编号，不自造），text回答该slot的question，status写这一段所陈述的状态：supported材料支持肯定的结论，refuted材料支持相反的结论，insufficient本次材料不足以回答，open尚未判定、仍有待查，conflict可比较的材料相互冲突。text的结论必须与status一致，status不是supported或refuted时不把结论写成已成立。
 有hypotheses时，每条假设写一个judgment段落，slot填该假设的编号（如H1），不填status，text按上文「情报假设」的写法，放在所有slot段落之后。
-evidence段落写支持、反对和竞争性解释的原文事实，gaps段落写没查到、查到不适用、读不到的内容和检索范围的限制，scenarios段落写可能的走向及其前提，以及会改变判断的复核条件；三种各可以有一个或几个段落。推断、判断和影响只写在judgment和scenarios段落；evidence和gaps段落只陈述材料里的事实和检索范围，每个可核查句仍带自己的引用。
+evidence段落写支持、反对和竞争性解释的原文事实，gaps段落写没查到、查到不适用、读不到的内容和检索范围的限制，scenarios段落写可能的走向及其前提，以及会改变判断的复核条件；三种各可以有一个或几个段落。推断和判断只写在judgment和scenarios段落；evidence段落陈述材料里的事实；gaps段落可以解释证据的局限及其有依据的影响，但仍不得把推断写成已证实的事实；每个可核查句仍带自己的引用。
 本次没有任务方目标：不写建议，也没有recommendation段落。"""
 
 # paragraphs the sentence-level and the unit-level verify prompts share
