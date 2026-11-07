@@ -1,0 +1,8 @@
+# Functions allowed over 80 lines or complexity 20 (scripts/code_metrics.py --check). Format:
+#   <path>:<qualified name>  <lines>/<cc>  <reason>
+# <lines>/<cc> is the size when the entry was written: a listed function may not grow past it. The check fails
+# on a new violator, on an entry that is within the limits now, and on a listed function that got bigger, so the
+# list only shrinks.
+app/core.py:_revision_target  20/21  over the complexity limit by one when the gate was introduced; split when the function is next changed
+app/core.py:judge  29/23  verdict assembly with one branch per outcome; split per outcome when the function is next changed
+app/llm.py:chat_json  61/21  model call with its retry and parsing inline; replaced when BioCheck moves to the shared llm-transport
