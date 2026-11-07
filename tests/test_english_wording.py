@@ -193,12 +193,12 @@ def test_a_digit_glued_to_a_word_is_no_number(client):  # noqa: F811
     assert seen(item, "value")["value"] == ("mismatch", "value_attached_to_a_word")
 
 
-def test_a_digit_behind_the_metrics_last_word_is_a_footnote_mark(client):  # noqa: F811
+def test_a_digit_behind_the_metrics_last_word_is_only_a_hint_of_a_footnote_mark(client):  # noqa: F811
     f = fields_for(W18, "2", None, None, None, metric="epidemiologically linked")
     span_of(f, "value", W18, "linked 2", 7, 1)
     item = ask(client, W18, "epidemiologically linked 2 and 141 were classified", f)
-    assert item["status"] == "inconsistent"
-    assert seen(item, "value")["value"] == ("mismatch", "value_is_a_footnote_mark")
+    assert item["status"] == "unchecked"  # the position alone does not prove a mark; a later count looks the same
+    assert seen(item, "value")["value"] == ("unsupported", "value_may_be_a_footnote_mark")
 
 
 W11 = ("# Zika virus disease–Panama\n\nOn 14 December 2015, the National IHR Focal Point (NFP) of Panama notified "

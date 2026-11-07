@@ -228,7 +228,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
   - 一句列出多个数（`N cases, including M deaths`、`N cases and M deaths`）且句中只有一个期间时，期间属于列表里的每个数：条件是它在所有数之前或之后，句中没有别的日期，每个数（第一个除外）由 including / and / of which 等引出。
   - `a total of` 是总量词；`As of <date>, a total of N` 证明累计口径；只写起点的期间（`since September 2012`）是累计，不是 flow。
   - 期间的新写法：混合精度（`Between August 2015 and 23 January 2016` 是日精度，首月从 1 日起）、ISO 周（`week 43 of 2017`、`week 34 (ending 27 August 2023)`，周一到周日）、`On 12 November 2015`（一天的区间）、年区间（`Between 2017 and 2021` 是月精度 2017-01 到 2021-12）、只有 `start` 的开放区间。没写年份、`to date`、`So far` 照旧不支持。
-  - 明确的错误判值 mismatch（条目 inconsistent）：数字粘在词后（`case1`）、紧跟指标末词的一位数字（`linked 2`）、写出的区间的一端（`between 38 to 74`）、更正声明里的旧值（`corrected from 1,595`）、`N of the M confirmed cases died` 里的 N 当成病例数。只是有歧义的仍是 unchecked。
+  - 文本里有结构依据的错读判值 mismatch（条目 inconsistent）：数字粘在词后（`case1`）、写出的区间的一端（`between 38 to 74`）、更正声明里的旧值（`corrected from 1,595`）、`N of the M confirmed cases died` 里的 N 当成病例数。紧跟指标末词的一位数字（`linked 2`）只凭位置证明不了是脚注（后置的计数也可能这样写），值给 unsupported（`value_may_be_a_footnote_mark`），条目 unchecked。只是有歧义的仍是 unchecked。
   - 拼写的 one 到 twelve 可以作为值（`extraction_normalize.v6`）。
 - 每个维度另给一个结果 `dims[kind]`，只有同时满足以下几条才是 match：原文在该 span 处写着这个值；文本里有这类角色的明确依据（标签、病例名词、人群词、「按报告日统计」这类口径写法等，机构、日期和裸数字都不算）；它所在短语没有否定、排除，也没有和别的成员并列；它和值在同一局部句且中间没有别的数量，或者在值的有效祖先标题里；它填满了一个能识别的结构位置。其余一律 unsupported。维度结果不改变条目状态。
 

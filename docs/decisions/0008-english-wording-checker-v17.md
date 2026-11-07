@@ -31,10 +31,12 @@ before), and it reads a value only when its local sentence has no CJK character 
   week (Monday to Sunday) and a week ending on a date are seven days; "On 12 November 2015" is an interval of one
   day; "Between 2017 and 2021" is a range of months (2017-01 to 2021-12); "since September 2012" is an interval with
   only `start`. A period without a year, "to date" and "So far" stay refused.
-- **Errors that are inconsistent.** A digit glued to a word (`case1`), a single digit right behind the metric's last
-  word (`linked 2`), one end of a written range (`between 38 to 74`), the old values of "corrected from 1,595 and
-  571", and N of "N of the M confirmed cases died" read as a count of the M. Each is a mismatch of the value, so the
-  item is inconsistent. A reading that is only ambiguous stays unchecked; no rule guesses.
+- **Errors that are inconsistent.** A digit glued to a word (`case1`), one end of a written range (`between 38 to
+  74`), the old values of "corrected from 1,595 and 571", and N of "N of the M confirmed cases died" read as a count
+  of the M. Each has structure in the text that says so; it is a mismatch of the value, so the item is inconsistent.
+  A reading that is only ambiguous stays unchecked; no rule guesses. A single digit right behind the metric's last
+  word (`linked 2`) is such a case: it may be a footnote mark, a later count looks the same, so the value is
+  unsupported (`value_may_be_a_footnote_mark`) and the item unchecked.
 - **Spelled counts** one to twelve are numbers (`extraction_normalize.v6`, contract 1.15.0).
 
 Not decided here: the event word of a quantity in a later comma group ("..., including 82 deaths, were reported"),

@@ -998,7 +998,8 @@ MODIFIER_RUN = re.compile(r"\s*(?:(?:" + "|".join(MODIFIERS) + r")\s+){0,2}", re
 
 def _footnote_mark(m, v0, v1):
     """A single digit right behind the metric's own last word ("epidemiologically linked 2"): a count names its
-    noun after the number, a number behind the noun is a mark, an ordinal or a label."""
+    noun after the number, so a number behind the noun may be a footnote mark, an ordinal or a label - may be:
+    the position alone proves none of them."""
     metric = m.f["metric"]
     if v1 - v0 != 1 or not stated(metric) or m.at_value or not m.ptext[v0].isdigit():
         return False
@@ -1024,22 +1025,23 @@ def _part_of_metric_population(m):
 
 
 def value_flaw(m):
-    """Why a value that is a whole number at its span is still not the count the item claims, or None: a digit
-    glued to a word (case1, H5N1), a footnote mark, one end of a written range, an old value named by a correction,
-    the numerator of "N of the M <metric>" read as a count of the M."""
+    """The result of a value that is a whole number at its span when the wording says it is not the count the item
+    claims, or None. A mismatch only where the text itself says so: a digit glued to a word (case1, H5N1), one end of
+    a written range, an old value named by a correction, the numerator of "N of the M <metric>" read as a count of the
+    M. A single digit behind the metric's last word (linked 2) is only a position: unsupported, never a mismatch."""
     v0, v1 = m.vspan["start"] - m.pbase, m.vspan["end"] - m.pbase
     before, after = m.ptext[m.L.start - m.pbase:v0], m.ptext[v1:m.L.end - m.pbase]
     if v0 and m.ptext[v0 - 1].isascii() and m.ptext[v0 - 1].isalpha():
-        return "value_attached_to_a_word"
-    if _footnote_mark(m, v0, v1):
-        return "value_is_a_footnote_mark"
+        return outcome("mismatch", "value_attached_to_a_word")
     if RANGE_AFTER.match(after) or RANGE_LOWER_BEFORE.search(before) or (
             BETWEEN_BEFORE.search(before) and BETWEEN_AFTER.match(after)):
-        return "value_is_one_end_of_a_range"
+        return outcome("mismatch", "value_is_one_end_of_a_range")
     if SUPERSEDED.search(before):
-        return "value_is_the_superseded_one"
+        return outcome("mismatch", "value_is_the_superseded_one")
     if _part_of_metric_population(m):
-        return "value_is_part_of_the_metric_population"
+        return outcome("mismatch", "value_is_part_of_the_metric_population")
+    if _footnote_mark(m, v0, v1):
+        return outcome("unsupported", "value_may_be_a_footnote_mark")
     return None
 
 
@@ -1067,7 +1069,7 @@ def check_measurement(item, P, unit_head=None, output=False, period_whole=None, 
     m = Measure(P, f, vspan, fields, L, unit_after(L.passage["text"], vspan["end"] - L.base, output), english=english)
     flaw = value_flaw(m) if english and fields["value"]["result"] == "match" else None
     if flaw:
-        fields["value"] = outcome("mismatch", flaw)
+        fields["value"] = flaw
     fields["unit"] = unit_result(m, unit_head)
     fields["denominator"], m.partners = denominator_result(m)
     fields["period"], m.period = period_result(m, period_whole)
