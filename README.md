@@ -209,6 +209,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 make venv            # .venv：只按 requirements.lock 安装（含契约 wheel），每个包都校验 sha256
 make test            # 全部测试（不联网，模型用 FakeLLM）
 make lint            # ruff
+make metrics         # 函数长度 80 行 / 圈复杂度 20 的门槛（scripts/code_metrics.py；例外清单 scripts/metrics_exceptions.txt 只许变短）
 make check-install   # 一个用完即删的新环境：按锁文件安装、逐个导入 app/ 模块、再跑一遍测试
 make check-lock      # requirements.lock 是否仍与 requirements*.txt 一致（要访问包索引）
 ```
@@ -216,7 +217,7 @@ make check-lock      # requirements.lock 是否仍与 requirements*.txt 一致�
 `make check-lock`、`make lock` 要访问 PyPI（`make venv`、`make check-install` 在 uv 缓存里没有的包也要下载）。zktest 上直连 PyPI 有时超时，这时只给这几条命令临时加上本机已有的 HTTP 代理（mihomo，监听 127.0.0.1:7890），例如 `HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 make check-lock`；不要把代理写进全局配置。`check-lock` 的结果有两种失败：解析本身失败（包索引或网络不可用、依赖解不出来）时报 `check-lock did not run`，make 显示 `Error 2`，锁文件没有比较过，不能因此重做锁；只有解析成功而内容不同时才报 `requirements.lock is stale`（make 显示 `Error 1`）。两种情况 make 都以非零状态结束。
 
 - 直接依赖写在 `requirements.txt`（运行 + 测试 + ruff）和 `requirements-contract.txt`（契约 wheel 的版本和 sha256）；`requirements.lock` 是由它们解析出的完整锁，每个包都带 sha256，解析目标是 CPython 3.12、x86_64-unknown-linux-gnu（锁文件头一行写着解析命令）。改了这两个文件后运行 `make lock`，再提交锁文件。
-- 已验证的组合：uv 0.13.0、CPython 3.12.15、711 个测试通过。
+- 已验证的组合：uv 0.13.0、CPython 3.12.15；通过数量以 `make check` 的输出为准，这里不写数字。
 
 `tests/test_checker_golden.py` 用 `tests/fixtures/checker_golden.jsonl` 逐字节比对三个契约的全部样例回执；只有提升 `CHECKER_VERSION` 时才用 `PYTHONPATH=. python tests/golden.py` 重新生成。
 
