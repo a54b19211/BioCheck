@@ -21,7 +21,7 @@ export SERVICE_TOKEN=一个足够长的随机串
 uvicorn app.service:app --host 127.0.0.1 --port 18562
 ```
 
-契约包钉在 1.13.1（checker v16 / 契约 v3 的期间规则 `period_span_whole_v5` 自 1.13.0 起提供）。`make check-install` 在一个全新的虚拟环境里按锁文件安装，再逐个导入 `app/` 下的模块，并在这个环境里跑一遍测试（规则运行时才会读契约包的函数），钉的版本缺东西时在这里就失败（`UV_OFFLINE=1` 只用本地 uv 缓存）。
+契约包钉在 1.15.0（checker v17 / 契约 v3 的期间规则 `period_span_whole_v5` 自 1.13.0 起提供，拼写数字的 `decimal_text_v6` 自 1.15.0 起提供）。`make check-install` 在一个全新的虚拟环境里按锁文件安装，再逐个导入 `app/` 下的模块，并在这个环境里跑一遍测试（规则运行时才会读契约包的函数），钉的版本缺东西时在这里就失败（`UV_OFFLINE=1` 只用本地 uv 缓存）。
 
 `GET /health` 不需要令牌；`/v1/*` 都要请求头 `Authorization: Bearer $SERVICE_TOKEN`。没有配置 `SERVICE_TOKEN` 时服务拒绝所有 `/v1/*` 请求（503）。
 
@@ -219,10 +219,17 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 
 ## 抽取一致性接口 v3（测量加业务维度）
 
-**POST /v3/extraction-consistency**（契约 `extraction_consistency.v3`，checker `biocheck.extraction_rules.v16`，规则在 `app/dimension_rules.py`）
+**POST /v3/extraction-consistency**（契约 `extraction_consistency.v3`，checker `biocheck.extraction_rules.v17`，规则在 `app/dimension_rules.py`）
 
 - 请求与 v2 相同，另外每个测量条目可以带 `dims`（每类至多一个：disease、population、date_basis、indication、product_or_class、milestone_definition、entity、stage、denominator_definition，各自写明 value 和 span）和 `family`。
 - 测量字段和条目状态与 v2 的规则相同，只是用这一版契约的读法：metric 短语里的单位按 `extraction_normalize.v4`，完整期间按 v5（上一行以完整日期结尾，例如公告的「发布时间」，不算期间的延续）；产出类单位（`120万支` 的单位是 `万支`，数量级不丢）和「实际产出」才算 flow。
+- **英文写法**（`docs/decisions/0008-english-wording-checker-v17.md`；只对不含中日韩字符的局部句生效，/v2 不变）：
+  - 一句里有多个数时每个数各自核验：值之后的字段，只要它和值之间没有别的数就是这个值的；值之前的字段，前面没有别的数才是；括号里的百分数（`(CFR of 14%)`）不是另一个数；括号里的逗号不切开值所在的组。
+  - 一句列出多个数（`N cases, including M deaths`、`N cases and M deaths`）且句中只有一个期间时，期间属于列表里的每个数：条件是它在所有数之前或之后，句中没有别的日期，每个数（第一个除外）由 including / and / of which 等引出。
+  - `a total of` 是总量词；`As of <date>, a total of N` 证明累计口径；只写起点的期间（`since September 2012`）是累计，不是 flow。
+  - 期间的新写法：混合精度（`Between August 2015 and 23 January 2016` 是日精度，首月从 1 日起）、ISO 周（`week 43 of 2017`、`week 34 (ending 27 August 2023)`，周一到周日）、`On 12 November 2015`（一天的区间）、年区间（`Between 2017 and 2021` 是月精度 2017-01 到 2021-12）、只有 `start` 的开放区间。没写年份、`to date`、`So far` 照旧不支持。
+  - 明确的错误判值 mismatch（条目 inconsistent）：数字粘在词后（`case1`）、紧跟指标末词的一位数字（`linked 2`）、写出的区间的一端（`between 38 to 74`）、更正声明里的旧值（`corrected from 1,595`）、`N of the M confirmed cases died` 里的 N 当成病例数。只是有歧义的仍是 unchecked。
+  - 拼写的 one 到 twelve 可以作为值（`extraction_normalize.v6`）。
 - 每个维度另给一个结果 `dims[kind]`，只有同时满足以下几条才是 match：原文在该 span 处写着这个值；文本里有这类角色的明确依据（标签、病例名词、人群词、「按报告日统计」这类口径写法等，机构、日期和裸数字都不算）；它所在短语没有否定、排除，也没有和别的成员并列；它和值在同一局部句且中间没有别的数量，或者在值的有效祖先标题里；它填满了一个能识别的结构位置。其余一律 unsupported。维度结果不改变条目状态。
 
 ## 开发环境与测试

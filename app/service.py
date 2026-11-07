@@ -307,10 +307,10 @@ class PeriodValue(Strict):
         if self.value is not None:
             if self.start is not None or self.end is not None or not re.match(form, self.value):
                 raise ValueError("a period has a value of its precision, or start and end, not both")
-        elif (self.start is None or self.end is None or self.type != "interval"
-              or self.precision not in ("day", "month")
-              or not re.match(form, self.start) or not re.match(form, self.end)):
-            raise ValueError("a period range is an interval of day or month precision with start and end")
+        elif (self.start is None or self.type != "interval" or self.precision not in ("day", "month")
+              or not re.match(form, self.start) or not (self.end is None or re.match(form, self.end))):
+            raise ValueError("a period range is an interval of day or month precision with a start and an end, "
+                             "or only a start when it is open at its end (since ...)")
         return self
 
 

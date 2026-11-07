@@ -40,7 +40,8 @@ request, under the same checker version, gets the same answer forever.
 | v3 | v13 | 978af0a | a dimension fills a whole slot of a recognised structure (1.10.0) |
 | v3 | v14 | 2b395ae | only independently proven, kind-compatible neighbours bound a metric slot (1.11.0) |
 | v3 | v15 | 73e425f | output measures: a reporting-period date basis written as such, a magnitude kept with its classifier (万支), output a flow only as actual output (1.12.0) |
-| v3 | v16 | b67aaef | extraction_normalize.v5 (1.13.0): a complete date ending the line above (a notice's 发布时间) is its own, not part of the body's period. Current for contract v3 |
+| v3 | v16 | b67aaef | extraction_normalize.v5 (1.13.0): a complete date ending the line above (a notice's 发布时间) is its own, not part of the body's period |
+| v3 | v17 | r3/biocheck-v17 | English wording (docs/decisions/0008): several numbers in a sentence, one period for a list, "a total of", weeks, "since ...", "On ...", ranges of years, marks and ends of ranges as errors, spelled counts (extraction_normalize.v6, 1.15.0). Current for contract v3 |
 
 ## Consequences
 

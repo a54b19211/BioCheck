@@ -9,7 +9,7 @@ other numbers, dates or event words elsewhere in an English paragraph never supp
 
 import dataclasses
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from extraction_contract import normalize as norm
@@ -32,7 +32,10 @@ MONTHS = {m: i for i, m in enumerate(("january", "february", "march", "april", "
                                       "september", "october", "november", "december"), 1)}
 MONTH_RE = "(" + "|".join(m.capitalize() for m in MONTHS) + ")"
 EN_DATE = re.compile(r"\b\d{1,2}\s+" + MONTH_RE + r"(?:\s+\d{4})?\b|\b" + MONTH_RE + r"\s+\d{4}\b|\b(?:19|20)\d{2}\b")
+GROUP_COMMAS = "，,、"  # the cuts of item_rules' group that stay inside one sentence
 SENTENCE_END = re.compile(r"(?<=[a-z0-9\)\]%])\.\s+(?=[A-Z(\[])")
+# a percentage in a parenthesis ("(CFR of 14%)", "4717 (56.5%) cases") states a rate of the number before it
+PERCENT_PAREN = re.compile(r"\((?:[^()\d]|\([^()\d]*\))*\d+(?:[.,]\d+)?\s*%(?:[^()\d]|\([^()\d]*\))*\)")
 
 # Word lists (versioned with CHECKER_VERSION).
 EVENT = re.compile(r"批准|获批|注册|受理|发布|报告|新增|新发|发生|上市|\b(?:recorded|reported|notified|approved|new)\b",
@@ -42,6 +45,10 @@ CUMULATIVE = re.compile(r"累计|累积|\bcumulative(?:ly)?\b|\byear-to-date\b|�
 AS_OF = re.compile(r"截至|截止|\bas of\b", re.IGNORECASE)
 STATE = re.compile(r"现有|正在|在研|活跃|在册|有效|\b(?:active|currently|ongoing)\b", re.IGNORECASE)
 TOTAL_WORD = re.compile(r"共|合计|总计|全部|\bin total\b", re.IGNORECASE)
+# English wording of contract v3 (the `english` switch of check): "a total of" is a total word, and after an as-of
+# date a cumulative wording
+TOTAL_WORD_EN = re.compile(TOTAL_WORD.pattern + r"|\btotal of\b", re.IGNORECASE)
+A_TOTAL_OF = re.compile(r"\btotal of\b", re.IGNORECASE)
 RESTRICTION = re.compile(r"其中|包括|除|以外|不含|部分|省|市|地区|县|哨点|\b(?:among|of which|excluding|except|only|"
                          r"province|region|district)\b", re.IGNORECASE)
 DEICTIC = re.compile(r"^(?:我国|本国|本省|本市|本院|我院|该|此|这|our\b|this\b|these\b|the country\b)", re.IGNORECASE)
@@ -52,6 +59,8 @@ CHANGE = re.compile(r"(?:下降|增长|上升|减少|提高|降低|增加|同比
 CN_CONNECT = set("共为是有达计了：:，,、（( |")
 EN_CONNECT = {"of", "total", "is", "was", "were", "are", "reached", "reported", "recorded", "had", "has", "have",
               "been", "with", "at", "in", "from", "and", "registered", "confirmed", "notified"}
+# English wording of contract v3: a count introduced by "including" is exact by position like one after "of"
+LIST_CONNECT = EN_CONNECT | {"including"}
 # "no unit" is proven only by punctuation or the end of the sentence after the number (whitespace skipped)
 NO_UNIT_AFTER = re.compile(r"^\s*(?:$|[，。；;,.!?！？)）\]】|/])")
 # the quantity's own phrase must be covered by the item's fields (versioned word lists):
@@ -151,16 +160,17 @@ _EN_RANGE = re.compile(r"(?:(?:[Ff]rom|[Bb]etween|[Ss]ince)\s+)?(\d{1,2}\s+)?" +
 _RELATIVE = re.compile(r"近\d+年|今年|去年|上月|本月|上半年|下半年|\bpast\b|\blast\b|\bthis year\b|\brecent")
 
 
-def _english_range(found):
+def _english_range(found, month_start=False):
     """(period, None) or (None, reason) of an English range match. Without a first year the stated one is
-    carried back - across a new year, the one before."""
+    carried back - across a new year, the one before. month_start: a first month written without its day before
+    an end with one is a range of days from the 1st (all of the first month is in it)."""
     d1, m1, y1, d2, m2, y2 = found.groups()
     m1, m2, y2 = MONTHS[m1.lower()], MONTHS[m2.lower()], int(y2)
     y1 = int(y1) if y1 else (y2 if m1 <= m2 else y2 - 1)
-    if bool(d1) != bool(d2):
+    if bool(d1) != bool(d2) and not (month_start and d2):
         return None, "mixed_precision_range"
-    if d1:
-        start, end, precision = _ymd(y1, m1, d1.strip()), _ymd(y2, m2, d2.strip()), "day"
+    if d2:
+        start, end, precision = _ymd(y1, m1, d1.strip() if d1 else 1), _ymd(y2, m2, d2.strip()), "day"
     else:
         start, end, precision = _ym(y1, m1), _ym(y2, m2), "month"
     if not start or not end:
@@ -168,6 +178,53 @@ def _english_range(found):
     if start > end:
         return None, "range_ends_before_it_starts"
     return {"type": "interval", "precision": precision, "start": start, "end": end}, None
+
+
+# English forms of contract v3 (canonical_period(..., english=True)): the ones the WHO notices of the D1 batch write -
+# one named day, an ISO 8601 week (Monday to Sunday) or a week ending on a date, an interval open at its start, a
+# range of years. A week is a range of days; a range of years one of months (no day the text does not state).
+_EN_DAY = re.compile(r"[Oo]n (\d{1,2}) " + MONTH_RE + r" (\d{4})")
+_EN_WEEK = re.compile(r"(?:(?:[Ii]n|[Dd]uring) )?[Ww]eek (\d{1,2}) of (\d{4})")
+_EN_WEEK_ENDING = re.compile(r"(?:(?:[Ii]n|[Dd]uring) )?[Ww]eek \d{1,2} \((?:week )?ending (?:on )?(\d{1,2}) "
+                             + MONTH_RE + r" (\d{4})\)")
+_EN_SINCE = re.compile(r"[Ss]ince (?:(\d{1,2}) )?" + MONTH_RE + r" (\d{4})")
+_EN_YEARS = re.compile(r"(?:[Ff]rom|[Bb]etween) ((?:19|20)\d{2}) (?:to|and|until|through) ((?:19|20)\d{2})")
+
+
+def _week_of(first):
+    return {"type": "interval", "precision": "day", "start": first.isoformat(),
+            "end": (first + timedelta(days=6)).isoformat()}
+
+
+def _english_forms(t):
+    """(period, None), (None, reason), or None when t is none of the English forms above."""
+    found = _EN_DAY.fullmatch(t)
+    if found:
+        day = _ymd(found.group(3), MONTHS[found.group(2).lower()], found.group(1))
+        return ({"type": "interval", "precision": "day", "value": day}, None) if day else (None, "invalid_date")
+    found = _EN_WEEK.fullmatch(t)
+    if found:
+        try:
+            return _week_of(date.fromisocalendar(int(found.group(2)), int(found.group(1)), 1)), None
+        except ValueError:
+            return None, "invalid_date"
+    found = _EN_WEEK_ENDING.fullmatch(t)
+    if found:
+        last = _ymd(found.group(3), MONTHS[found.group(2).lower()], found.group(1))
+        return (_week_of(date.fromisoformat(last) - timedelta(days=6)), None) if last else (None, "invalid_date")
+    found = _EN_SINCE.fullmatch(t)
+    if found:
+        day, month, year = found.groups()
+        start = _ymd(year, MONTHS[month.lower()], day) if day else _ym(year, MONTHS[month.lower()])
+        return ({"type": "interval", "precision": "day" if day else "month", "start": start}, None) if start \
+            else (None, "invalid_date")
+    found = _EN_YEARS.fullmatch(t)
+    if found:
+        first, last = found.groups()
+        if first > last:
+            return None, "range_ends_before_it_starts"
+        return {"type": "interval", "precision": "month", "start": f"{first}-01", "end": f"{last}-12"}, None
+    return None
 
 
 def _refusal(t):
@@ -179,10 +236,12 @@ def _refusal(t):
     return "period_form_not_supported"
 
 
-def canonical_period(text):
+def canonical_period(text, english=False):
     """(period dict, None) or (None, reason). A period is {"type": point|interval, "precision": day|month|quarter|
-    half|year, "value"} or, for an interval spanning several units, {"start", "end"} instead of "value". No day or
-    month the text does not state is added; a period without a year or relative to an unstated date is refused."""
+    half|year, "value"} or, for an interval spanning several units, {"start", "end"} instead of "value" ({"start"}
+    alone when it is open at its end, english only). No day or month the text does not state is added; a period
+    without a year or relative to an unstated date is refused. english: the forms of contract v3 (mixed-precision
+    ranges, weeks, "since ...", "On ...", ranges of years)."""
     t = squash(text).translate(item_rules.FULLWIDTH)
     for pattern, build in _PERIOD_FORMS:
         m = re.fullmatch(pattern, t)
@@ -196,11 +255,20 @@ def canonical_period(text):
             else (None, "invalid_date")
     m = _EN_RANGE.fullmatch(t)
     if m:
-        return _english_range(m)
+        return _english_range(m, english)
+    if english:
+        found = _english_forms(t)
+        if found is not None:
+            return found
     year = norm.english_year(t)
     if year:
         return year, None
     return None, _refusal(t)
+
+
+def open_at_its_end(period):
+    """An interval written with only its start ("since September 2012")."""
+    return "start" in period and "end" not in period
 
 
 def inclusive_days(period):
@@ -226,6 +294,22 @@ class Local:
         g_start, g_end = P.group(vspan)
         self.g_start, self.g_end = max(g_start, self.start), min(g_end, self.end)
         self.pid, self.base = pid, base
+        self.vspan, self.english = vspan, False  # use_english(): the English wording rules read English sentences only
+
+    def use_english(self):
+        """Switch on the English wording rules for this value. Commas inside a parenthesis ("9 029 (suspected,
+        probable or confirmed) cases and 18 deaths") then do not cut its group."""
+        self.english = True
+        text, lo, hi = self.passage["text"], self.start - self.base, self.end - self.base
+        a, depth = self.vspan["start"] - self.base, 0
+        while a > lo and not (text[a - 1] in GROUP_COMMAS and depth == 0):
+            depth += (text[a - 1] == ")") - (text[a - 1] == "(" and depth > 0)
+            a -= 1
+        b, depth = self.vspan["end"] - self.base, 0
+        while b < hi and not (text[b] in GROUP_COMMAS and depth == 0):
+            depth += (text[b] == "(") - (text[b] == ")" and depth > 0)
+            b += 1
+        self.g_start, self.g_end = self.base + a, self.base + b
 
     def text(self, a=None, b=None):
         a, b = self.start if a is None else a, self.end if b is None else b
@@ -239,6 +323,8 @@ class Local:
         """Numbers in [a, b) that are not dates and not inside any excluded span."""
         text = self.text(a, b)
         text = EN_DATE.sub(item_rules.spaces, item_rules.blank_dates(text))
+        if self.english:
+            text = PERCENT_PAREN.sub(item_rules.spaces, text)
         out = []
         for ms, me in norm.number_tokens(text):
             s, e = a + ms, a + me
@@ -269,10 +355,12 @@ def ratios_in(clause_text, offset):
     return out
 
 
-def whole_number(P, span):
-    """The span is exactly one written number of its passage - a space-grouped number is one."""
+def whole_number(P, span, spelled=False):
+    """The span is exactly one written number of its passage - a space-grouped number is one (spelled: also a
+    count written as one of the words one to twelve, extraction_normalize.v6)."""
     p = P.by_id[span["passage"]]
-    return norm.is_whole_number(p["text"], span["start"] - p["start"], span["end"] - p["start"])
+    whole = norm.is_whole_number_v6 if spelled else norm.is_whole_number
+    return whole(p["text"], span["start"] - p["start"], span["end"] - p["start"])
 
 
 def whole_period(P, span, period_whole=None):
@@ -426,11 +514,22 @@ def next_to(ptext, pbase, ratio, vspan):
     return set(between) <= ADJACENT
 
 
-def own_place(L, P, span, vspan, partners, exclude):
+def _group_stretch(L, span, vspan, english):
+    """The stretch of the value's group that holds no other quantity if `span` is the value's own. English wording
+    of contract v3: a quantity's phrase runs from its number to the next quantity, so a field after the value is
+    separated from it only by a quantity between them, and a field before it by one anywhere before the value."""
+    if english and span["start"] >= vspan["end"]:
+        return vspan["end"], span["start"]
+    if english and span["end"] <= vspan["start"]:
+        return L.g_start, vspan["start"]
+    return L.g_start, L.g_end
+
+
+def own_place(L, P, span, vspan, partners, exclude, english=False):
     """Where a field span stands to the value: "group" (its group, no other quantity), "before" (same sentence,
     before the value, no other quantity in between), "heading" (an effective ancestor heading), or why not."""
     if L.inside(span, group=True):
-        others = L.numbers(L.g_start, L.g_end, exclude + [span] + partners)
+        others = L.numbers(*_group_stretch(L, span, vspan, english), exclude + [span] + partners)
         return "several" if others else "group"
     if L.inside(span) and span["end"] <= vspan["start"]:
         return "several" if L.numbers(span["end"], vspan["start"], exclude + partners) else "before"
@@ -453,6 +552,7 @@ class Measure:
     partners: list = dataclasses.field(default_factory=list)
     cover: list = dataclasses.field(default_factory=list)
     period: dict | None = None
+    english: bool = False
 
     @property
     def ptext(self):
@@ -482,22 +582,23 @@ class Measure:
                 if stated(x) and x["span"] is not span]
 
     def place(self, span):
-        return own_place(self.L, self.P, span, self.vspan, self.partners, self.others(span))
+        return own_place(self.L, self.P, span, self.vspan, self.partners, self.others(span), self.english)
 
     def covered(self, pos):
         return any(c["start"] <= pos < c["end"] for c in self.cover)
 
 
-def value_result(item, P, vtext):
+def value_result(item, P, vtext, spelled=False):
     """The value span is one whole written number inside the quote, equal to the stated canonical decimal."""
     vf = item["fields"]["value"]
     if not P.inside(vf["span"], item["locator"]):
         return outcome("mismatch", "value_outside_quote")
-    if not whole_number(P, vf["span"]):
+    if not whole_number(P, vf["span"], spelled):
         return outcome("mismatch", "value_span_not_a_whole_number")
-    if norm.decimal_text(vtext) is None:
+    written = (norm.decimal_text_v6 if spelled else norm.decimal_text)(vtext)
+    if written is None:
         return outcome("unsupported", "value_not_a_plain_number")
-    if Decimal(norm.decimal_text(vtext)) != Decimal(vf["value"]):
+    if Decimal(written) != Decimal(vf["value"]):
         return outcome("mismatch", "value_differs_from_span")
     return outcome("match", span=vf["span"])
 
@@ -574,6 +675,36 @@ def denominator_result(m):
     return result, partners
 
 
+# A sentence that lists quantities ("N cases, including M deaths") has one period when it says one: the list is
+# introduced by these words before each member after the first (English wording of contract v3).
+LIST_INTRO = re.compile(r"(?:\b(?:including|and|of which|of whom|among them|with)|[,(])\s*"
+                        r"(?:(?:a total of|at least|over|more than|about|approximately|nearly|up to)\s+)*$",
+                        re.IGNORECASE)
+OTHER_TIME = re.compile(EN_DATE.pattern + r"|\b[Ww]eek \d")
+
+
+def shared_period(m, span):
+    """The period span stands in the value's sentence beyond other quantities and is meant for the whole list: it
+    is the only date of the sentence, it lies before every quantity (a fronted adverbial) or after every one, and
+    each quantity from it to the value, the first of the sentence aside, is introduced as a member of the list
+    (including, and, of which, ...) - never "bringing the total to 40"."""
+    L = m.L
+    if not L.inside(span):
+        return False
+    for found in OTHER_TIME.finditer(L.text()):
+        if not (span["start"] <= L.start + found.start() and L.start + found.end() <= span["end"]):
+            return False
+    v = ends(m.vspan)
+    quantities = sorted(L.numbers(L.start, L.end, m.others(span) + [span] + m.partners) + [v])
+    lead = span["end"] <= v[0]
+    beyond = quantities[0][0] < span["start"] if lead else quantities[-1][1] > span["end"]
+    if beyond:
+        return False
+    low, high = (span["end"], v[1]) if lead else (v[0], span["start"])
+    members = [q for q in quantities if low <= q[0] and q[1] <= high]
+    return all(q == quantities[0] or LIST_INTRO.search(L.text(L.start, q[0])) for q in members)
+
+
 def period_result(m, period_whole):
     """(result, the checked canonical period or None): the span is the whole written period, its canonical form
     is the stated one, and it stands in the value's group or before it in its sentence."""
@@ -581,7 +712,7 @@ def period_result(m, period_whole):
     if not stated(pf):
         return outcome("unsupported", "period_not_stated"), None
     ptxt = m.P.text(pf["span"])
-    got, why = canonical_period(ptxt or "")
+    got, why = canonical_period(ptxt or "", m.english)
     if ptxt is None:
         return outcome("mismatch", "period_span_outside_passage"), None
     if got is None:
@@ -591,11 +722,13 @@ def period_result(m, period_whole):
     if got != pf["value"]:
         return outcome("mismatch", "period_differs_from_canonical_span"), None
     place = m.place(pf["span"])
+    if place == "several" and m.english and shared_period(m, pf["span"]):
+        place = "list"
     start = pf["span"]["start"] - m.pbase
     past = re.search(r"past (\d+) days\s*\(\s*$", m.ptext[max(0, start - 24):start], re.IGNORECASE)
-    if past and got.get("precision") == "day" and "start" in got and int(past.group(1)) != inclusive_days(got):
+    if past and got.get("precision") == "day" and "end" in got and int(past.group(1)) != inclusive_days(got):
         return outcome("mismatch", "past_n_days_disagrees_with_dates"), None
-    if place in ("group", "before"):
+    if place in ("group", "before", "list"):
         return outcome("match", "period_" + place, pf["span"]), got
     return outcome("unsupported", "several_quantities_in_value_sentence" if place == "several"
                    else "period_not_in_value_sentence"), None
@@ -656,7 +789,7 @@ def _object_metric_total(m, item_id):
         covered.append(f["period"]["span"])
     rest = _blank_covered(L.text(L.g_start, L.g_end), L.g_start, covered)
     lead_rest = _blank_covered(L.text(L.start, L.g_start), L.start, covered)
-    total = TOTAL_WORD.search(rest)
+    total = (TOTAL_WORD_EN if m.english else TOTAL_WORD).search(rest)
     obj = squash(f["object"]["value"]) if stated(f["object"]) else ""
     if m.fields["object"]["result"] != "match" or m.fields["metric"]["result"] != "match":
         return outcome("unsupported", "object_metric_total_needs_checked_object_and_metric")
@@ -664,7 +797,9 @@ def _object_metric_total(m, item_id):
         return outcome("unsupported", "no_total_word_in_value_group")
     if RESTRICTION.search(rest) or RESTRICTION.search(lead_rest):
         return outcome("unsupported", "restriction_outside_the_fields")
-    if any(obj not in squash(h) or RESTRICTION.search(h.replace(obj, " ")) for h in headings_over(m.P, m.vspan)):
+    fold = str.casefold if m.english else str  # an English heading writes the disease with a capital
+    if any(fold(obj) not in fold(squash(h)) or RESTRICTION.search(fold(h).replace(fold(obj), " "))
+           for h in headings_over(m.P, m.vspan)):
         return outcome("unsupported", "heading_may_restrict_the_total")
     return outcome("match", "object_metric_total",
                    {"passage": L.pid, "start": L.g_start + total.start(), "end": L.g_start + total.end()})
@@ -691,12 +826,17 @@ def words_outside_fields(m):
                 if CJK.match(ch) and ch not in CN_FUNCTION and not m.covered(L.g_start + i)]
     aux = AUX.search(ptext, vspan["end"] - pbase, L.g_end - pbase)
     zone_end = pbase + aux.start() if aux else L.g_end
+    if m.english:  # the next quantity's own phrase is not this one's
+        following = L.numbers(vspan["end"], zone_end, m.others(None) + m.partners)
+        zone_end = following[0][0] if following else zone_end
     metric_end = m.f["metric"]["span"]["end"]
-    left_out = []
-    for w in re.finditer(r"[A-Za-z][A-Za-z-]*", ptext[vspan["end"] - pbase:zone_end - pbase]):
+    zone, glue, left_out = ptext[vspan["end"] - pbase:zone_end - pbase], GLUE, []
+    if m.english:  # a rate in a parenthesis ("(CFR of 14%)") and the connector to the next quantity qualify nothing
+        zone, glue = PERCENT_PAREN.sub(item_rules.spaces, zone), GLUE | {"including"}
+    for w in re.finditer(r"[A-Za-z][A-Za-z-]*", zone):
         pos = vspan["end"] + w.start()
         word = w.group(0).lower()
-        if m.covered(pos) or word in GLUE or (pos >= metric_end and EVENT.fullmatch(word)):
+        if m.covered(pos) or word in glue or (pos >= metric_end and EVENT.fullmatch(word)):
             continue
         left_out.append(w.group(0))
     return left_out
@@ -735,6 +875,8 @@ def _flow(m, output):
     vgroup, sentence = m.vgroup, m.L.text()
     if m.period["type"] == "point":
         return outcome("mismatch", "flow_needs_an_interval")
+    if m.english and open_at_its_end(m.period):
+        return outcome("unsupported", "open_period_not_a_flow")
     if CUMULATIVE.search(sentence) or AS_OF.search(sentence):
         return outcome("unsupported", "cumulative_or_as_of_wording")
     if EVENT.search(vgroup):
@@ -746,9 +888,13 @@ def _flow(m, output):
 
 def _cumulative(m, output):
     pf = m.f["period"]
-    own = m.vgroup + " " + ((m.P.text(pf["span"]) or "") if stated(pf) else "")
-    if CUMULATIVE.search(own):
+    period_text = (m.P.text(pf["span"]) or "") if stated(pf) else ""
+    if CUMULATIVE.search(m.vgroup + " " + period_text):
         return outcome("match", "cumulative_wording")
+    if m.english and AS_OF.search(period_text) and A_TOTAL_OF.search(m.vgroup):
+        return outcome("match", "as_of_total")  # "As of 4 November 2022, a total of 368 ...": the total to a date
+    if m.english and open_at_its_end(m.period):
+        return outcome("match", "cumulative_since_start")  # "since September 2012": from then to the notice
     return outcome("unsupported", "no_cumulative_wording")
 
 
@@ -808,7 +954,7 @@ def _exact_by_position(m, gap):
         field_ends.add(f["period"]["span"]["end"])
     word = re.search(r"([A-Za-z-]+)$", gap)
     if not gap.strip(" ，,、（(|") or m.L.g_start + len(gap) in field_ends or gap[-1] in CN_CONNECT \
-            or (word and word.group(1).lower() in EN_CONNECT):
+            or (word and word.group(1).lower() in (LIST_CONNECT if m.english else EN_CONNECT)):
         return outcome("match", "exact_by_position")
     return outcome("unsupported", "exactness_not_provable")
 
@@ -839,7 +985,65 @@ def modality_result(m):
             else outcome("mismatch", "modality_is_" + found))
 
 
-def check_measurement(item, P, unit_head=None, output=False, period_whole=None):
+# Wording that says a number at a value span is not the count the item claims (English wording of contract v3).
+SUPERSEDED = re.compile(r"\b(?:corrected|revised|amended|updated|adjusted)\s+(?:(?:down|up)\s+)?from\s+"
+                        r"(?:[\d.,]+\s*(?:,|and)\s*)*$", re.IGNORECASE)
+RANGE_AFTER = re.compile(r"\s*(?:-|–|—)\s*\d")
+BETWEEN_BEFORE = re.compile(r"\bbetween\s+$", re.IGNORECASE)
+BETWEEN_AFTER = re.compile(r"\s*(?:to|and)\s+\d", re.IGNORECASE)
+RANGE_LOWER_BEFORE = re.compile(r"(?:\bbetween\s+[\d.,\s]*\d\s+(?:to|and)\s+|\d\s*(?:-|–|—)\s*)$", re.IGNORECASE)
+PART_OF = re.compile(_N + r"\s+of\s+(?:(?:the|these|those|all)\s+)?" + _N, re.IGNORECASE)
+MODIFIER_RUN = re.compile(r"\s*(?:(?:" + "|".join(MODIFIERS) + r")\s+){0,2}", re.IGNORECASE)
+
+
+def _footnote_mark(m, v0, v1):
+    """A single digit right behind the metric's own last word ("epidemiologically linked 2"): a count names its
+    noun after the number, a number behind the noun is a mark, an ordinal or a label."""
+    metric = m.f["metric"]
+    if v1 - v0 != 1 or not stated(metric) or m.at_value or not m.ptext[v0].isdigit():
+        return False
+    end = metric["span"]["end"] - m.pbase
+    if metric["span"]["passage"] != m.L.pid or end != v0 - 1 or end < 1:
+        return False
+    return m.ptext[end] == " " and m.ptext[end - 1].isalpha()
+
+
+def _part_of_metric_population(m):
+    """The value is the numerator of "N of the M <metric>" and the metric is the noun phrase of the M: N is some of
+    those M (the ones that died), not a count of them."""
+    metric = m.f["metric"]
+    if stated(m.f["denominator"]) or not stated(metric) or metric["span"]["passage"] != m.L.pid:
+        return False
+    sentence, start = m.L.text(), m.L.start
+    for found in PART_OF.finditer(sentence):
+        gap = metric["span"]["start"] - start - found.end(2)
+        if (start + found.start(1), start + found.end(1)) == ends(m.vspan) and gap >= 0 and MODIFIER_RUN.fullmatch(
+                sentence[found.end(2):found.end(2) + gap]):
+            return True
+    return False
+
+
+def value_flaw(m):
+    """Why a value that is a whole number at its span is still not the count the item claims, or None: a digit
+    glued to a word (case1, H5N1), a footnote mark, one end of a written range, an old value named by a correction,
+    the numerator of "N of the M <metric>" read as a count of the M."""
+    v0, v1 = m.vspan["start"] - m.pbase, m.vspan["end"] - m.pbase
+    before, after = m.ptext[m.L.start - m.pbase:v0], m.ptext[v1:m.L.end - m.pbase]
+    if v0 and m.ptext[v0 - 1].isascii() and m.ptext[v0 - 1].isalpha():
+        return "value_attached_to_a_word"
+    if _footnote_mark(m, v0, v1):
+        return "value_is_a_footnote_mark"
+    if RANGE_AFTER.match(after) or RANGE_LOWER_BEFORE.search(before) or (
+            BETWEEN_BEFORE.search(before) and BETWEEN_AFTER.match(after)):
+        return "value_is_one_end_of_a_range"
+    if SUPERSEDED.search(before):
+        return "value_is_the_superseded_one"
+    if _part_of_metric_population(m):
+        return "value_is_part_of_the_metric_population"
+    return None
+
+
+def check_measurement(item, P, unit_head=None, output=False, period_whole=None, english=False):
     """Field results of one measurement item (locator checked first, as in item_rules). The field checks run in
     this order because later ones read what earlier ones established (partners, period, object and metric)."""
     fields = {"locator": item_rules.locator_result(item, P)}
@@ -855,9 +1059,15 @@ def check_measurement(item, P, unit_head=None, output=False, period_whole=None):
         for name in FIELDS:
             fields.setdefault(name, outcome("unsupported", "no_valid_value_span"))
         return fields
-    fields["value"] = value_result(item, P, vtext)
+    fields["value"] = value_result(item, P, vtext, english)
     L = Local(P, vspan)
-    m = Measure(P, f, vspan, fields, L, unit_after(L.passage["text"], vspan["end"] - L.base, output))
+    english = english and not CJK.search(L.text())
+    if english:
+        L.use_english()
+    m = Measure(P, f, vspan, fields, L, unit_after(L.passage["text"], vspan["end"] - L.base, output), english=english)
+    flaw = value_flaw(m) if english and fields["value"]["result"] == "match" else None
+    if flaw:
+        fields["value"] = outcome("mismatch", flaw)
     fields["unit"] = unit_result(m, unit_head)
     fields["denominator"], m.partners = denominator_result(m)
     fields["period"], m.period = period_result(m, period_whole)
@@ -877,13 +1087,15 @@ def check_measurement(item, P, unit_head=None, output=False, period_whole=None):
     return fields
 
 
-def check(request, unit_head=None, output=False, period_whole=None):
+def check(request, unit_head=None, output=False, period_whole=None, english=False):
     """Contract v2: measurement items only. Raises ContractError on a contract break. unit_head: the rule for
     the unit in the bound metric phrase (default extraction_normalize.v3 unit_subject_head); output: the output
-    units and wording of contract v3; period_whole: the whole-period rule (default extraction_normalize.v2)."""
+    units and wording of contract v3; period_whole: the whole-period rule (default extraction_normalize.v2);
+    english: the English wording of contract v3 (docs/decisions/0007) - spelled counts, more period forms, one
+    period for a list of quantities, "a total of", values that are marks, ends of ranges or old values."""
     item_rules.check_request(request, primary=False)
 
     def one(item, P):
-        return check_measurement(item, P, unit_head, output, period_whole)
+        return check_measurement(item, P, unit_head, output, period_whole, english)
 
     return item_rules.answer(request, one, CONTRACT_VERSION, CHECKER_VERSION)

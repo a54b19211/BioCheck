@@ -3,7 +3,8 @@
 
 A measurement item is answered exactly as measurement_rules answers it (its fields and its status), with the
 normalisation of this contract - extraction_normalize.v4 for the unit in the bound metric phrase, v5 for the
-whole written period - and the output units and wording. Beside the fields, each business dimension the request
+whole written period, v6 for a spelled value - and the output units and wording and the English wording rules
+(docs/decisions/0007). Beside the fields, each business dimension the request
 states is judged. A dimension is "match" only when all of these hold, each from the text alone:
 1. its literal is written at its span;
 2. the role its kind names has evidence in the text - a closed grammar of explicit labels and forms (a disease
@@ -28,8 +29,8 @@ from .item_rules import outcome, written_as
 
 CONTRACT_VERSION = "extraction_consistency.v3"
 # Bump whenever a role grammar, a phrase rule or a normalisation function changes (docs/decisions/0001).
-CHECKER_VERSION = "biocheck.extraction_rules.v16"
-NORMALIZE_VERSION = norm.NORMALIZE_V4  # the bound-unit rule; the whole-period rule is v5's
+CHECKER_VERSION = "biocheck.extraction_rules.v17"
+NORMALIZE_VERSION = norm.NORMALIZE_V4  # the bound-unit rule; the whole-period rule is v5's, the value rule v6's
 
 _LABEL = r"[:：]\s*$"
 _BEFORE = {
@@ -294,7 +295,7 @@ def check(request):
     """Contract v3: the measurement check with this contract's normalisation, and each stated dimension."""
     base = dict(request, items=[{k: v for k, v in i.items() if k != "dims"} for i in request["items"]])
     out = measurement_rules.check(base, unit_head=norm.unit_subject_head_v4, output=True,
-                                  period_whole=norm.period_span_whole_v5)
+                                  period_whole=norm.period_span_whole_v5, english=True)
     P = item_rules.Passages(request["passages"])
     for answered, item in zip(out["items"], request["items"]):
         answered["dims"] = dims_of(item, P)

@@ -34,7 +34,7 @@ def answer(client, b):  # noqa: F811
     out = r.json()
     assert out["contract_version"] == "extraction_consistency.v3"
     assert out["checker_version"] == dimension_rules.CHECKER_VERSION
-    assert dimension_rules.CHECKER_VERSION == "biocheck.extraction_rules.v16"
+    assert dimension_rules.CHECKER_VERSION == "biocheck.extraction_rules.v17"
     return out["items"][0]
 
 
