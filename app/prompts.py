@@ -27,6 +27,16 @@ evidence里带superseded_by的是已被更正或撤回的旧材料：被更正�
 有hypotheses时，正文末尾加一节「情报假设」：每条假设单独一段，以它的编号开头写成「H1 待验证的假设：……」，同一段里接着写支持和反驳它的事实（各自引用 facts 里的 ref）、竞争解释、还缺什么证据、什么信号出现会使它失效。假设本身不是事实，不能写成已证实；单条信号只能支持「某事已被提出或启动」。
 draft字段放完整中文稿件。"""
 
+# the same writer when the request carries slots: the structure of the report only, no other rule changes
+WRITE_BY_SLOT = WRITE + """
+本次请求带slots：整份稿件不放在draft字段，改放在sections里，不填draft；以上对稿件的全部要求不变，只是稿件按下面的结构分段。
+sections是按阅读顺序排列的段落，每个元素一个自然段（段内不留空行、不单列标题），字段为kind、slot、status、text。
+kind取judgment、evidence、gaps、scenarios之一。slot和status只用于judgment段落，其它段落填null。
+slots是程序给出的、稿件必须回答的问题，编号如J1。每个slot恰好写一个judgment段落：slot填该编号（只能用slots里给出的编号，不自造），text回答该slot的question，status写这一段所陈述的状态：supported材料支持肯定的结论，refuted材料支持相反的结论，insufficient本次材料不足以回答，open尚未判定、仍有待查，conflict可比较的材料相互冲突。text的结论必须与status一致，status不是supported或refuted时不把结论写成已成立。
+有hypotheses时，每条假设写一个judgment段落，slot填该假设的编号（如H1），不填status，text按上文「情报假设」的写法，放在所有slot段落之后。
+evidence段落写支持、反对和竞争性解释的原文事实，gaps段落写没查到、查到不适用、读不到的内容和检索范围的限制，scenarios段落写可能的走向及其前提，以及会改变判断的复核条件；三种各可以有一个或几个段落。推断、判断和影响只写在judgment和scenarios段落；evidence和gaps段落只陈述材料里的事实和检索范围，每个可核查句仍带自己的引用。
+本次没有任务方目标：不写建议，也没有recommendation段落。"""
+
 # paragraphs the sentence-level and the unit-level verify prompts share
 _VERIFY_CONTEXT = """context中的前后句只用于理解代词；标题只帮助辨认研究/实验室/日期/人群，不能补成未引用的事实。核验中不修订原句，也不参考作者自评。
 检查六类问题：OBJ对象/研究/组别归属，NUM数值单位分母，TIME随访/截止时间，COND人群/研究条件，STR推断强度/因果/显著性，REF所引原文是否支持。labels只用这六个，正确句为空列表。

@@ -1,4 +1,4 @@
-"""POST /v2/verify: verify a draft by assertion unit (docs/decisions/0004).
+"""POST /v2/verify: verify a draft by assertion unit (docs/decisions/0004, report sections 0005).
 
 The program cuts each sentence into numbered candidate segments (segment_rules.py). The model reads the whole
 sentence, its neighbours and the cited texts, reports the units (a verbatim fragment at a segment each) and says
@@ -22,6 +22,7 @@ CHECKER_VERSION = "biocheck.unit_verify.v1"
 BATCH_SEGMENTS = 24  # candidate segments in one model call
 LONG_SENTENCE_SEGMENTS, LONG_SENTENCE_CHARS = 8, 300  # a sentence over either goes alone
 NO_CITATION = "no_citation: 本句陈述可核查事实却没有引用，不能借用相邻句的引用"
+INFERENCE_SECTIONS = ("judgment", "scenarios", "recommendation")  # the report sections where an inference may stand
 
 
 # ---- what the model answers: flat lists, the sentence named by the program's index
@@ -98,12 +99,13 @@ def _payload(inputs, batch):
 
 
 def _ask(budget, payload):
-    """(the parsed answer or None, the error, whether the model's output was cut off)."""
+    """(the parsed answer or None, the error, whether the model's output was cut off, the position of the call in
+    budget.calls - None when no call was made)."""
     made = len(budget.calls)
     out, error = budget.ask("verify_claims", CLAIM_VERIFY_UNITS, payload, UnitBatch)
     call = budget.calls[-1] if len(budget.calls) > made else {}
     cut = call.get("finish_reason") == "length" or call.get("error") == "output_empty_after_limit"
-    return out, error, cut
+    return out, error, cut, made if call else None
 
 
 def _run_batches(batches, inputs, budget):
@@ -113,12 +115,12 @@ def _run_batches(batches, inputs, budget):
     reads, queue = [], deque(batches)
     while queue:
         batch = queue.popleft()
-        out, error, cut = _ask(budget, _payload(inputs, batch))
+        out, error, cut, call = _ask(budget, _payload(inputs, batch))
         if cut and len(batch) > 1:
             half = len(batch) // 2
             queue.extendleft([batch[half:], batch[:half]])
         else:
-            reads += _record(batch, out, error, cut, inputs)
+            reads += _record(batch, out, error, cut, call, inputs)
     return reads
 
 
@@ -138,6 +140,7 @@ def _unchecked(claim, reason=None):
     """A sentence the model did not judge: the program's own cut is all there is to show."""
     if reason:
         claim["reason"] = reason
+    claim.setdefault("call", None)
     claim.update(segments=_segment_rows(split_segments(claim["text"]), None), units=[], form_check=None,
                  semantic_split=None)
 
@@ -173,8 +176,20 @@ def _known_numbers(inputs, claim):
                           for t in C.numeric_tokens(other["text"])}
 
 
-def _record(batch, out, error, cut, inputs):
-    """Apply one batch's answer to its sentences; the read requests of those left without support."""
+def _fact_section(claim, sections):
+    """Whether the sentence lies in a section where only facts belong (any but INFERENCE_SECTIONS). Without sections,
+    or outside every one of them, it is not: nothing is known about where it stands."""
+    for section in sections:
+        if section["start"] <= claim["start"] and claim["end"] <= section["end"]:
+            return section["kind"] not in INFERENCE_SECTIONS
+    return False
+
+
+def _record(batch, out, error, cut, call, inputs):
+    """Apply one batch's answer to its sentences; the read requests of those left without support. call: the
+    position in llm_calls of the call that carried the batch, kept on each sentence."""
+    for claim in batch:
+        claim["call"] = call
     if out is None or cut:
         reason = ("output_truncated: 模型输出被截断，本句待核" if cut else
                   "unchecked: 已达max_llm_calls上限" if error == "llm_call_limit" else f"batch_failed: {error}")
@@ -188,6 +203,7 @@ def _record(batch, out, error, cut, inputs):
     for claim in batch:
         mine = [unit for unit in out.units if unit.sentence == claim["index"]]  # other indexes are ignored
         result = check_sentence(claim, mine, inputs.refs, known_ids=inputs.known_ids,
+                                fact_section=_fact_section(claim, inputs.req.get("sections", [])),
                                 known_numbers=_known_numbers(inputs, claim))
         _apply(claim, result, splits.get(claim["index"]))
         inputs.views[claim["index"]] = {k: v for k, v in coverage_view(result).items() if k != "index"}

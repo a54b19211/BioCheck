@@ -7,12 +7,26 @@ from pydantic import BaseModel
 
 from . import claims as C
 from .llm import chat_json
-from .prompts import CLAIM_REVISE, CLAIM_VERIFY, VERIFY_COVERAGE, WRITE
+from .prompts import CLAIM_REVISE, CLAIM_VERIFY, VERIFY_COVERAGE, WRITE, WRITE_BY_SLOT
 
 
 # Small model output schemas. The model only answers by the program's sentence index.
 class DraftOut(BaseModel):
     draft: str
+
+
+class SectionOut(BaseModel):
+    """One paragraph of the report written by slot. No recommendation kind: a request has no objectives to write one
+    for. slot and status belong to a judgment."""
+
+    kind: Literal["judgment", "evidence", "gaps", "scenarios"]
+    slot: str | None = None  # a slot of the request, or the id of a hypothesis
+    status: Literal["supported", "refuted", "insufficient", "open", "conflict"] | None = None
+    text: str
+
+
+class SectionsOut(BaseModel):
+    sections: list[SectionOut]
 
 
 class QuoteOut(BaseModel):
@@ -131,16 +145,37 @@ def mark_superseded(evidence, updates):
     return [dict(e, superseded_by=later[e["id"]]["replacement"]) if e["id"] in later else e for e in evidence]
 
 
+def _written_sections(out):
+    """The writer's sections as returned: a paragraph each, its whitespace squashed so that the draft joined from
+    them has one paragraph per section; slot and status only on a judgment; a paragraph without text left out.
+    Whether a slot is one the request gave is the caller's to check."""
+    sections = []
+    for section in out.sections if out else []:
+        text = C.squash(section.text)
+        if text:
+            named = {"slot": section.slot, "status": section.status} if section.kind == "judgment" else {}
+            sections.append({"kind": section.kind, **{k: v for k, v in named.items() if v}, "text": text})
+    return sections
+
+
 def generate(req, llm=chat_json):
+    """The report as a draft; when the request has slots, written and returned as sections (their paragraphs joined
+    by a blank line are the draft)."""
     payload = materials(req)
     payload["evidence"] = mark_superseded(payload.get("evidence", []), payload.get("source_updates", []))
+    slots = req.get("slots") or []
+    if slots:
+        payload["slots"] = slots
     budget = Budget(llm, req.get("max_llm_calls", 20))
     thinking = os.environ.get("LLM_WRITE_THINKING", "false").lower() in ("1", "true", "yes")
-    out, error = budget.ask("generate", WRITE, payload, DraftOut, max_tokens=8192, thinking=thinking)
-    if out is None or not out.draft.strip():
+    prompt, answer_as = (WRITE_BY_SLOT, SectionsOut) if slots else (WRITE, DraftOut)
+    out, error = budget.ask("generate", prompt, payload, answer_as, max_tokens=8192, thinking=thinking)
+    sections = _written_sections(out) if slots else None
+    draft = "\n\n".join(s["text"] for s in sections) if slots else (out.draft.strip() if out else "")
+    if not draft:
         raise InputError(error or "empty_draft", "生成失败：" + (error or "draft为空"),
                          400 if error == "llm_call_limit" else 502, budget.calls)
-    return {"draft": out.draft.strip(), "llm_calls": budget.calls}
+    return {"draft": draft, "llm_calls": budget.calls} | ({"sections": sections} if slots else {})
 
 
 def _check_quotes(claim, answer, refs):

@@ -50,6 +50,16 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 
 **POST /v1/generate** → `{"draft": "……", "llm_calls": [...]}`
 
+请求可带 `slots`：`[{"slot": "J1", "question": "……"}]`，雷达列出的、稿件必须回答的问题（编号由雷达给）。带了 `slots` 时稿件按段写，响应多一个 `sections`，`draft` 是各段用空行连起来的结果（每段内的空白合并为一个空格，所以一段就是核验时的一个段落）：
+
+```json
+{"draft": "……\n\n……", "llm_calls": [...],
+ "sections": [{"kind": "judgment", "slot": "J1", "status": "supported", "text": "……[E1]。"},
+              {"kind": "evidence", "text": "……[E1]。"}]}
+```
+
+`kind` 取 `judgment|evidence|gaps|scenarios`（没有任务方目标，不写 `recommendation`）；只有 `judgment` 段带 `slot`（请求给的槽，或假设编号如 `H1`）和 `status`（`supported|refuted|insufficient|open|conflict`；假设段不带 `status`）。服务不核对 `slot` 是否是请求给过的编号，放不进去的段落由雷达丢弃并记录。不带 `slots` 的请求，提示词、输出和响应与以前完全一致。
+
 **POST /v1/verify**（再加 `"draft"`）。例：`draft` 为 `"2.5 mg/kg组ORR为32%[E1]。3.4 mg/kg组ORR为32%[E1]。"`，返回（节选）：
 
 ```json
@@ -89,16 +99,16 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 **POST /v1/revise**（再加 `"draft"` 和上一步的 `"review"`）→ `{"draft": "……", "changed": [{"index": 2, "before": "……", "after": "……"}], "llm_calls": [...]}`
 
 - 只改两类句子：`contradicted` 且有找到的短引的句子（交给模型，每句换成一句，只能用原句自己的引用；不合格的替换直接丢弃，原句不动）；核验时被标出 `scope_span` 的“未报告写成未实施”的句子（程序直接改成“本次引用材料不足以确认“……”这一说法”，不调用模型）。
-- `review` 必须是对同一份 `draft` 的核验结果，否则返回 409 `review_mismatch`。
-- 改完后由雷达再调一次 `/v1/verify`。
+- `review` 必须是对同一份 `draft` 的核验结果，否则返回 409 `review_mismatch`。可以是 `/v1/verify` 或 `/v2/verify` 的结果：`/v2/verify` 的句子没有 `quotes`，短引取自各单元的 `quotes`（找到一处或多处都算找到）。
+- 改完后由雷达再调一次核验。
 
 错误统一为 `{"error_code": "...", "message": "..."}`：401 `unauthorized`、400 `invalid_request`/`no_materials`/`duplicate_id`、409 `review_mismatch`、502 生成失败（附 `llm_calls`）。
 
 ## 按断言单元核验（/v2/verify）
 
-**POST /v2/verify**：请求是 `/v1/verify` 的请求（含 `draft`），但**拒绝任何未知字段**（包括嵌套对象里的），`evidence` 每条可多带 `first_seen_at`、`proof_available_at`、`replay_mode`（`current|operational_replay|public_history_reconstruction`，发布日期仍是 `published_at`），另有可选的 `rules_version`：调用方期望的句段规则版本，与服务的不同返回 409 `rules_version_mismatch`。
+**POST /v2/verify**：请求是 `/v1/verify` 的请求（含 `draft`），但**拒绝任何未知字段**（包括嵌套对象里的），`evidence` 每条可多带 `first_seen_at`、`proof_available_at`、`replay_mode`（`current|operational_replay|public_history_reconstruction`，发布日期仍是 `published_at`），另有可选的 `rules_version`：调用方期望的句段规则版本，与服务的不同返回 409 `rules_version_mismatch`。还可带 `sections`：`[{"kind": "judgment", "start": 0, "end": 120}]`，稿件每个段落所属的报告节，偏移是 `draft` 的字符位置（左闭右开，同句子的 `start/end`）；`kind` 取 `question|judgment|evidence|gaps|scenarios|uncertainty|visibility|revision|recommendation`，各节不能重叠、不能越出 `draft`，否则 400。完全落在 `judgment`、`scenarios`、`recommendation` 之外的节里的句子是“事实节”的句子：其中的推断单元（`kind=inference`）模型判 `supported` 时降为 `insufficient`（`inference_in_fact_section`）。没带 `sections`，或句子不在任何一节里，与以前一样。节不送给模型。
 
-响应在 `/v1/verify` 的 `status`、`claims`、`coverage`、`read_requests`、`llm_calls` 之外多：顶层 `checker_version`、`rules_version`；每个句子多 `segments`、`units`、`form_check`、`semantic_split`（`claims[].labels` 是各单元标签的并集）。
+响应在 `/v1/verify` 的 `status`、`claims`、`coverage`、`read_requests`、`llm_calls` 之外多：顶层 `checker_version`、`rules_version`；每个句子多 `segments`、`units`、`form_check`、`semantic_split`、`call`（`claims[].labels` 是各单元标签的并集）。`call` 是最后一次载着该句的 `verify_claims` 调用在响应 `llm_calls` 里的下标；该句没有送模型（引用了不存在的编号、`batch_limit`、已达 `max_llm_calls`）时为 `null`。批被截断后拆开重来的，指拆开后的那一次。
 
 - `segments[]`：程序按标点和连接词切的候选句段 `{id: "S1", start, end, text, markers, status, units}`；`status` 为 `handled`（有单元处理）、`unhandled`、`unchecked`（句子没有送模型或模型没答）。
 - `units[]`：程序编号 `U1..`（作废的单元也占号）、`segment`、`fragment`、`start/end`（句内偏移）、`kind`（`fact|negated_fact|condition|inference|time|no_claim`）、`model_verdict`（模型原判）、`verdict`（规则之后）、`reason`、`void_reason`（片段定位不到或不唯一时的作废理由）、`labels`、`governed_by`（程序映射后的单元编号，或请求预先给的编号如假设 `H1`）、`conditional`（条件，或受条件管辖）、`field_basis`（否定依据为结构字段时的路径、值和是否对得上）、`quotes[]`（`{ref, quote, status, positions, adopted}`：短引在原文中的全部位置，和被采用的那一处；重复出现而模型没指明哪一处时不采用，不默认取第一处）。

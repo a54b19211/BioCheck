@@ -4,7 +4,7 @@
 
 ## 写代码
 
-- 普通函数优先，一个文件一类职责：`llm.py` 调模型，`prompts.py` 提示词，`claims.py` 拆句与确定性检查，`segment_rules.py` 候选句段、否定与条件标记、可见时间线索，`unit_rules.py` 断言单元的编号定位、形式检查和句子判定（这两个是不调模型的规则层，供 `/v2/verify` 用，见 docs/decisions/0003），`unit_verify.py` 按断言单元核验（`/v2/verify`：批次、模型调用、句子记录，见 docs/decisions/0004），`core.py` 三个操作，`service.py` HTTP；抽取一致性按契约分三个规则模块：`item_rules.py`（契约 v1，各类条目逐字段）、`measurement_rules.py`（契约 v2，测量的期间、种类、范围、限定和情态）、`dimension_rules.py`（契约 v3，测量加业务维度）。文件名讲职责，版本号只写在 `CONTRACT_VERSION` / `CHECKER_VERSION` 常量里。不建插件框架、注册中心、队列或通用 Agent。
+- 普通函数优先，一个文件一类职责：`llm.py` 调模型，`prompts.py` 提示词，`claims.py` 拆句与确定性检查，`segment_rules.py` 候选句段、否定与条件标记、可见时间线索，`unit_rules.py` 断言单元的编号定位、形式检查和句子判定（这两个是不调模型的规则层，供 `/v2/verify` 用，见 docs/decisions/0003），`unit_verify.py` 按断言单元核验（`/v2/verify`：批次、模型调用、句子记录，见 docs/decisions/0004），`core.py` 三个操作（`/v1/generate` 带 `slots` 时按段写稿，报告节与槽见 docs/decisions/0005），`service.py` HTTP；抽取一致性按契约分三个规则模块：`item_rules.py`（契约 v1，各类条目逐字段）、`measurement_rules.py`（契约 v2，测量的期间、种类、范围、限定和情态）、`dimension_rules.py`（契约 v3，测量加业务维度）。文件名讲职责，版本号只写在 `CONTRACT_VERSION` / `CHECKER_VERSION` 常量里。不建插件框架、注册中心、队列或通用 Agent。
 - 编号由程序分配（材料 E1/A1 由雷达给，句子 1..n 由本服务给），模型只引用。无效编号、短引、回答只让那一句待核并写明原因，不让整个请求失败。
 - 模型输出 schema 要小（不超过两层，必填不超过 5 个，枚举小写英文）。校验失败只重试一次（附上 pydantic 报错），再失败只让这一批失败。
 - 核验、覆盖、修订关闭思考；只有写稿可按 `LLM_WRITE_THINKING` 开启。

@@ -284,9 +284,32 @@ def test_revise_refuses_a_review_of_a_different_draft():
 def test_generate_uses_8192_tokens_and_no_thinking_by_default(monkeypatch):
     monkeypatch.delenv("LLM_WRITE_THINKING", raising=False)
     llm = FakeLLM(generate=lambda p: {"draft": "ORR为32%[E1]。"})
-    assert core.generate(request(), llm)["draft"] == "ORR为32%[E1]。"
+    result = core.generate(request(), llm)
+    assert result["draft"] == "ORR为32%[E1]。"
     assert llm.payloads[0][2] == {"max_tokens": 8192, "thinking": False}
     assert "text" in llm.payloads[0][1]["evidence"][0]
+    assert "slots" not in llm.payloads[0][1] and set(result) == {"draft", "llm_calls"}  # no slots: as before
+
+
+def test_generate_with_slots_returns_the_report_as_sections_and_the_draft_joined_from_them():
+    slots = [{"slot": "J1", "question": "是否需要核查？"}]
+    written = {"sections": [
+        {"kind": "judgment", "slot": "J1", "status": "insufficient", "text": "是否核查尚无法判断，\n缺少记录[E1]。"},
+        {"kind": "evidence", "slot": "J1", "status": "open", "text": "ORR为32%[E1]。"},  # only a judgment has them
+        {"kind": "gaps", "text": "  "},  # no text: left out
+        {"kind": "judgment", "slot": "H1", "text": "H1 待验证的假设：某事已提出[E2]。"}]}
+    llm = FakeLLM(generate=lambda p: written)
+    result = core.generate(request(slots=slots), llm)
+    assert result["sections"] == [
+        {"kind": "judgment", "slot": "J1", "status": "insufficient", "text": "是否核查尚无法判断， 缺少记录[E1]。"},
+        {"kind": "evidence", "text": "ORR为32%[E1]。"},
+        {"kind": "judgment", "slot": "H1", "text": "H1 待验证的假设：某事已提出[E2]。"}]
+    assert result["draft"] == "\n\n".join(s["text"] for s in result["sections"])  # one paragraph per section
+    assert llm.payloads[0][1]["slots"] == slots and llm.payloads[0][2] == {"max_tokens": 8192, "thinking": False}
+    empty = FakeLLM(generate=lambda p: {"sections": [{"kind": "gaps", "text": " "}]})
+    with pytest.raises(core.InputError) as raised:
+        core.generate(request(slots=slots), empty)
+    assert (raised.value.code, raised.value.status) == ("empty_draft", 502)
 
 
 def test_generate_marks_the_source_a_newer_one_corrects():

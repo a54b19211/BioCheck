@@ -75,6 +75,68 @@ def test_v2_verify_refuses_unknown_fields_and_a_rules_version_it_does_not_have(c
     assert ok.json()["rules_version"] == "biocheck.segment_rules.v1" and ok.json()["checker_version"]
 
 
+def test_v2_verify_takes_sections_that_lie_in_the_draft_and_no_slots(client):
+    draft = "2.5 mg/kg组ORR为32%[E1]。\n\n说明该剂量有效[E1]。"
+    body = dict(request(), draft=draft)
+    http = client(FakeLLM(verify_claims=lambda p: {"units": [], "splits": []}))
+
+    def status(**extra):
+        return http.post("/v2/verify", json=dict(body, **extra), headers=auth()).status_code
+
+    first = draft.index("\n\n")
+    span = {"kind": "evidence", "start": 0, "end": first}
+    assert status(sections=[span, {"kind": "judgment", "start": first + 2, "end": len(draft)}]) == 200
+    assert status(sections=[span, dict(span, kind="judgment", start=first - 5)]) == 400  # overlapping
+    assert status(sections=[dict(span, end=len(draft) + 1)]) == 400  # past the draft
+    assert status(sections=[dict(span, start=5, end=5)]) == 400  # empty
+    assert status(sections=[dict(span, kind="summary")]) == 400  # not a section of the report
+    assert status(sections=[dict(span, extra=1)]) == 400
+    assert status(slots=[{"slot": "J1", "question": "q"}]) == 400  # slots are the writer's request
+
+
+def test_slots_reach_the_writer_over_http_and_the_sections_come_back(client):
+    seen = []
+
+    def generate(payload):
+        seen.append(payload)
+        return {"sections": [{"kind": "judgment", "slot": "J1", "status": "supported", "text": "需要核查[E1]。"}]}
+
+    body = dict(request(), slots=[{"slot": "J1", "question": "是否需要核查？"}])
+    response = client(FakeLLM(generate=generate)).post("/v1/generate", json=body, headers=auth())
+    assert response.status_code == 200, response.text
+    assert seen[0]["slots"] == [{"slot": "J1", "question": "是否需要核查？"}]
+    assert response.json()["sections"] == [
+        {"kind": "judgment", "slot": "J1", "status": "supported", "text": "需要核查[E1]。"}]
+    assert response.json()["draft"] == "需要核查[E1]。"
+    # a request without slots is answered as before
+    plain = client(FakeLLM(generate=lambda p: {"draft": "ORR为32%[E1]。"})).post(
+        "/v1/generate", json=request(), headers=auth())
+    assert plain.json()["draft"] == "ORR为32%[E1]。" and "sections" not in plain.json()
+
+
+def test_the_reviser_reads_the_quotes_of_a_v2_review(client):
+    seen = []
+
+    def revise(payload):
+        seen.append(payload)
+        return {"sentences": []}
+
+    draft = "3.4 mg/kg组ORR为32%[E1]。"
+    quote = "In the 3.4 mg/kg arm ORR was 35%"
+    llm = FakeLLM(
+        verify_claims=lambda p: {"units": [
+            {"sentence": 1, "segment": "S1", "fragment": "3.4 mg/kg组ORR为32%", "kind": "fact",
+             "verdict": "contradicted", "quotes": [{"ref": "E1", "quote": quote}]}],
+            "splits": [{"sentence": 1, "assessment": "complete"}]},
+        revise=revise)
+    http = client(llm)
+    checked = http.post("/v2/verify", json=dict(request(), draft=draft), headers=auth()).json()
+    assert checked["claims"][0]["verdict"] == "contradicted" and "quotes" not in checked["claims"][0]
+    review = {"status": checked["status"], "claims": checked["claims"]}
+    assert http.post("/v1/revise", json=dict(request(), draft=draft, review=review), headers=auth()).status_code == 200
+    assert seen[0]["claims"][0]["quotes"] == [{"ref": "E1", "quote": quote, "found": True}]
+
+
 def test_generate_model_failure_is_a_502_with_llm_calls(client):
     response = client(FakeLLM()).post("/v1/generate", json=request(), headers=auth())
     assert response.status_code == 502

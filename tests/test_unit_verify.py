@@ -86,6 +86,45 @@ def test_an_incomplete_split_does_not_pass_a_sentence_as_no_claim_either():
     assert [u["verdict"] for u in claim["units"]] == ["no_claim", "no_claim"]  # the units themselves are untouched
 
 
+INFERRED = "2.5 mg/kg组ORR为32%，说明该剂量有效[E1]。"
+
+
+def test_an_inference_is_supported_only_in_a_judgment_scenarios_or_recommendation_section():
+    def inferring(sentence):
+        return [unit(sentence, "S1", "2.5 mg/kg组ORR为32%", quote=QUOTE_ORR),
+                unit(sentence, "S2", "说明该剂量有效", kind="inference", quote=QUOTE_ORR)]
+
+    draft, width = INFERRED + "\n\n" + INFERRED, len(INFERRED)  # two paragraphs: sentence 1, then sentence 2
+
+    def checked(*kinds):
+        sections = [{"kind": k, "start": n * (width + 2), "end": n * (width + 2) + width} for n, k in enumerate(kinds)]
+        return run(draft, FakeLLM(verify_claims=answers(*inferring(1), *inferring(2))), sections=sections)["claims"]
+
+    assert [c["verdict"] for c in checked("judgment", "evidence")] == ["supported", "insufficient"]
+    assert [c["verdict"] for c in checked("gaps", "judgment")] == ["insufficient", "supported"]
+    assert [c["verdict"] for c in checked("scenarios", "recommendation")] == ["supported", "supported"]
+    fact = checked("judgment", "evidence")[1]
+    assert fact["units"][1]["reason"].startswith("inference_in_fact_section")
+    assert fact["units"][0]["verdict"] == "supported"  # only the inference is held back
+    # no sections, or a sentence that lies in none of the given ones: nothing is known of where it stands
+    assert [c["verdict"] for c in checked()] == ["supported", "supported"]
+    outside = [{"kind": "evidence", "start": 0, "end": 5}]
+    unplaced = run(draft, FakeLLM(verify_claims=answers(*inferring(1), *inferring(2))), sections=outside)
+    assert [c["verdict"] for c in unplaced["claims"]] == ["supported", "supported"]
+
+
+def test_each_sentence_names_the_call_that_carried_it():
+    # two paragraphs are two batches: the sentence of the second is in the second verify_claims call
+    both = answers(unit(1, "S1", "2.5 mg/kg组ORR为32%", quote=QUOTE_ORR), unit(2, "S1", "2.5 mg/kg组ORR为32%",
+                                                                              quote=QUOTE_ORR))
+    result = run("2.5 mg/kg组ORR为32%[E1]。\n\n2.5 mg/kg组ORR为32%[E1]。", FakeLLM(verify_claims=both))
+    assert [c["call"] for c in result["claims"]] == [0, 1]
+    assert [result["llm_calls"][c["call"]]["stage"] for c in result["claims"]] == ["verify_claims"] * 2
+    # a sentence unknown to the references is never sent: no call
+    unknown = run("2.5 mg/kg组ORR为32%[E9]。", FakeLLM(verify_claims=both))["claims"][0]
+    assert unknown["call"] is None
+
+
 def plan(draft):
     pending = C.sentences(draft)
     sizes = {c["index"]: len(split_segments(c["text"])) for c in pending}
@@ -137,10 +176,12 @@ def test_a_cut_off_answer_splits_the_batch_down_to_one_sentence_and_the_calls_ar
     assert sent == [[1, 2], [1], [2]]
     assert first["verdict"] == "supported"
     assert second["verdict"] == "insufficient" and second["reason"].startswith("output_truncated")
+    assert (first["call"], second["call"]) == (1, 2)  # the last call that carried each sentence, not the cut-off pair
     # the request's own call limit bounds the splitting: no call left means unchecked, not another try
     capped = Truncating(verify_claims=answers(one))
     first, second = run(draft, capped, max_llm_calls=2)["claims"]
     assert first["verdict"] == "supported" and second["reason"].startswith("unchecked")
+    assert (first["call"], second["call"]) == (1, None)
     assert len([1 for stage, _, _ in capped.payloads if stage == "verify_claims"]) == 2
 
 

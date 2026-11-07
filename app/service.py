@@ -77,7 +77,7 @@ class Hypothesis(BaseModel):
     facts: list[HypothesisFact] = []
 
 
-class GenerateRequest(BaseModel):
+class MaterialsRequest(BaseModel):
     question: str = Field(min_length=1)
     evidence: list[Evidence] = []
     analysis_results: list[AnalysisResult] = []
@@ -89,7 +89,18 @@ class GenerateRequest(BaseModel):
     max_llm_calls: int = Field(20, ge=0)
 
 
-class VerifyRequest(GenerateRequest):
+class Slot(BaseModel):
+    """A question the report must answer, numbered by the radar (J1 ...); the writer answers it by that number."""
+
+    slot: str = Field(min_length=1, max_length=32)
+    question: str = Field(min_length=1)
+
+
+class GenerateRequest(MaterialsRequest):
+    slots: list[Slot] = []  # given: the report is written, and answered, as sections
+
+
+class VerifyRequest(MaterialsRequest):
     draft: str = Field(min_length=1)
 
 
@@ -110,6 +121,19 @@ class ReviewClaim(BaseModel):
     quotes: list[ReviewQuote] = []
     reason: str = ""
     scope_span: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def quotes_of_units(cls, data):
+        """A /v2/verify claim keeps its short quotes in its units; the reviser reads them as the claim's quotes
+        (a quote found once or several times is found)."""
+        units = data.get("units") if isinstance(data, dict) else None
+        if isinstance(units, list) and not data.get("quotes"):
+            data = dict(data, quotes=[
+                {"ref": q.get("ref"), "quote": q.get("quote"), "found": q.get("status") in ("found", "ambiguous")}
+                for unit in units if isinstance(unit, dict)
+                for q in unit.get("quotes", []) if isinstance(q, dict)])
+        return data
 
 
 class Review(BaseModel):
@@ -379,7 +403,17 @@ class ExtractionRequestV2(Strict):
 
 
 # ---- /v2/verify: strict like the extraction contracts, and the evidence carries the time facts the semantic check
-# reads (design task book 06, section 3). rules_version is the segment-rule version the caller expects.
+# reads (design task book 06, section 3). rules_version is the segment-rule version the caller expects; sections
+# say which report section each paragraph of the draft is (task book 08, section 2.2).
+
+class SectionSpan(Strict):
+    """One section of the report, where it lies in the draft: characters [start, end) of `draft`."""
+
+    kind: Literal["question", "judgment", "evidence", "gaps", "scenarios", "uncertainty", "visibility", "revision",
+                  "recommendation"]
+    start: int = Field(ge=0)
+    end: int = Field(ge=1)
+
 
 class EvidenceV2(Evidence, Strict):
     first_seen_at: str | None = None
@@ -424,6 +458,16 @@ class VerifyRequestV2(VerifyRequest, Strict):
     previous_report: PreviousReportV2 | None = None
     hypotheses: list[HypothesisV2] = []
     rules_version: str | None = None
+    sections: list[SectionSpan] = []
+
+    @model_validator(mode="after")
+    def sections_lie_in_the_draft(self):
+        edge = 0
+        for section in sorted(self.sections, key=lambda s: s.start):
+            if not edge <= section.start < section.end <= len(self.draft):
+                raise ValueError("sections: each is a non-empty range inside the draft, none overlapping another")
+            edge = section.end
+        return self
 
 
 def error(status, code, message, **extra):
