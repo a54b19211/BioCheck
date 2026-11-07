@@ -103,7 +103,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 - `segments[]`：程序按标点和连接词切的候选句段 `{id: "S1", start, end, text, markers, status, units}`；`status` 为 `handled`（有单元处理）、`unhandled`、`unchecked`（句子没有送模型或模型没答）。
 - `units[]`：程序编号 `U1..`（作废的单元也占号）、`segment`、`fragment`、`start/end`（句内偏移）、`kind`（`fact|negated_fact|condition|inference|time|no_claim`）、`model_verdict`（模型原判）、`verdict`（规则之后）、`reason`、`void_reason`（片段定位不到或不唯一时的作废理由）、`labels`、`governed_by`（程序映射后的单元编号，或请求预先给的编号如假设 `H1`）、`conditional`（条件，或受条件管辖）、`field_basis`（否定依据为结构字段时的路径、值和是否对得上）、`quotes[]`（`{ref, quote, status, positions, adopted}`：短引在原文中的全部位置，和被采用的那一处；重复出现而模型没指明哪一处时不采用，不默认取第一处）。
 - `form_check`：程序能确定的部分（每个句段有单元或标为非事实、无空结果、重叠已声明、`governed_by` 能映射、句段里的否定词没有在单元里丢掉）。`passed` 不代表拆分完整。
-- `semantic_split`：模型自评单元是否涵盖全句（`complete|incomplete|uncertain`，没报是 `not_reported`），标 `model_self_assessment`。不是 `complete` 时句子不能判 `supported`。
+- `semantic_split`：模型自评单元是否涵盖全句（`complete|incomplete|uncertain`，没报是 `not_reported`），标 `model_self_assessment`。不是 `complete` 时句子不能判 `supported`，也不能判 `no_claim`（都降为 `insufficient`）。
 - 句子判定由程序汇总：任一单元 `contradicted` 则 `contradicted`；形式检查失败或有单元 `insufficient` 则 `insufficient`；条件单元不算已陈述的事实。
 
 批次：每批最多 4 句、24 个句段、同一段；超过 8 个句段或 300 字的句子单独成批；超过 24 个句段的句子不送模型，记 `batch_limit`。模型输出被截断时，这一批拆成两半重来，直到单句；单句仍被截断记 `output_truncated`。拆批和重试计入 `max_llm_calls`。

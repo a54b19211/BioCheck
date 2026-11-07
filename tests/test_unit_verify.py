@@ -75,6 +75,17 @@ def test_a_conditional_sentence_states_nothing_and_the_coverage_check_is_told_so
     assert (coverage["stated"], coverage["conditional"]) == ([], ["如果ORR为32%", "则获批"])
 
 
+def test_an_incomplete_split_does_not_pass_a_sentence_as_no_claim_either():
+    draft = "如果ORR为32%，则获批[E1]。"
+    condition = unit(1, "S1", "如果ORR为32%", kind="condition", verdict="no_claim")
+    consequent = unit(1, "S2", "则获批", verdict="supported", governed_by=["S1"])
+    result = run(draft, FakeLLM(verify_claims=answers(condition, consequent, split="incomplete")))
+    claim = result["claims"][0]
+    assert (result["status"], claim["verdict"]) == ("REVIEW", "insufficient")
+    assert claim["reason"].startswith("semantic_split_incomplete")
+    assert [u["verdict"] for u in claim["units"]] == ["no_claim", "no_claim"]  # the units themselves are untouched
+
+
 def plan(draft):
     pending = C.sentences(draft)
     sizes = {c["index"]: len(split_segments(c["text"])) for c in pending}

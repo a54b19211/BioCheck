@@ -148,9 +148,9 @@ def _split_record(split):
 
 
 def _with_split(result, split):
-    """The program's sentence verdict, except that a support the model's own split report does not stand behind
-    (anything but complete, or no report) is held back. A contradiction or a non-claim is not."""
-    if result.verdict != "supported" or (split and split.assessment == "complete"):
+    """The program's sentence verdict, except that a support or a non-claim the model's own split report does not
+    stand behind (anything but complete, or no report) is held back. A contradiction is not."""
+    if result.verdict not in ("supported", "no_claim") or (split and split.assessment == "complete"):
         return result.verdict, result.reason
     said = split.assessment if split else "not_reported"
     return "insufficient", f"semantic_split_{said}: 模型自评没有说单元已涵盖本句的全部断言"

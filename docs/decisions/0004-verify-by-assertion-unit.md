@@ -22,9 +22,9 @@ program does everything it can check.
   transport's single validation retry.
 - `form_check` and `semantic_split` are recorded apart. `semantic_split` is the model's own report that its units
   cover the sentence (`complete`, `incomplete`, `uncertain`) and says so (`source: model_self_assessment`). The
-  program takes a sentence as supported only when that report is `complete`; a missing or other report holds the
-  support back (`semantic_split_*`). A contradiction or a non-claim is not held back. No field says the split is
-  guaranteed complete.
+  program takes a sentence as supported or as a non-claim only when that report is `complete`; a missing or other
+  report holds either back as `insufficient` (`semantic_split_*`). A contradiction is not held back. No field says
+  the split is guaranteed complete.
 - Kept from `/v1`: the numbers of a supported fragment (in the cited text, or named in the reason), uncited facts,
   the source-use rules, read requests and the coverage check. The coverage check is also told, per sentence, what
   it states and what is only a condition.
