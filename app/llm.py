@@ -1,4 +1,4 @@
-"""One OpenAI-compatible JSON chat call with a single validation retry (SPEC §2)."""
+"""One OpenAI-compatible JSON chat call with a single validation retry (SPEC §2). The HTTP side is llm_transport."""
 import json
 import os
 import time
@@ -6,6 +6,7 @@ import types
 import typing
 
 import httpx
+import llm_transport as lt
 from pydantic import BaseModel, ValidationError
 
 
@@ -24,51 +25,44 @@ def shape(tp):
 
 
 def chat_json(stage, system, payload, model_cls, *, max_tokens=4096, thinking=False, client=None, retry=True):
-    """Return (parsed object or None, call record). Never raises for model or network failures."""
-    provider = os.environ.get("LLM_PROVIDER", "deepseek")
+    """Return (parsed object or None, call record). Never raises for model or network failures. The HTTP side
+    (request body, sending, request count) is the shared llm_transport; the prompt, the single validation retry and
+    the error codes are this service's."""
+    provider_name = os.environ.get("LLM_PROVIDER", "deepseek")
     model = os.environ.get("LLM_MODEL", "deepseek-chat")
+    provider = lt.Provider(
+        kind=provider_name if provider_name in ("deepseek", "vllm") else "openai_compatible",
+        base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"), model=model,
+        api_key=os.environ.get("LLM_API_KEY", ""), timeout_seconds=float(os.environ.get("LLM_TIMEOUT_SECONDS", "180")))
     call = {"stage": stage, "model": model, "finish_reason": None,
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             "seconds": 0.0, "error": None, "requests": 0}
-    body = {"model": model, "max_tokens": max_tokens, "response_format": {"type": "json_object"},
-            "messages": [{"role": "system", "content": system + "\n\n只返回一个JSON对象，格式：" + shape(model_cls)},
-                         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]}
-    if provider == "deepseek":
-        body["thinking"] = {"type": "enabled" if thinking else "disabled"}
-    elif provider == "vllm":
-        # local vLLM serving Qwen: the same per-call switch, as its chat template reads it
-        body["chat_template_kwargs"] = {"enable_thinking": bool(thinking)}
-    if not thinking:
-        body["temperature"] = 0
-    url = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com").rstrip("/") + "/chat/completions"
-    headers = {"Authorization": "Bearer " + os.environ.get("LLM_API_KEY", "")}
-    client = client or httpx.Client(timeout=float(os.environ.get("LLM_TIMEOUT_SECONDS", "180")))
+    messages = [{"role": "system", "content": system + "\n\n只返回一个JSON对象，格式：" + shape(model_cls)},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
+    record = lt.CallRecord(stage=stage, endpoint_id="", model=model)
+    own_client = client is None
+    client = client or httpx.Client()
     started = time.monotonic()
     try:
         for attempt in range(2 if retry else 1):
-            call["requests"] += 1
-            try:
-                response = client.post(url, json=body, headers=headers)
-            except httpx.TimeoutException:
-                call["error"] = "timeout"  # the provider may still bill it; do not resend
+            body = lt.build_body(provider, messages, max_tokens=max_tokens, thinking=thinking)
+            sent = lt.send(provider, body, record, client=client)
+            call["requests"] = record.requests
+            if sent.exception is not None:
+                call["error"] = "timeout" if sent.timed_out else "network_error"  # a timeout is not resent: billed?
                 return None, call
-            except httpx.HTTPError:
-                call["error"] = "network_error"
+            if sent.status != 200:
+                call["error"] = f"http_{sent.status}"
                 return None, call
-            if response.status_code != 200:
-                call["error"] = f"http_{response.status_code}"
-                return None, call
-            try:
-                data = response.json()
-                choice = data["choices"][0]
-                content = choice["message"].get("content") or ""
-            except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+            answer = sent.envelope()
+            if answer.problem:
                 call["error"] = "bad_response"
                 return None, call
-            for key, value in (data.get("usage") or {}).items():
+            content = answer.content or ""
+            for key, value in answer.usage.items():
                 if key in call["usage"] and isinstance(value, int):
                     call["usage"][key] += value
-            call["finish_reason"] = choice.get("finish_reason")
+            call["finish_reason"] = answer.finish_reason
             if not content.strip() and call["finish_reason"] == "length":
                 call["error"] = "output_empty_after_limit"  # reasoning used the whole budget
                 return None, call
@@ -80,7 +74,10 @@ def chat_json(stage, system, payload, model_cls, *, max_tokens=4096, thinking=Fa
                 problem = str(error)
             call["error"] = "invalid_output"
             if attempt == 0:
-                body["messages"][1]["content"] += "\n\n上次输出未通过校验，请修正后重新返回完整JSON：\n" + problem
+                again = "\n\n上次输出未通过校验，请修正后重新返回完整JSON：\n" + problem
+                messages[1] = {**messages[1], "content": messages[1]["content"] + again}
         return None, call
     finally:
         call["seconds"] = round(time.monotonic() - started, 3)
+        if own_client:
+            client.close()
