@@ -1,7 +1,11 @@
 """Function size and cyclomatic complexity of the Python sources, with a CI guard.
 
-    python scripts/code_metrics.py [paths...]          # report: file sizes, the longest, the most complex
-    python scripts/code_metrics.py --check [paths...]  # fail on a function over the limits without a reason
+    python <dir>/code_metrics.py [paths...]          # report: file sizes, the longest, the most complex
+    python <dir>/code_metrics.py --check [paths...]  # fail on a function over the limits without a reason
+
+Without paths it measures those of `[tool.code-metrics] paths` in the repository's pyproject.toml (the
+directory above this script). The script is the same file in every repository (devtools keeps the canonical
+copy and checks the copies); only that setting and the exceptions file are the repository's own.
 
 A function's length is its lines from `def` to its last line. Its complexity is McCabe's: 1 plus one per
 if / elif / for / while / except / with-less branch point, conditional expression, comprehension `for` and
@@ -10,8 +14,8 @@ that holds them (moving a branch into a closure does not make the function simpl
 their own.
 
 The limits are 80 lines and complexity 20. The functions that were already over them when this gate was
-introduced are frozen in scripts/metrics_exceptions.txt as `path:qualified.name  <lines>/<cc>  reason`, where
-<lines>/<cc> is the size they had then. --check fails on
+introduced are frozen in metrics_exceptions.txt next to this script as
+`path:qualified.name  <lines>/<cc>  reason`, where <lines>/<cc> is the size they had then. --check fails on
 
   - a function over the limits that is not listed (a new violator),
   - a listed function that is within the limits now (remove the entry: the list only shrinks),
@@ -24,13 +28,26 @@ import ast
 import pathlib
 import sys
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10: tomli, the same parser (a pinned dependency of pytest there)
+    import tomli as tomllib
+
 MAX_LINES, MAX_CC = 80, 20
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-EXCEPTIONS = ROOT / "scripts" / "metrics_exceptions.txt"
-# the application package; tests are not measured
-DEFAULT_PATHS = (
-    "app",
-)
+EXCEPTIONS = pathlib.Path(__file__).resolve().parent / "metrics_exceptions.txt"
+
+
+def configured_paths():
+    """The measured paths: `[tool.code-metrics] paths` in pyproject.toml (tests are usually not measured)."""
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    paths = config.get("tool", {}).get("code-metrics", {}).get("paths")
+    if not paths or not all(isinstance(p, str) for p in paths):
+        sys.exit(f"{ROOT / 'pyproject.toml'}: [tool.code-metrics] paths must be a non-empty list of paths")
+    return tuple(paths)
+
+
+DEFAULT_PATHS = configured_paths()
 
 
 def complexity(node):
@@ -117,7 +134,9 @@ def problems_of(rows, allowed):
     over = {k: v for k, v in seen.items() if v[0] > MAX_LINES or v[1] > MAX_CC}
     for key, (size, cc) in sorted(over.items()):
         if key not in allowed:
-            problems.append(f"{key}: {size} lines, complexity {cc} (limits {MAX_LINES} / {MAX_CC}), no reason")
+            problems.append(
+                f"{key}: {size} lines, complexity {cc} (limits {MAX_LINES} / {MAX_CC}), no reason"
+            )
             continue
         frozen_lines, frozen_cc, _ = allowed[key]
         if size > frozen_lines or cc > frozen_cc:
@@ -146,7 +165,7 @@ def main():
     parser.add_argument(
         "--freeze",
         action="store_true",
-        help="print every function over the limits as exception-file lines (a starting point for the reasons)",
+        help="print every function over the limits as exception-file lines (a starting point for reasons)",
     )
     args = parser.parse_args()
     files, rows = collect(args.paths)
