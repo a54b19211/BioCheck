@@ -5,4 +5,3 @@
 # list only shrinks.
 app/core.py:_revision_target  20/21  over the complexity limit by one when the gate was introduced; split when the function is next changed
 app/core.py:judge  29/23  verdict assembly with one branch per outcome; split per outcome when the function is next changed
-app/llm.py:chat_json  61/21  model call with its retry and parsing inline; replaced when BioCheck moves to the shared llm-transport
