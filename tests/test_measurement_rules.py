@@ -1,6 +1,6 @@
-"""Contract v2, measurements. Real samples: tests/fixtures/p3_matrix.json (matrix v2 of extraction-contract:
-real clauses of fixed clean_text.v11 artifacts with their real offsets, every field's literal span, the final
-values and the expected outcome). Each matrix row becomes a real HTTP request to /v2; negatives of the kind
+"""Measurements, asked to /v3 without dimensions. Real samples: tests/fixtures/p3_matrix.json (matrix v2 of
+extraction-contract: real clauses of fixed clean_text.v11 artifacts with their real offsets, every field's literal
+span, the final values and the expected outcome). Each matrix row becomes a real HTTP request; negatives of the kind
 "wrong final value at a real span" change only the final value. Synthetic texts cover what no real sample has
 yet: heading hierarchy, tables, period edge cases, decimal bounds."""
 
@@ -13,7 +13,7 @@ import pytest
 from conftest import FakeLLM
 from fastapi.testclient import TestClient
 
-from app import measurement_rules
+from app import dimension_rules, measurement_rules
 from app.service import create_app
 
 TOKEN = "test-token"
@@ -29,7 +29,7 @@ def client(monkeypatch):
 
 
 def post(client, body):
-    return client.post("/v2/extraction-consistency", json=body, headers={"Authorization": f"Bearer {TOKEN}"})
+    return client.post("/v3/extraction-consistency", json=body, headers={"Authorization": f"Bearer {TOKEN}"})
 
 
 def dec(x):
@@ -37,7 +37,7 @@ def dec(x):
 
 
 def request_of(row, final=None):
-    """The v2 request a correct client builds from a matrix row (final values at the literals' real spans)."""
+    """The request a correct client builds from a matrix row (final values at the literals' real spans)."""
     final = final or row["final"]
     f = row["fields"]
     c0, c1 = row["clause_span"]
@@ -61,7 +61,7 @@ def request_of(row, final=None):
     if fields["scope_mode"] != "stated":
         fields["scope"] = {"state": "unknown"}
     a, b = row["sentence_span"]
-    return {"contract_version": "extraction_consistency.v2",
+    return {"contract_version": "extraction_consistency.v3",
             "subject": {"source_id": row["source"], "record_id": row["record"][:2000], "version_id": row["version_id"],
                         "raw_sha256": row["raw_sha256"], "is_demo": row["is_demo"],
                         "artifact": {"processor_version": row["processor"], "text_sha256": row["text_sha256"]}},
@@ -79,8 +79,8 @@ def answer(client, body):
     r = post(client, body)
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["contract_version"] == "extraction_consistency.v2"
-    assert out["checker_version"] == measurement_rules.CHECKER_VERSION
+    assert out["contract_version"] == "extraction_consistency.v3"
+    assert out["checker_version"] == dimension_rules.CHECKER_VERSION
     assert out["llm_calls"] == []
     return out["items"][0]
 
@@ -133,7 +133,7 @@ def test_s19_overlapping_spans_and_the_interval_is_not_cumulation(client):
 
 def synthetic(text, quote, fields, start=1000):
     at = text.index(quote)
-    return {"contract_version": "extraction_consistency.v2",
+    return {"contract_version": "extraction_consistency.v3",
             "subject": {"source_id": "s", "record_id": "r", "version_id": "v", "raw_sha256": "a" * 64, "is_demo": True,
                         "artifact": {"processor_version": "t", "text_sha256": "b" * 64}},
             "passages": [{"id": "p1", "role": "primary", "start": start, "end": start + len(text), "text": text}],
@@ -267,15 +267,6 @@ def test_a_monthly_stock_is_not_a_flow(client):
                    obj="国家药监局", metric="在册医疗器械产品", mode="object_metric_total")
     item = answer(client, synthetic(text, "国家药监局在册医疗器械产品共318个", f))
     assert item["fields"]["measure_kind"]["result"] != "match"
-
-
-def test_a_total_word_alone_is_not_cumulation(client):
-    text = "As of 19 May 2020, ICH reported a total of 3462 cases."
-    as_of = {"type": "point", "precision": "day", "value": "2020-05-19"}
-    f = fields_for(text, "3462", "cases", "As of 19 May 2020", as_of,
-                   kind="cumulative", obj="ICH")
-    item = answer(client, synthetic(text, "a total of 3462 cases", f))
-    assert item["fields"]["measure_kind"]["reason"] == "no_cumulative_wording"
 
 
 def test_table_header_of_the_value_column(client):

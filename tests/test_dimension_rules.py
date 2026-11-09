@@ -97,16 +97,11 @@ def test_one_dimension_per_kind_and_known_kinds_only(client):  # noqa: F811
     assert post(client, b).status_code == 400
 
 
-def test_v2_stays_strict_and_unchanged(client):  # noqa: F811
+def test_the_v2_extraction_route_is_gone(client):  # noqa: F811
     b = body(PLAIN, PLAIN[:-1], [("disease", "炭疽")])
     b["contract_version"] = "extraction_consistency.v2"
     headers = {"Authorization": f"Bearer {TOKEN}"}
-    assert client.post("/v2/extraction-consistency", json=b, headers=headers).status_code == 400  # no dims in v2
-    b["items"][0].pop("dims")
-    b["items"][0].pop("family")
-    r = client.post("/v2/extraction-consistency", json=b, headers=headers)
-    assert r.status_code == 200 and r.json()["checker_version"] == "biocheck.extraction_rules.v10"
-    assert "dims" not in r.json()["items"][0]
+    assert client.post("/v2/extraction-consistency", json=b, headers=headers).status_code == 404
 
 
 def test_v11_reads_a_single_letter_in_the_metric_subject(client):  # noqa: F811
@@ -115,4 +110,4 @@ def test_v11_reads_a_single_letter_in_the_metric_subject(client):  # noqa: F811
                    obj="Hospital B", metric="hepatitis E cases", mode="object_metric_total")
     b = synthetic(text, text, f)
     b["contract_version"] = "extraction_consistency.v3"
-    assert answer(client, b)["fields"]["unit"]["result"] == "match"  # extraction_normalize.v3 cut at the letter E
+    assert answer(client, b)["fields"]["unit"]["result"] == "match"  # extraction_normalize.v4 keeps the letter E

@@ -4,7 +4,8 @@ Status: accepted (2026-11-06; records decisions taken 2026-11-02 to 2026-11-06)
 
 ## Context
 
-`/v{1,2,3}/extraction-consistency` answer whether a processing product corresponds to its fixed source text.
+`/v1/extraction-consistency` and `/v3/extraction-consistency` answer whether a processing product corresponds to its
+fixed source text (`/v2`, checker v10, was removed: no caller was left).
 Fabric and Radar store those answers next to the data they judge, so an answer must stay reproducible: the same
 request, under the same checker version, gets the same answer forever.
 
@@ -12,9 +13,9 @@ request, under the same checker version, gets the same answer forever.
 
 - Every rule, word list, unit table or number conversion change bumps `CHECKER_VERSION` of the module it touches.
   An old version is never edited; it stays reproducible at the commit that released it.
-- One module per contract, named by what it checks: `app/item_rules.py` (contract v1), `app/measurement_rules.py`
-  (contract v2), `app/dimension_rules.py` (contract v3). A newer contract imports the older module's rules and
-  passes its own normalisation functions in (`unit_head`, `period_whole`, `output`) instead of copying them.
+- One module per contract, named by what it checks: `app/item_rules.py` (contract v1), `app/dimension_rules.py`
+  (contract v3). The measurement rules live in `app/measurement_rules.py`, which `dimension_rules` calls with the
+  current normalisation (extraction_normalize v4, v5, v6) instead of copying them; contract v2 has no route.
 - Rules shared with Radar live in the `extraction-contract` wheel (`extraction_contract.normalize`), pinned by hash
   in `requirements-contract.txt`; each normalisation version is a separate function there, never changed in place.
 - Release checker versions in batches of rule changes, not one version per boundary case.
@@ -34,7 +35,7 @@ request, under the same checker version, gets the same answer forever.
 | v2 | v7 | 45600af | a negated predicate outside the fields proves no event |
 | v2 | v8 | 43dba74 | extraction_normalize.v1 (contract wheel 1.5.0): space-grouped numbers, English single years, the unit inside the bound metric phrase |
 | v2 | v9 | 58f7b08 | extraction_normalize.v2 (1.6.1): a period span must be the whole written period; a bound unit is the phrase's head counting noun |
-| v2 | v10 | 407b45b | extraction_normalize.v3 (1.7.0): the unit is the head of the metric phrase's own subject, never a subset named after "including / excluding / such as". Current for contract v2 |
+| v2 | v10 | 407b45b | extraction_normalize.v3 (1.7.0): the unit is the head of the metric phrase's own subject, never a subset named after "including / excluding / such as". The last checker of contract v2, whose route was removed |
 | v3 | v11 | e98b392 | business dimensions (disease, population, date basis, ...) judged by literal, role evidence and relation to the value; extraction_normalize.v4 (1.8.0) |
 | v3 | v12 | 1c08f7c | a dimension keeps its qualifying context: not negated, excluded or joined with another member (1.9.0) |
 | v3 | v13 | 978af0a | a dimension fills a whole slot of a recognised structure (1.10.0) |

@@ -1,6 +1,5 @@
 """Output measures under contract v3: a reporting-period date basis written as such, a magnitude-and-classifier
-unit kept whole, output a flow only as actual output; contract v2 unchanged, and an entity written fused with
-its site still unproven."""
+unit kept whole, output a flow only as actual output; and an entity written fused with its site still unproven."""
 
 import pytest
 from test_dimension_rules import answer
@@ -11,20 +10,15 @@ HEAD = "## 甲公司\n\n### 按报告期统计\n\n"  # the entity a section of i
 
 
 def ask(client, sentence, value="120", unit="万支", metric="实际产出的注射剂产量", obj="苏州工厂", scope="苏州工厂",  # noqa: F811
-        dims=(("entity", "甲公司"), ("date_basis", "按报告期统计")), head=HEAD, kind="flow", contract=3):
+        dims=(("entity", "甲公司"), ("date_basis", "按报告期统计")), head=HEAD, kind="flow"):
     text = head + sentence
     quote = sentence[:-1]
     f = fields_for(text, value, unit, "2026年第一季度", Q1, kind=kind, obj=obj, metric=metric, scope=scope,
                    mode="stated" if scope else "unknown")
     b = synthetic(text, quote, f)
-    if contract == 3:
-        b["contract_version"] = "extraction_consistency.v3"
-        b["items"][0]["dims"] = [{"kind": k, "state": "stated", "value": v, "span": at(text, v)} for k, v in dims]
-        b["items"][0]["family"] = "capacity"
-        return answer(client, b)
-    from test_measurement_rules import answer as answer_v2
-
-    return answer_v2(client, b)
+    b["items"][0]["dims"] = [{"kind": k, "state": "stated", "value": v, "span": at(text, v)} for k, v in dims]
+    b["items"][0]["family"] = "capacity"
+    return answer(client, b)
 
 
 ACTUAL = "2026年第一季度，苏州工厂实际产出的注射剂产量为120万支。"
@@ -71,9 +65,3 @@ def test_an_entity_written_fused_with_its_site_is_still_not_proven(client):  # n
     got = ask(client, "2026年第一季度，甲公司苏州工厂实际产出的注射剂产量为120万支。", obj="甲公司苏州工厂", scope=None,
               head="## 按报告期统计\n\n")
     assert got["dims"]["entity"]["result"] == "unsupported"
-
-
-def test_contract_v2_stays_checker_v10(client):  # noqa: F811
-    got = ask(client, ACTUAL, contract=2)
-    assert got["fields"]["unit"]["result"] != "match"
-    assert got["fields"]["measure_kind"]["reason"] == "no_event_wording"

@@ -1,10 +1,8 @@
-"""The unit of the metric phrase (extraction_normalize.v3): the unit is the head of the metric phrase's own
+"""The unit of the metric phrase (extraction_normalize.v4): the unit is the head of the metric phrase's own
 subject - never a subset named after an inclusion / exclusion / example boundary. Generic templates."""
 
 import pytest
 from test_measurement_rules import answer, client, fields_for, synthetic  # noqa: F401
-
-from app import measurement_rules
 
 YEAR = {"type": "interval", "precision": "year", "value": "2018"}
 
@@ -13,11 +11,6 @@ def en(client, metric, unit):  # noqa: F811
     text = "In 2018, Hospital B in total reported 23 " + metric + "."
     f = fields_for(text, "23", unit, "In 2018", YEAR, obj="Hospital B", metric=metric, mode="object_metric_total")
     return answer(client, synthetic(text, text, f))
-
-
-def test_the_checker_is_v10_with_normalize_v3():
-    assert measurement_rules.CHECKER_VERSION == "biocheck.extraction_rules.v10"
-    assert measurement_rules.NORMALIZE_VERSION == "extraction_normalize.v3"
 
 
 @pytest.mark.parametrize("metric,unit", [

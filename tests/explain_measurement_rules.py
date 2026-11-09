@@ -1,4 +1,4 @@
-"""Print, for every matrix sample and wrong-final negative, the contract v2 status and each non-match field
+"""Print, for every matrix sample and wrong-final negative, the contract v3 status and each non-match field
 with its reason
 (a review aid: the status alone can be right for the wrong reason)."""
 import copy
@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from test_measurement_rules import MATRIX, ROWS, request_of
 
-from app import measurement_rules
+from app import dimension_rules
 
 for row in MATRIX["rows"]:
     if row["group"] == "negative" and row.get("kind") != "wrong_final_at_real_span":
@@ -23,6 +23,6 @@ for row in MATRIX["rows"]:
     else:
         body = request_of(row)
     body.pop("contract_version")
-    out = measurement_rules.check(body)["items"][0]
+    out = dimension_rules.check(body)["items"][0]
     print(row["id"], out["status"], json.dumps({k: v.get("reason", "") for k, v in out["fields"].items()
                                                  if v["result"] != "match"}, ensure_ascii=False))

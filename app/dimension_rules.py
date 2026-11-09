@@ -294,10 +294,8 @@ def dims_of(item, P):
 def check(request):
     """Contract v3: the measurement check with this contract's normalisation, and each stated dimension."""
     base = dict(request, items=[{k: v for k, v in i.items() if k != "dims"} for i in request["items"]])
-    out = measurement_rules.check(base, unit_head=norm.unit_subject_head_v4, output=True,
-                                  period_whole=norm.period_span_whole_v5, english=True)
+    out = measurement_rules.check(base, CONTRACT_VERSION, CHECKER_VERSION)
     P = item_rules.Passages(request["passages"])
     for answered, item in zip(out["items"], request["items"]):
         answered["dims"] = dims_of(item, P)
-    out["contract_version"], out["checker_version"] = CONTRACT_VERSION, CHECKER_VERSION
     return out

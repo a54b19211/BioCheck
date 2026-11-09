@@ -1,11 +1,9 @@
-"""Whole periods and head nouns (extraction_normalize.v2 and later): a period span is read only as the whole
+"""Whole periods and head nouns (extraction_normalize.v4 and v5): a period span is read only as the whole
 written period;
 a unit in the bound metric phrase must be its head counting noun. Generic templates, not the words of a sample."""
 
 import pytest
 from test_measurement_rules import answer, client, fields_for, synthetic  # noqa: F401
-
-from app import measurement_rules
 
 YEAR = {"type": "interval", "precision": "year", "value": "2018"}
 
@@ -15,11 +13,6 @@ def en(client, prefix, period_text, unit="contacts", metric="close contacts", pe
     f = fields_for(text, "23", unit, period_text, period, obj="Hospital B", metric=metric,
                    mode="object_metric_total")
     return answer(client, synthetic(text, text, f))
-
-
-def test_the_checker_reads_with_normalize_v2_or_later():
-    assert measurement_rules.CHECKER_VERSION == "biocheck.extraction_rules.v10"
-    assert measurement_rules.NORMALIZE_VERSION == "extraction_normalize.v3"
 
 
 @pytest.mark.parametrize("prefix,period_text", [("In 2018", "In 2018"), ("In 2018", "2018"),

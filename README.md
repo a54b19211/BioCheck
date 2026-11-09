@@ -181,11 +181,11 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
  "counts": {"consistent": 0, "inconsistent": 0, "unchecked": 1}, "llm_calls": []}
 ```
 
-## 抽取一致性接口 v2（测量）
+## 测量规则（`app/measurement_rules.py`）
 
-**POST /v2/extraction-consistency**（契约 `extraction_consistency.v2`，checker `biocheck.extraction_rules.v10`，规则在 `app/measurement_rules.py`）
+测量条目的规则在 `app/measurement_rules.py`，由下面的 `/v3/extraction-consistency` 调用。原来的 `POST /v2/extraction-consistency`（契约 `extraction_consistency.v2`，checker `biocheck.extraction_rules.v10`）已经删除：Fabric 和 Radar 都不调用它。
 
-- **范围**：只接受 measurement 条目，请求里必须写 `"contract_version": "extraction_consistency.v2"`。/v1 的请求、回执和规则都不变，也不会被默认升到 v2。
+- **范围**：只有 measurement 条目。/v1 的请求、回执和规则不变。
 - **数值**：value 和 denominator 用规范十进制字符串传输（`318`、`21.3`、`-3`），最多 18 位数字、6 位小数，不用 JSON 数字，全程不经过 float。不规范或超出上限的返回 422。
 - **period** 是结构化的：`{"type": "point"|"interval", "precision": "day"|"month"|"quarter"|"half"|"year", "value"}`，跨越的区间用 `start`/`end` 代替 `value`。
   - canonical_period.v1 的规范写法逐一列在 `app/measurement_rules.py`；
@@ -221,9 +221,9 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 
 **POST /v3/extraction-consistency**（契约 `extraction_consistency.v3`，checker `biocheck.extraction_rules.v17`，规则在 `app/dimension_rules.py`）
 
-- 请求与 v2 相同，另外每个测量条目可以带 `dims`（每类至多一个：disease、population、date_basis、indication、product_or_class、milestone_definition、entity、stage、denominator_definition，各自写明 value 和 span）和 `family`。
-- 测量字段和条目状态与 v2 的规则相同，只是用这一版契约的读法：metric 短语里的单位按 `extraction_normalize.v4`，完整期间按 v5（上一行以完整日期结尾，例如公告的「发布时间」，不算期间的延续）；产出类单位（`120万支` 的单位是 `万支`，数量级不丢）和「实际产出」才算 flow。
-- **英文写法**（`docs/decisions/0008-english-wording-checker-v17.md`；只对不含中日韩字符的局部句生效，/v2 不变）：
+- 请求里的测量条目如上一节，另外每个测量条目可以带 `dims`（每类至多一个：disease、population、date_basis、indication、product_or_class、milestone_definition、entity、stage、denominator_definition，各自写明 value 和 span）和 `family`。
+- 测量字段和条目状态用上一节的规则，读法按这一版契约：metric 短语里的单位按 `extraction_normalize.v4`，完整期间按 v5（上一行以完整日期结尾，例如公告的「发布时间」，不算期间的延续）；产出类单位（`120万支` 的单位是 `万支`，数量级不丢）和「实际产出」才算 flow。
+- **英文写法**（`docs/decisions/0008-english-wording-checker-v17.md`；只对不含中日韩字符的局部句生效）：
   - 一句里有多个数时每个数各自核验：值之后的字段，只要它和值之间没有别的数就是这个值的；值之前的字段，前面没有别的数才是；括号里的百分数（`(CFR of 14%)`）不是另一个数；括号里的逗号不切开值所在的组。
   - 一句列出多个数（`N cases, including M deaths`、`N cases and M deaths`）且句中只有一个期间时，期间属于列表里的每个数：条件是它在所有数之前或之后，句中没有别的日期，每个数（第一个除外）由 including / and / of which 等引出。
   - `a total of` 是总量词；`As of <date>, a total of N` 证明累计口径；只写起点的期间（`since September 2012`）是累计，不是 flow。

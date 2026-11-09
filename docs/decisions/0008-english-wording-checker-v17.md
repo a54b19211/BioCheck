@@ -13,8 +13,8 @@ including 82 deaths"), "a total of", weeks, "since September 2012" and counts as
 ## Decision
 
 Checker v17 (`dimension_rules`, contract v3) adds only what the correct sentences of that batch need. Everything
-below is the `english` switch of `measurement_rules.check`; it is on for `/v3`, off for `/v2` (checker v10 answers as
-before), and it reads a value only when its local sentence has no CJK character (Chinese answers are unchanged).
+below applies to `/v3` (it was the `english` switch of `measurement_rules.check`, off for the since removed `/v2`),
+and it reads a value only when its local sentence has no CJK character (Chinese answers are unchanged).
 
 - **Several numbers in a sentence.** A quantity's phrase runs from its number to the next quantity, so a field after
   the value is the value's unless a number stands between them, and one before it unless a number precedes it in the

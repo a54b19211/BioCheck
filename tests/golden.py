@@ -2,7 +2,7 @@
 replayed byte for byte by tests/test_checker_golden.py, so code can be moved without changing an answer.
 
 The cases are every request the test suite sends to a checker (over HTTP or directly), every p3 matrix row and
-its wrong-final negative under contracts v2 and v3, every canonical_period input of the suite, and the sentence
+its wrong-final negative under contract v3, every canonical_period input of the suite, and the sentence
 split of every evaluation draft. Freeze again only together with a CHECKER_VERSION bump, from the repo root:
 
     PYTHONPATH=. python tests/golden.py
@@ -21,9 +21,8 @@ def checkers():
     """name -> (module, function name) of every frozen entry point."""
     from app import claims, dimension_rules, item_rules, measurement_rules
 
-    return {"contract_v1": (item_rules, "check"), "contract_v2": (measurement_rules, "check"),
-            "contract_v3": (dimension_rules, "check"), "canonical_period": (measurement_rules, "canonical_period"),
-            "sentences": (claims, "sentences")}
+    return {"contract_v1": (item_rules, "check"), "contract_v3": (dimension_rules, "check"),
+            "canonical_period": (measurement_rules, "canonical_period"), "sentences": (claims, "sentences")}
 
 
 def answer(name, request):
@@ -83,7 +82,7 @@ def _suite_requests():
 
 
 def _matrix_requests():
-    """Every p3 matrix row and wrong-final negative, as the v2 request a correct client builds, and under v3."""
+    """Every p3 matrix row and wrong-final negative, as the request a correct client builds."""
     sys.path.insert(0, str(ROOT / "tests"))
     from test_measurement_rules import MATRIX, ROWS, request_of
 
@@ -99,7 +98,7 @@ def _matrix_requests():
         else:
             body = request_of(row)
         body.pop("contract_version")
-        out += [("contract_v2", body), ("contract_v3", copy.deepcopy(body))]
+        out.append(("contract_v3", body))
     return out
 
 

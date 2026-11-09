@@ -18,11 +18,6 @@ def run(client, text, value, **kw):  # noqa: F811
     return f, answer(client, synthetic(text, text, f))
 
 
-def test_the_checker_reads_with_the_shared_normalization():
-    assert measurement_rules.CHECKER_VERSION == "biocheck.extraction_rules.v10"
-    assert measurement_rules.NORMALIZE_VERSION == "extraction_normalize.v3"
-
-
 @pytest.mark.parametrize("written,canonical", [("1 444", "1444"), ("1 444", "1444"), ("1 444", "1444"),
                                                ("1,444", "1444"), ("12 345 678", "12345678")])
 def test_a_grouped_value_is_one_number(client, written, canonical):  # noqa: F811

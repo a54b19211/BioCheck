@@ -336,7 +336,7 @@ def _decimal(field, name):
             raise ValueError(f"{name}: a canonical decimal string of at most 18 digits and 6 decimals")
 
 
-class MeasurementFieldsV2(Strict):
+class MeasurementFields(Strict):
     object: FieldValue
     metric: FieldValue
     value: FieldValue
@@ -362,9 +362,9 @@ class MeasurementFieldsV2(Strict):
         return self
 
 
-class MeasurementItemV2(ItemBase):
+class MeasurementItem(ItemBase):
     kind: Literal["measurement"]
-    fields: MeasurementFieldsV2
+    fields: MeasurementFields
 
 
 class Dim(Strict):
@@ -377,7 +377,7 @@ class Dim(Strict):
     span: Span
 
 
-class MeasurementItemV3(MeasurementItemV2):
+class MeasurementItemV3(MeasurementItem):
     dims: list[Dim] = Field(default_factory=list, max_length=9)
     family: Literal["case_count", "milestone_count", "capacity", "efficacy", ""] = ""
 
@@ -393,13 +393,6 @@ class ExtractionRequestV3(Strict):
     subject: Subject
     passages: list[Passage] = Field(min_length=1, max_length=8)
     items: list[MeasurementItemV3] = Field(min_length=1, max_length=50)
-
-
-class ExtractionRequestV2(Strict):
-    contract_version: Literal["extraction_consistency.v2"]
-    subject: Subject
-    passages: list[Passage] = Field(min_length=1, max_length=8)
-    items: list[MeasurementItemV2] = Field(min_length=1, max_length=50)
 
 
 # ---- /v2/verify: strict like the extraction contracts, and the evidence carries the time facts the semantic check
@@ -527,13 +520,6 @@ def create_app(llm=chat_json):
     @app.post("/v2/verify")
     def verify_units(req: VerifyRequestV2):
         return unit_verify.verify(req.model_dump(), llm)
-
-    @app.post("/v2/extraction-consistency")
-    def extraction_consistency_v2(req: ExtractionRequestV2):
-        try:
-            return measurement_rules.check(req.model_dump(exclude={"contract_version"}, exclude_none=True))
-        except item_rules.ContractError as exc:
-            return error(400, "invalid_request", str(exc))
 
     @app.post("/v3/extraction-consistency")
     def extraction_consistency_v3(req: ExtractionRequestV3):

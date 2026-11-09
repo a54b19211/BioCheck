@@ -1,5 +1,5 @@
-"""Extraction consistency of measurements, contract v2 (POST /v2/extraction-consistency): item_rules (contract
-v1) extended by the smallest set of rules that lets explicit wording or structure prove what item_rules leaves
+"""Extraction consistency of measurements (called by dimension_rules, contract v3): item_rules (contract v1)
+extended by the smallest set of rules that lets explicit wording or structure prove what item_rules leaves
 unsupported - the kind of a count (flow / cumulative / stock / rate), a canonical period with its type and
 precision, a scope stated or proven to be the object's own total, a value qualifier and the modality. Everything
 the rules cannot prove stays "unsupported". item_rules is imported, not copied.
@@ -18,12 +18,6 @@ from . import item_rules
 from .claims import squash
 from .item_rules import ContractError, ends, outcome, stated, written_as
 
-CONTRACT_VERSION = "extraction_consistency.v2"
-# Bump whenever a rule, a word list, the unit table or canonical_period changes (docs/decisions/0001).
-# The normalisation functions of extraction_normalize.v3 are this version's defaults; contract v3
-# (dimension_rules) passes newer ones in.
-CHECKER_VERSION = "biocheck.extraction_rules.v10"
-NORMALIZE_VERSION = norm.NORMALIZE_V3
 FIELDS = ("object", "metric", "value", "unit", "period", "scope", "denominator", "measure_kind", "qualifier",
           "modality")
 MAX_DIGITS, MAX_DECIMALS = 18, 6
@@ -37,7 +31,7 @@ SENTENCE_END = re.compile(r"(?<=[a-z0-9\)\]%])\.\s+(?=[A-Z(\[])")
 # a percentage in a parenthesis ("(CFR of 14%)", "4717 (56.5%) cases") states a rate of the number before it
 PERCENT_PAREN = re.compile(r"\((?:[^()\d]|\([^()\d]*\))*\d+(?:[.,]\d+)?\s*%(?:[^()\d]|\([^()\d]*\))*\)")
 
-# Word lists (versioned with CHECKER_VERSION).
+# Word lists (versioned with dimension_rules.CHECKER_VERSION).
 EVENT = re.compile(r"批准|获批|注册|受理|发布|报告|新增|新发|发生|上市|\b(?:recorded|reported|notified|approved|new)\b",
                    re.IGNORECASE)
 CUMULATIVE = re.compile(r"累计|累积|\bcumulative(?:ly)?\b|\byear-to-date\b|年初至今|前\d{1,2}个?月|"
@@ -363,17 +357,16 @@ def whole_number(P, span, spelled=False):
     return whole(p["text"], span["start"] - p["start"], span["end"] - p["start"])
 
 
-def whole_period(P, span, period_whole=None):
-    """The period span is the whole written period in its passage (period_whole: the normalisation rule,
-    extraction_normalize.v2 period_span_whole by default)."""
+def whole_period(P, span):
+    """The period span is the whole written period in its passage (extraction_normalize.v5 period_span_whole_v5)."""
     p = P.by_id[span["passage"]]
-    return (period_whole or norm.period_span_whole)(p["text"], span["start"] - p["start"], span["end"] - p["start"])
+    return norm.period_span_whole_v5(p["text"], span["start"] - p["start"], span["end"] - p["start"])
 
 
-def bound_unit(P, f, unit, vspan, unit_head=None):
+def bound_unit(P, f, unit, vspan):
     """The stated unit is the head of the stated metric phrase's own subject, a counting noun, the phrase
     starting right after the value with nothing between the value and the unit but words
-    (extraction_normalize.v3 unit_subject_head); the metric span must hold its value."""
+    (extraction_normalize.v4 unit_subject_head_v4); the metric span must hold its value."""
     metric = f["metric"]
     if not stated(metric) or len({vspan["passage"], unit["span"]["passage"], metric["span"]["passage"]}) != 1:
         return False
@@ -382,9 +375,9 @@ def bound_unit(P, f, unit, vspan, unit_head=None):
         return False
     p = P.by_id[vspan["passage"]]
     b = p["start"]
-    rule = unit_head or norm.unit_subject_head
-    return rule(p["text"], vspan["end"] - b, unit["span"]["start"] - b, unit["span"]["end"] - b,
-                metric["span"]["start"] - b, metric["span"]["end"] - b)
+    return norm.unit_subject_head_v4(p["text"], vspan["end"] - b, unit["span"]["start"] - b,
+                                     unit["span"]["end"] - b, metric["span"]["start"] - b,
+                                     metric["span"]["end"] - b)
 
 
 def heading_ancestor(P, span, vspan):
@@ -603,7 +596,7 @@ def value_result(item, P, vtext, spelled=False):
     return outcome("match", span=vf["span"])
 
 
-def unit_result(m, unit_head):
+def unit_result(m):
     """A stated unit is the whole unit recognised at the value, or the head of the bound metric phrase; "no unit"
     is proven only by punctuation or the sentence end after the number."""
     unit, at_value, L = m.f["unit"], m.at_value, m.L
@@ -622,7 +615,7 @@ def unit_result(m, unit_head):
         return outcome("match", "unit_at_value", span)  # the whole recognized unit, exactly
     if at_value:
         return outcome("mismatch", "unit_span_is_not_the_unit_at_value:" + at_value[0])
-    if bound_unit(m.P, m.f, unit, m.vspan, unit_head):
+    if bound_unit(m.P, m.f, unit, m.vspan):
         return outcome("match", "unit_in_bound_metric", span)
     return outcome("unsupported", "unit_not_at_value_or_not_in_table")
 
@@ -705,7 +698,7 @@ def shared_period(m, span):
     return all(q == quantities[0] or LIST_INTRO.search(L.text(L.start, q[0])) for q in members)
 
 
-def period_result(m, period_whole):
+def period_result(m):
     """(result, the checked canonical period or None): the span is the whole written period, its canonical form
     is the stated one, and it stands in the value's group or before it in its sentence."""
     pf = m.f["period"]
@@ -717,7 +710,7 @@ def period_result(m, period_whole):
         return outcome("mismatch", "period_span_outside_passage"), None
     if got is None:
         return outcome("unsupported", why), None
-    if not whole_period(m.P, pf["span"], period_whole):
+    if not whole_period(m.P, pf["span"]):
         return outcome("unsupported", "period_span_not_the_whole_period"), None
     if got != pf["value"]:
         return outcome("mismatch", "period_differs_from_canonical_span"), None
@@ -1045,9 +1038,11 @@ def value_flaw(m):
     return None
 
 
-def check_measurement(item, P, unit_head=None, output=False, period_whole=None, english=False):
+def check_measurement(item, P):
     """Field results of one measurement item (locator checked first, as in item_rules). The field checks run in
-    this order because later ones read what earlier ones established (partners, period, object and metric)."""
+    this order because later ones read what earlier ones established (partners, period, object and metric).
+    Output units and wording are always read; the English wording rules apply to an item whose text is not
+    Chinese."""
     fields = {"locator": item_rules.locator_result(item, P)}
     if fields["locator"]["result"] != "match":
         for name in FIELDS:
@@ -1061,18 +1056,18 @@ def check_measurement(item, P, unit_head=None, output=False, period_whole=None, 
         for name in FIELDS:
             fields.setdefault(name, outcome("unsupported", "no_valid_value_span"))
         return fields
-    fields["value"] = value_result(item, P, vtext, english)
+    fields["value"] = value_result(item, P, vtext, True)
     L = Local(P, vspan)
-    english = english and not CJK.search(L.text())
+    english = not CJK.search(L.text())
     if english:
         L.use_english()
-    m = Measure(P, f, vspan, fields, L, unit_after(L.passage["text"], vspan["end"] - L.base, output), english=english)
+    m = Measure(P, f, vspan, fields, L, unit_after(L.passage["text"], vspan["end"] - L.base, True), english=english)
     flaw = value_flaw(m) if english and fields["value"]["result"] == "match" else None
     if flaw:
         fields["value"] = flaw
-    fields["unit"] = unit_result(m, unit_head)
+    fields["unit"] = unit_result(m)
     fields["denominator"], m.partners = denominator_result(m)
-    fields["period"], m.period = period_result(m, period_whole)
+    fields["period"], m.period = period_result(m)
     for name in ("object", "metric"):
         fields[name] = object_or_metric_result(m, name)
     fields["scope"] = scope_result(m, item["id"])
@@ -1081,7 +1076,7 @@ def check_measurement(item, P, unit_head=None, output=False, period_whole=None, 
         left_out = words_outside_fields(m)
         if left_out:
             fields["metric"] = outcome("unsupported", "quantity_words_outside_the_fields:" + " ".join(left_out)[:60])
-    kind = kind_result(m, output)
+    kind = kind_result(m, True)
     if kind is not None:
         fields["measure_kind"] = kind
     fields["qualifier"] = qualifier_result(m)
@@ -1089,15 +1084,11 @@ def check_measurement(item, P, unit_head=None, output=False, period_whole=None, 
     return fields
 
 
-def check(request, unit_head=None, output=False, period_whole=None, english=False):
-    """Contract v2: measurement items only. Raises ContractError on a contract break. unit_head: the rule for
-    the unit in the bound metric phrase (default extraction_normalize.v3 unit_subject_head); output: the output
-    units and wording of contract v3; period_whole: the whole-period rule (default extraction_normalize.v2);
-    english: the English wording of contract v3 (docs/decisions/0007) - spelled counts, more period forms, one
-    period for a list of quantities, "a total of", values that are marks, ends of ranges or old values."""
+def check(request, contract_version, checker_version):
+    """Measurement items only, answered under the given contract and checker version. Raises ContractError on a
+    contract break. The normalisation is extraction_normalize v4 (unit), v5 (whole period) and v6 (spelled
+    counts); the output units and wording and the English wording rules (docs/decisions/0007: spelled counts,
+    more period forms, one period for a list of quantities, "a total of", values that are marks, ends of ranges
+    or old values) are read."""
     item_rules.check_request(request, primary=False)
-
-    def one(item, P):
-        return check_measurement(item, P, unit_head, output, period_whole, english)
-
-    return item_rules.answer(request, one, CONTRACT_VERSION, CHECKER_VERSION)
+    return item_rules.answer(request, check_measurement, contract_version, checker_version)
