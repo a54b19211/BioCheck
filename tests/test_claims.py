@@ -25,16 +25,30 @@ def test_item_numbers_neither_end_a_sentence_nor_count_as_data():
              "是比喻性的长期生态风险讨论，还是指代具体的、即将爆发的急性疫情？"
              "4. 这些GDELT线索的具体来源链接、发布时间及原始语境是什么？")
     result = C.sentences(draft)
-    starts = ["关键未知信息包括：1. 2026年", "2. 澳大利亚政府", "3. 标题中“playing", "是比喻性的长期", "4. 这些GDELT"]
-    assert len(result) == 5 and all(s["text"].startswith(start) for s, start in zip(result, starts))
+    starts = ["关键未知信息包括：", "1. 2026年", "2. 澳大利亚政府",
+              "3. 标题中“playing", "是比喻性的长期", "4. 这些GDELT"]
+    assert [s["text"].startswith(start) for s, start in zip(result, starts)] == [True] * 6 and len(result) == 6
     assert all(draft[s["start"]:s["end"]] == s["text"] for s in result)
-    assert [C.numeric_tokens(s["text"]) for s in result] == [[]] * 5
+    assert [C.numeric_tokens(s["text"]) for s in result] == [[]] * 6
 
 
 def test_a_number_after_an_item_number_is_still_data():
-    result = C.sentences("主要发现：1. 肯尼亚报告输入病例9例[E1]。2. 尼日利亚报告1例[E1]。")
-    assert [(s["citations"], C.numeric_tokens(s["text"])) for s in result] == [(["E1"], ["9"]), (["E1"], ["1"])]
-    assert len(C.sentences("Cases: 31. Deaths: 5.")) == 2  # a final number is not an item number
+    for draft in ("主要发现：1. 肯尼亚报告输入病例9例[E1]。2. 尼日利亚报告1例[E1]。",  # a run 1. 2.
+                  "主要发现：\n1. 肯尼亚报告输入病例9例[E1]。\n2. 尼日利亚报告1例[E1]。"):  # at the start of lines
+        facts = C.sentences(draft)[1:]
+        assert [(s["citations"], C.numeric_tokens(s["text"])) for s in facts] == [(["E1"], ["9"]), (["E1"], ["1"])]
+
+
+def test_a_number_and_full_stop_that_is_no_list_stays_a_number():
+    # a number is only an item number in a list format; elsewhere it is a case count like any other
+    for count in ("31", "3"):
+        draft = f"病例数：{count}. 其中5例死亡[E1]。"
+        result = C.sentences(draft)
+        assert [s["text"] for s in result] == [f"病例数：{count}.", "其中5例死亡[E1]。"]
+        assert [C.numeric_tokens(s["text"]) for s in result] == [[count], ["5"]]
+        assert all(draft[s["start"]:s["end"]] == s["text"] for s in result)
+    assert C.numeric_tokens("病例数：31. 其中5例") == ["31", "5"]
+    assert len(C.sentences("Cases: 31. Deaths: 5.")) == 2
 
 
 def test_batches_never_mix_paragraphs_and_hold_at_most_four():

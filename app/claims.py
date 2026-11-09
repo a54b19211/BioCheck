@@ -7,8 +7,7 @@ ID = r"[A-Za-z][A-Za-z_]*\d[A-Za-z0-9_.:-]*"  # a ref has a digit: [E1], [A2]; [
 CITE = re.compile(r"\[(" + ID + r"(?:\s*[,，;；]\s*" + ID + r")*)\]")
 TRAILING = re.compile(r"[ \t]*(?:" + CITE.pattern + r"[ \t]*)+")
 SENTENCE_END = re.compile(r"[。！？]+[”’」』]?|[.!?]+(?=\s|\[|$)|\n+|\Z")
-# "1." numbering an item (at the start, or after a colon, a sentence end or a line break): not a sentence end, not data
-LIST_MARK = re.compile(r"(?:^|(?<=[：；。！？\n]))[ \t]*\d{1,2}\.(?=[ \t])")
+ITEM_NUMBER = re.compile(r"(?:^|(?<=[：；。！？\n]))[ \t]*(\d{1,2})\.(?=[ \t])")  # may be "1." numbering an item
 NUMBER = re.compile(r"(?<![A-Za-z0-9_.])(?<![A-Za-z]-)[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")
 MAX_BATCH = 4
 
@@ -51,15 +50,29 @@ def paragraphs(draft):
     return spans
 
 
+def list_marks(text):
+    """(start, end) of each item number such as "1." in a paragraph or a sentence. One counts when it stands at the
+    start of a line, or belongs to a run 1. 2. ... (two or more, in order) after colons and sentence ends. Every
+    other number followed by a full stop ("病例数：31. 其中……") stays a number and is checked like any."""
+    found = [(m.start(1), m.end(), int(m.group(1))) for m in ITEM_NUMBER.finditer(text)]
+    run = []
+    for start, end, number in found:
+        if number == len(run) + 1:
+            run.append((start, end))
+    at_line_start = [(start, end) for start, end, _ in found if not text[text.rfind("\n", 0, start) + 1:start].strip()]
+    return sorted(set(at_line_start + (run if len(run) > 1 else [])))
+
+
 def sentences(draft):
-    """Numbered sentences with draft offsets. Citations right after the full stop belong to it."""
+    """Numbered sentences with draft offsets. Citations right after the full stop belong to it. An item number opens
+    its own sentence (the lead-in before it is one too) and its full stop does not end it."""
     result = []
     for number, (p_start, p_end) in enumerate(paragraphs(draft), 1):
         text, cursor = draft[p_start:p_end], 0
-        item_numbers = {m.end() for m in LIST_MARK.finditer(text)}  # the sentence goes on after "1."
-        for m in SENTENCE_END.finditer(text):
-            end = m.end()
-            if end <= cursor or end in item_numbers:
+        marks = list_marks(text)
+        ends = {m.end() for m in SENTENCE_END.finditer(text)} - {end for _, end in marks}
+        for end in sorted(ends | {start for start, _ in marks}):
+            if end <= cursor:
                 continue
             tail = TRAILING.match(text, end)
             if tail:
@@ -100,9 +113,10 @@ def unnamed_numbers(tokens, reason):
 
 
 def numeric_tokens(text):
+    for start, end in reversed(list_marks(text)):  # the same item numbers sentences() cut at are not data
+        text = text[:start] + text[end:]
     text = re.sub(r"\b(?:NCT\d+|PMID\s*:?\s*\d+)\b", "", DATE.sub("", TIMESTAMP.sub("", CITE.sub("", text))))
-    text = LIST_MARK.sub("", text)
-    text = re.sub(r"[（(]\s*\d{1,2}\s*[)）]", "", text)  # list markers such as （1） and 1. are not data
+    text = re.sub(r"[（(]\s*\d{1,2}\s*[)）]", "", text)  # list markers such as （1） are not data
     return list(dict.fromkeys(m.group() for m in NUMBER.finditer(text)))
 
 
