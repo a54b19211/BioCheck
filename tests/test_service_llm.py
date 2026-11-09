@@ -251,3 +251,40 @@ def test_the_reviser_also_sees_which_materials_are_one_source(client):
     )
     assert response.status_code == 200
     assert seen and seen[0]["source_relations"][0]["target"] == "E1"
+
+
+def test_the_window_of_a_source_reaches_the_writer_the_checker_and_the_reviser(client):
+    """A source sent as an excerpt says so to every model request (writer, sentence check, reviser); one sent
+    by a caller that says nothing is "unknown" there, never the whole record."""
+    window = {"coverage": "excerpt", "chars": 3916, "record_chars": 15118, "ranges": [[0, 2000], [9000, 10916]]}
+    body = request()
+    body["evidence"][0]["window"] = window  # E2 comes with none, as from an older caller
+    draft = "3.4 mg/kg组ORR为32%[E1]。网帖称某市医院出现多例不明肺炎[E2]。"
+    quote = "In the 3.4 mg/kg arm ORR was 35%"
+    llm = FakeLLM(
+        verify_claims=lambda p: {"claims": [
+            {"sentence": 1, "units": [{"segment": "S1", "fragment": "3.4 mg/kg组ORR为32%", "kind": "fact",
+                                       "verdict": "contradicted", "quotes": [{"ref": "E1", "quote": quote}]}],
+             "split": {"assessment": "complete"}},
+            {"sentence": 2, "units": [{"segment": "S1", "fragment": "网帖称某市医院出现多例不明肺炎",
+                                       "kind": "fact", "verdict": "supported",
+                                       "quotes": [{"ref": "E2", "quote": "多例不明肺炎"}]}],
+             "split": {"assessment": "complete"}}]},
+        generate=lambda p: {"draft": draft}, revise=lambda p: {"sentences": []})
+    http = client(llm)
+    checked = http.post("/v2/verify", json=dict(body, draft=draft), headers=auth()).json()
+    review = {"status": checked["status"], "claims": checked["claims"]}
+    assert http.post("/v1/revise", json=dict(body, draft=draft, review=review), headers=auth()).status_code == 200
+    assert http.post("/v1/generate", json=body, headers=auth()).status_code == 200
+
+    def sent(stage):  # what the model was sent, as JSON
+        return [json.loads(json.dumps(p)) for s, p, _ in llm.payloads if s == stage]
+
+    unknown = {"coverage": "unknown"}
+    assert {r["ref"]: r["window"] for p in sent("verify_claims") for r in p["references"]} == {
+        "E1": window, "E2": unknown}
+    assert {r["ref"]: r["window"] for p in sent("revise") for r in p["references"]}["E1"] == window
+    assert {e["id"]: e["window"] for e in sent("generate")[0]["evidence"]} == {"E1": window, "E2": unknown}
+    unplaced = dict(body["evidence"][0], window=dict(window, extra=1))  # /v2/verify refuses what it does not know
+    assert http.post("/v2/verify", json=dict(body, evidence=[unplaced], draft=draft), headers=auth()
+                     ).status_code == 400

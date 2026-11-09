@@ -46,6 +46,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 - `source_kind` 取 `official|research|news|social|registry|company`；`verified` 必填。
 - `analysis_results`：`{"id": "A1", "method": "...", "output": {...}, "calculation_basis": {...}, "limitations": [...]}`。
 - `source_updates`：`{"target": "E2", "replacement": "E5", "kind": "correction|retraction"}`，表示 E2 已被 E5 更正或撤回。
+- `evidence[].window`（可选）：说明 `text` 是这份材料的哪一部分，由送材料的一方按它实际截取的范围给出：`{"coverage": "full|excerpt|unknown", "chars": text 字数, "record_chars": 全文字数, "ranges": [[起, 止], ...], "ranges_omitted": 没列出的段数}`，`ranges` 是 `text` 取自全文的字符位置（左闭右开），之间的内容没有给本服务。不带 `window`（旧调用方）按 `unknown` 处理，不当作全文；`unknown` 和 `excerpt` 一样按片段对待：片段里没有 X，只能写成“本次片段未提供X，尚未查清”，不能判成全文或本次检索也没有。`/v2/verify` 的 `window` 同样拒绝未知字段。
 - `max_llm_calls`（默认 20）：本次最多调用几次模型，用完后剩下的句子判为待核（`unchecked`）。
 
 **POST /v1/generate** → `{"draft": "……", "llm_calls": [...]}`

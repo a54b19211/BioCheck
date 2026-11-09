@@ -14,6 +14,18 @@ from . import core, dimension_rules, item_rules, measurement_rules, unit_verify
 from .llm import chat_json
 
 
+class Window(BaseModel):
+    """Which part of the whole record an evidence `text` is, as its sender cut it. `ranges` are the characters
+    [start, end) of the whole record text that `text` holds; what lies between them is not given."""
+
+    model_config = ConfigDict(extra="forbid")
+    coverage: Literal["full", "excerpt", "unknown"]
+    chars: int | None = None  # length of `text`
+    record_chars: int | None = None  # length of the whole record text
+    ranges: list[tuple[int, int]] = []
+    ranges_omitted: int | None = None  # ranges the sender left out of the list
+
+
 class Evidence(BaseModel):
     id: str
     title: str = ""
@@ -23,6 +35,7 @@ class Evidence(BaseModel):
     verified: bool
     text: str = Field(min_length=1)
     origin_group: str | None = None  # Fabric's explicit same-origin group; absent = independence unknown
+    window: Window | None = None  # absent = unknown whether `text` is the whole record, never read as it is
 
 
 class AnalysisResult(BaseModel):

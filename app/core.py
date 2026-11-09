@@ -93,8 +93,19 @@ def materials(req):
     if len(set(ids)) != len(ids):
         raise InputError("duplicate_id", "evidence与analysis_results的id必须唯一")
     # Only these fields reach the model; evaluation labels and other extras never do.
-    return {k: req[k] for k in ("question", "evidence", "analysis_results", "source_updates", "source_relations",
+    body = {k: req[k] for k in ("question", "evidence", "analysis_results", "source_updates", "source_relations",
                                 "research_scope", "previous_report", "hypotheses") if req.get(k) is not None}
+    if "evidence" in body:
+        body["evidence"] = [dict(e, window=window_of(e)) for e in body["evidence"]]
+    return body
+
+
+def window_of(e):
+    """Which part of the record an evidence item's text is, as the model reads it: what the sender said (see
+    service.Window), else {"coverage": "unknown"}. A sender that said nothing - an older caller - did not say
+    the text is the whole record."""
+    said = {k: v for k, v in (e.get("window") or {}).items() if v not in (None, [])}
+    return said or {"coverage": "unknown"}
 
 
 TIME_FIELDS = ("first_seen_at", "proof_available_at", "replay_mode")
@@ -104,7 +115,7 @@ def references(req):
     """id -> the text a citation may be checked against (analysis results as canonical JSON)."""
     refs = {e["id"]: {"ref": e["id"], "title": e.get("title", ""), "source_kind": e["source_kind"],
                       "verified": e["verified"], "published_at": e.get("published_at"),
-                      "origin_group": e.get("origin_group"), "text": e["text"],
+                      "origin_group": e.get("origin_group"), "window": window_of(e), "text": e["text"],
                       **{k: e[k] for k in TIME_FIELDS if e.get(k)}}  # only what the request gave: v1 has none
             for e in req.get("evidence", [])}
     for a in req.get("analysis_results", []):
