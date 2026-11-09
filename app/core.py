@@ -372,12 +372,12 @@ def _revision_target(old, now, current, refs):
     if old["verdict"] == "insufficient" and C.scope_span_ok(now["text"], old.get("scope_span")):
         return "scope", C.scope_revision(now["text"], old["scope_span"])
     if old["verdict"] == "insufficient" and not now["citations"] and old["reason"].startswith("no_citation"):
-        # An uncited fact may take a citation from its neighbours, and only from them.
+        # An uncited fact may take a citation from its neighbours, and only from them. Without any it is revised
+        # all the same (narrowed to an unknown or a scope note) and verified again.
         near = [current.get(now["index"] + d) for d in (-1, 1)]
         nearby = list(dict.fromkeys(r for o in near if o for r in o["citations"] if r in refs))
-        if nearby:
-            return "model", dict(now, citations=nearby, verdict=old["verdict"], labels=old["labels"],
-                                 reason=old["reason"], quotes=[], alternatives=[])
+        return "model", dict(now, citations=nearby, verdict=old["verdict"], labels=old["labels"],
+                             reason=old["reason"], quotes=[], alternatives=[])
     return None
 
 
@@ -399,14 +399,17 @@ def _revision_targets(req, current, refs):
 
 def _revision_payload(req, batch, sentences, refs):
     cited = list(dict.fromkeys(r for c in batch for r in c["citations"] + c["alternatives"]))
-    return {"question": req["question"],
-            "claims": [{k: c[k] for k in ("index", "text", "citations", "verdict", "labels", "reason", "quotes",
-                                          "alternatives")}
-                       | {"context": context(sentences, c)} for c in batch],
-            "references": [refs[r] for r in cited if r in refs],
-            # the reviser must see which cited materials are one source reposted
-            "source_relations": [r for r in req.get("source_relations", [])
-                                 if r["source"] in cited or r.get("target") in cited]}
+    payload = {"question": req["question"],
+               "claims": [{k: c[k] for k in ("index", "text", "citations", "verdict", "labels", "reason", "quotes",
+                                             "alternatives")}
+                          | {"context": context(sentences, c)} for c in batch],
+               "references": [refs[r] for r in cited if r in refs],
+               # the reviser must see which cited materials are one source reposted
+               "source_relations": [r for r in req.get("source_relations", [])
+                                    if r["source"] in cited or r.get("target") in cited]}
+    if any(not c["citations"] for c in batch):  # a sentence with nothing to cite: what was searched, as context only
+        payload["research_scope"] = req.get("research_scope", {})
+    return payload
 
 
 def _accept_revisions(out, batch, replaced, refs, current):

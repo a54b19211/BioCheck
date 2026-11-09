@@ -255,6 +255,22 @@ def test_an_uncited_scope_note_may_be_rewritten_without_a_citation():
     assert [c["index"] for c in result["changed"]] == [2]
 
 
+def test_an_uncited_sentence_whose_neighbours_cite_nothing_is_revised_too():
+    # r2 first analysis, paragraph 2: "the evidence supports only observing", uncited, and so were its neighbours
+    draft = "现有证据支持该事件目前仅需继续观察。材料显示相关报道为未核实来源，未提供具体病例数。"
+    req = dict(request(), draft=draft)
+    review = core.verify(req, FakeLLM(verify_claims=supported()))
+    assert [c["reason"].startswith("no_citation") for c in review["claims"]] == [True, True]
+    narrowed = "现有材料不足以判断是否需要继续观察，缺少具体病例数和官方通报。"
+    llm = FakeLLM(revise=lambda p: {"sentences": [{"index": 1, "text": narrowed}]})
+    result = core.revise(dict(req, review=review), llm)
+    asked = llm.payloads[0][1]
+    assert [c["index"] for c in asked["claims"]] == [1, 2] and asked["references"] == []  # nothing offered to cite
+    assert asked["research_scope"] == req["research_scope"]  # context only, not a reference
+    assert result["draft"] == draft.replace("现有证据支持该事件目前仅需继续观察。", narrowed)
+    assert [c["index"] for c in result["changed"]] == [1]
+
+
 def wrong_ref_review():
     """The sentence cites E1 (the trial), but what it says is in E2 (the post)."""
     draft = "网帖称医院出现多例不明肺炎[E1]。"
