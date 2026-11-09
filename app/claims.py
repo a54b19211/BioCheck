@@ -7,6 +7,8 @@ ID = r"[A-Za-z][A-Za-z_]*\d[A-Za-z0-9_.:-]*"  # a ref has a digit: [E1], [A2]; [
 CITE = re.compile(r"\[(" + ID + r"(?:\s*[,，;；]\s*" + ID + r")*)\]")
 TRAILING = re.compile(r"[ \t]*(?:" + CITE.pattern + r"[ \t]*)+")
 SENTENCE_END = re.compile(r"[。！？]+[”’」』]?|[.!?]+(?=\s|\[|$)|\n+|\Z")
+# "1." numbering an item (at the start, or after a colon, a sentence end or a line break): not a sentence end, not data
+LIST_MARK = re.compile(r"(?:^|(?<=[：；。！？\n]))[ \t]*\d{1,2}\.(?=[ \t])")
 NUMBER = re.compile(r"(?<![A-Za-z0-9_.])(?<![A-Za-z]-)[-−]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)%?")
 MAX_BATCH = 4
 
@@ -54,9 +56,10 @@ def sentences(draft):
     result = []
     for number, (p_start, p_end) in enumerate(paragraphs(draft), 1):
         text, cursor = draft[p_start:p_end], 0
+        item_numbers = {m.end() for m in LIST_MARK.finditer(text)}  # the sentence goes on after "1."
         for m in SENTENCE_END.finditer(text):
             end = m.end()
-            if end <= cursor:
+            if end <= cursor or end in item_numbers:
                 continue
             tail = TRAILING.match(text, end)
             if tail:
@@ -98,7 +101,8 @@ def unnamed_numbers(tokens, reason):
 
 def numeric_tokens(text):
     text = re.sub(r"\b(?:NCT\d+|PMID\s*:?\s*\d+)\b", "", DATE.sub("", TIMESTAMP.sub("", CITE.sub("", text))))
-    text = re.sub(r"[（(]\s*\d{1,2}\s*[)）]", "", text)  # list markers such as （1） are not data
+    text = LIST_MARK.sub("", text)
+    text = re.sub(r"[（(]\s*\d{1,2}\s*[)）]", "", text)  # list markers such as （1） and 1. are not data
     return list(dict.fromkeys(m.group() for m in NUMBER.finditer(text)))
 
 

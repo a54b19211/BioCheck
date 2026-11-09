@@ -16,6 +16,27 @@ def test_english_decimal_is_not_a_sentence_end_and_comma_lists_are_citations():
     assert [s["citations"] for s in result] == [["E1", "E2"], ["E1"]]
 
 
+def test_item_numbers_neither_end_a_sentence_nor_count_as_data():
+    # r2 first analysis, the "key unknowns" paragraph: "1." and "2." "3." "4." were sentences of their own
+    draft = ("关键未知信息包括：1. 2026年10月至11月期间，澳大利亚是否有官方报告的禽流感"
+             "（禽类或野生动物）确诊病例、死亡事件或聚集性疫情？"
+             "2. 澳大利亚政府机构（如DAFF、州卫生厅）是否发布了针对禽类或野生动物的疫情警报、封锁令或风险评估？"
+             "3. 标题中“playing chicken”的具体指代是什么？"
+             "是比喻性的长期生态风险讨论，还是指代具体的、即将爆发的急性疫情？"
+             "4. 这些GDELT线索的具体来源链接、发布时间及原始语境是什么？")
+    result = C.sentences(draft)
+    starts = ["关键未知信息包括：1. 2026年", "2. 澳大利亚政府", "3. 标题中“playing", "是比喻性的长期", "4. 这些GDELT"]
+    assert len(result) == 5 and all(s["text"].startswith(start) for s, start in zip(result, starts))
+    assert all(draft[s["start"]:s["end"]] == s["text"] for s in result)
+    assert [C.numeric_tokens(s["text"]) for s in result] == [[]] * 5
+
+
+def test_a_number_after_an_item_number_is_still_data():
+    result = C.sentences("主要发现：1. 肯尼亚报告输入病例9例[E1]。2. 尼日利亚报告1例[E1]。")
+    assert [(s["citations"], C.numeric_tokens(s["text"])) for s in result] == [(["E1"], ["9"]), (["E1"], ["1"])]
+    assert len(C.sentences("Cases: 31. Deaths: 5.")) == 2  # a final number is not an item number
+
+
 def test_batches_never_mix_paragraphs_and_hold_at_most_four():
     draft = "一[E1]。二[E1]。三[E1]。四[E1]。五[E1]。\n\n六[E1]。"
     sizes = [[c["index"] for c in b] for b in C.batches(C.sentences(draft))]
