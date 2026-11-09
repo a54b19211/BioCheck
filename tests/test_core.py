@@ -241,6 +241,20 @@ def test_revise_may_give_an_uncited_sentence_a_neighbours_citation(replacement, 
     assert result["draft"].endswith(replacement) is applied
 
 
+def test_an_uncited_scope_note_may_be_rewritten_without_a_citation():
+    # r2 second analysis, sentence 8: "[research_scope]" is no citation, so the note had none; the reviser only took
+    # the bracket off and cited nothing, which was refused. A sentence that had citations keeps them (see above).
+    note = "关于更新或更正情况，本次提供的材料中未包含针对该新闻的更正或撤回通知"
+    draft = f"2.5 mg/kg组ORR为32%[E1]。\n\n{note}[research_scope]。然而，3.4 mg/kg组ORR为35%[E1]。"
+    req = dict(request(), draft=draft)
+    review = core.verify(req, FakeLLM(verify_claims=supported()))
+    assert review["claims"][1]["reason"].startswith("no_citation")
+    llm = FakeLLM(revise=lambda p: {"sentences": [{"index": 2, "text": note + "。"}]})
+    result = core.revise(dict(req, review=review), llm)
+    assert result["draft"] == draft.replace("[research_scope]", "")
+    assert [c["index"] for c in result["changed"]] == [2]
+
+
 def wrong_ref_review():
     """The sentence cites E1 (the trial), but what it says is in E2 (the post)."""
     draft = "网帖称医院出现多例不明肺炎[E1]。"

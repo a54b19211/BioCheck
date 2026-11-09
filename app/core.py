@@ -409,9 +409,10 @@ def _revision_payload(req, batch, sentences, refs):
                                  if r["source"] in cited or r.get("target") in cited]}
 
 
-def _accept_revisions(out, batch, replaced, refs):
+def _accept_revisions(out, batch, replaced, refs, current):
     """Keep each replacement that is one sentence citing its own references, or offered alternatives each backed
-    by a quote found in that material."""
+    by a quote found in that material. A sentence that had no citation may stay without one (a scope note): the
+    whole draft is verified again, and an uncited fact does not pass there. A cited sentence keeps its citations."""
     allowed = {c["index"]: c for c in batch}
     for item in (out.sentences if out else []):
         old, text = allowed.get(item.index), item.text.strip()
@@ -421,7 +422,8 @@ def _accept_revisions(out, batch, replaced, refs):
         new = set(cites) - set(old["citations"])
         quoted = {q.ref for q in item.quotes
                   if q.ref in refs and C.locate_quote(refs[q.ref]["text"], q.quote) in ("found", "ambiguous")}
-        if cites and new <= set(old["alternatives"]) & quoted:
+        stays_uncited = not cites and not current[item.index]["citations"]
+        if stays_uncited or (cites and new <= set(old["alternatives"]) & quoted):
             replaced[item.index] = text
 
 
@@ -445,6 +447,6 @@ def revise(req, llm=chat_json):
     budget = Budget(llm, req.get("max_llm_calls", 20))
     for batch in C.batches(sorted(to_model, key=lambda c: c["index"]), size=C.MAX_BATCH):
         out, _ = budget.ask("revise", CLAIM_REVISE, _revision_payload(req, batch, sentences, refs), RevisionOut)
-        _accept_revisions(out, batch, replaced, refs)
+        _accept_revisions(out, batch, replaced, refs, current)
     out_draft, changed = _splice(draft, current, replaced)
     return {"draft": out_draft, "changed": changed, "llm_calls": budget.calls}
