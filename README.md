@@ -21,7 +21,7 @@ export SERVICE_TOKEN=一个足够长的随机串
 uvicorn app.service:app --host 127.0.0.1 --port 18562
 ```
 
-契约包钉在 1.15.0（checker v17 / 契约 v3 的期间规则 `period_span_whole_v5` 自 1.13.0 起提供，拼写数字的 `decimal_text_v6` 自 1.15.0 起提供）。`make check-install` 在一个全新的虚拟环境里按锁文件安装，再逐个导入 `app/` 下的模块，并在这个环境里跑一遍测试（规则运行时才会读契约包的函数），钉的版本缺东西时在这里就失败（`UV_OFFLINE=1` 只用本地 uv 缓存）。
+契约包钉在 2.0.0（只描述 checker v3 和 v17；v17 / 契约 v3 用 normalize 的 `unit_subject_head_v4`、`period_span_whole_v5` 和 `decimal_text_v6` 读数）。`make check-install` 在一个全新的虚拟环境里按锁文件安装，再逐个导入 `app/` 下的模块，并在这个环境里跑一遍测试（规则运行时才会读契约包的函数），钉的版本缺东西时在这里就失败（`UV_OFFLINE=1` 只用本地 uv 缓存）。
 
 `GET /health` 不需要令牌；`/v1/*` 都要请求头 `Authorization: Bearer $SERVICE_TOKEN`。没有配置 `SERVICE_TOKEN` 时服务拒绝所有 `/v1/*` 请求（503）。
 

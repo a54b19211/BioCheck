@@ -1,6 +1,6 @@
 # The shared extraction-consistency contract and normalization, pinned by the sha256 of its reproducible wheel.
-# Checker v17 (contract v3) reads a spelled count with extraction_normalize.v6, which 1.15.0 was the first to ship, and the
-# period with v5; 1.15.0 is the pinned release; checker v10 (contract v2) uses extraction_normalize.v3 from the same wheel. Install it next to requirements.txt
+# Checker v17 (contract v3) reads the unit with extraction_normalize.v4, the whole period with v5 and a spelled count
+# with v6; 2.0.0 is the pinned release (it describes checkers v3 and v17 only). Install it next to requirements.txt
 # (README; scripts/check_clean_install.sh proves a fresh environment imports every module):
 #   uv pip install --no-index --find-links "${EXTRACTION_CONTRACT_WHEELS:-../extraction-contract/dist}" --require-hashes -r requirements-contract.txt
-extraction-contract==1.15.0 --hash=sha256:569de80fc4f5a3d82d1b3d07fbc2090b522b35909fada26c96ae10e1f38faad3
+extraction-contract==2.0.0 --hash=sha256:2d0bed01f6c035ad691ebd72bc284cfe86d222abb0c1ab303ae1dcb571c8510d
