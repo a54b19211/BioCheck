@@ -3,12 +3,10 @@
 # x86_64-unknown-linux-gnu with a sha256 for every distribution; `make venv` installs only from it.
 UV ?= uv
 PYTHON ?= 3.12
-# the shared contract wheel (built in the sibling extraction-contract checkout; hash in the lock)
-EXTRACTION_CONTRACT_WHEELS ?= ../extraction-contract/dist
 VENV ?= .venv
 PY = $(VENV)/bin/python
-LOCK_INPUTS = requirements.txt requirements-contract.txt
-LOCK_FLAGS = --generate-hashes --python-version 3.12 --python-platform x86_64-unknown-linux-gnu --find-links $(EXTRACTION_CONTRACT_WHEELS)
+LOCK_INPUTS = requirements.txt
+LOCK_FLAGS = --generate-hashes --python-version 3.12 --python-platform x86_64-unknown-linux-gnu
 
 .PHONY: help venv test lint metrics check check-install check-lock lock
 help:
@@ -22,7 +20,7 @@ help:
 	@echo 'make lock           re-resolve requirements.lock after a change of $(LOCK_INPUTS)'
 venv:
 	test -x $(PY) || $(UV) venv --quiet --python $(PYTHON) $(VENV)
-	$(UV) pip sync --quiet --python $(PY) --require-hashes --find-links $(EXTRACTION_CONTRACT_WHEELS) requirements.lock
+	$(UV) pip sync --quiet --python $(PY) --require-hashes requirements.lock
 test: venv
 	$(PY) -m pytest -q
 lint: venv
@@ -31,7 +29,7 @@ metrics: venv
 	$(PY) scripts/code_metrics.py --check
 check: test lint metrics check-lock
 check-install:
-	UV=$(UV) PYTHON=$(PYTHON) EXTRACTION_CONTRACT_WHEELS=$(EXTRACTION_CONTRACT_WHEELS) sh scripts/check_clean_install.sh
+	UV=$(UV) PYTHON=$(PYTHON) sh scripts/check_clean_install.sh
 # the lock is re-resolved with itself as the preference: unchanged inputs give the same pins.
 # make reports Error 1: resolved, and the lock differs (stale); Error 2: the resolution itself failed (no
 # index or network, or inputs that do not resolve), so nothing was compared - that is no reason to re-lock

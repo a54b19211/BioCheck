@@ -22,9 +22,8 @@ producer's own claim. Dimensions never change the item status."""
 
 import re
 
-from extraction_contract import normalize as norm
-
 from . import item_rules, measurement_rules
+from . import normalize as norm
 from .item_rules import outcome, written_as
 
 CONTRACT_VERSION = "extraction_consistency.v3"

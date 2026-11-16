@@ -16,8 +16,9 @@ request, under the same checker version, gets the same answer forever.
 - One module per contract, named by what it checks: `app/item_rules.py` (contract v1), `app/dimension_rules.py`
   (contract v3). The measurement rules live in `app/measurement_rules.py`, which `dimension_rules` calls with the
   current normalisation (extraction_normalize v4, v5, v6) instead of copying them; contract v2 has no route.
-- Rules shared with Radar live in the `extraction-contract` wheel (`extraction_contract.normalize`), pinned by hash
-  in `requirements-contract.txt`; each normalisation version is a separate function there, never changed in place.
+- The normalisation rules live in `app/normalize.py` (they were the shared `extraction-contract` wheel until it was
+  dissolved; Fabric's producer keeps a copy of the number rules); each normalisation version is a separate
+  function there, never changed in place.
 - Release checker versions in batches of rule changes, not one version per boundary case.
 - `tests/fixtures/checker_golden.jsonl` freezes the answers of the current versions; it is regenerated only with
   a version bump (`tests/golden.py`).

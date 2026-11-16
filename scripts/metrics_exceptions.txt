@@ -4,3 +4,4 @@
 # on a new violator, on an entry that is within the limits now, and on a listed function that got bigger, so the
 # list only shrinks.
 app/core.py:judge  29/23  verdict assembly with one branch per outcome; split per outcome when the function is next changed
+app/normalize.py:period_span_whole_v5  51/43  moved unchanged from the extraction-contract package (one branch per written-period continuation); split when the rule is next changed

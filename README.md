@@ -211,12 +211,12 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
   - **qualifier**：看值前后的标记词。
   - **modality**：看局部句、有效标题和表格标题。
   - **单位**：中文量词、英文计数名词（之前最多两个白名单修饰词）、%、金额，外加 v1 的单位表；数值后没有单位时，也可以是绑定在 metric 短语主语上的计数名词（`14 close contacts`），但包含/排除/举例之后点名的子集不算单位。
-  - **数字和期间的读法**用共享契约包的 `extraction_contract.normalize`（与 Radar 同一份）：千分位可以用逗号、空格、不换行空格分组；英文单独年份（`in 2018`）是年度区间；period 的 span 必须是完整写出的期间，后面还接着月、日、区间或起点的不算（`In January 2018` 里的 `2018` 不是期间）。
+  - **数字和期间的读法**用 `app/normalize.py`（BioCheck 自己的规则；Fabric 的测量产出方复制了其中读数字的几条）：千分位可以用逗号、空格、不换行空格分组；英文单独年份（`in 2018`）是年度区间；period 的 span 必须是完整写出的期间，后面还接着月、日、区间或起点的不算（`In January 2018` 里的 `2018` 不是期间）。
 - **数量短语完整**：值所在组里，数量自己的短语必须被本条目的字段覆盖。英文从值到第一个助动词；中文是整组，只允许列出的虚词留在字段外。介词和冠词可以连接字段；事件动词只有在 metric 之后（作谓语）才不需要字段。已核字段所对应的标记词（声明 cumulative 时的「累计」、声明 planned 时的「计划」、声明非 exact 时的比较词）算作已覆盖。漏掉的限定语（suspected、in humans、批准注册、表格行的类别）会让 metric 给 unsupported。
 - **比较短语**：比较词按整个短语、从长到短匹配，包括否定形式（不超过是上限）；清单里没有的否定写法给 unsupported。值前后的限定和「无单位」都在有边界的局部句里判断，会跳过空白。百分数只能用紧贴它写出的比例。
 - **谓语否定**：值所在组里，如果字段之外出现否定词（not、never、without、n't、未、没有、尚未、无、不），measure_kind 给 unsupported（negated_predicate）。否定句里的事件词不算肯定的事件依据。字段内部的否定（如 metric 里的「不合格」、已声明的「不超过」）属于该字段本身，不受影响。
 - **字段 span**：可以重叠，例如 object 落在 metric 之内；passages 仍然不能重叠。
-- **测试**：`tests/test_measurement_rules.py` 用 `tests/fixtures/p3_matrix.json`（extraction-contract 样本矩阵 v2：固定 clean_text.v11 产物的真实子句、真实偏移和逐字段原文位置），每一行都走真实 HTTP。`tests/explain_measurement_rules.py` 逐行打印状态和非 match 字段的原因，用于审查。
+- **测试**：`tests/test_measurement_rules.py` 用 `tests/fixtures/p3_matrix.json`（样本矩阵 v2：固定 clean_text.v11 产物的真实子句、真实偏移和逐字段原文位置），每一行都走真实 HTTP。`tests/explain_measurement_rules.py` 逐行打印状态和非 match 字段的原因，用于审查。
 
 ## 抽取一致性接口 v3（测量加业务维度）
 
@@ -235,10 +235,10 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 
 ## 开发环境与测试
 
-唯一的入口是 `Makefile`。需要 uv 0.13.0（在 PATH 上，例如 `~/.local/bin/uv`；或者 `make UV=<路径>`），以及旁边 extraction-contract 检出里构建好的 wheel（`../extraction-contract/dist`，或 `EXTRACTION_CONTRACT_WHEELS=<目录>`）。
+唯一的入口是 `Makefile`。需要 uv 0.13.0（在 PATH 上，例如 `~/.local/bin/uv`；或者 `make UV=<路径>`）。
 
 ```sh
-make venv            # .venv：只按 requirements.lock 安装（含契约 wheel），每个包都校验 sha256
+make venv            # .venv：只按 requirements.lock 安装，每个包都校验 sha256
 make test            # 全部测试（不联网，模型用 FakeLLM）
 make lint            # ruff
 make metrics         # 函数长度 80 行 / 圈复杂度 20 的门槛（scripts/code_metrics.py；例外清单 scripts/metrics_exceptions.txt 只许变短）
@@ -255,7 +255,7 @@ make check-lock      # requirements.lock 是否仍与 requirements*.txt 一致�
 
 `make check-lock`、`make lock` 要访问 PyPI（`make venv`、`make check-install` 在 uv 缓存里没有的包也要下载）。zktest 上直连 PyPI 有时超时，这时只给这几条命令临时加上本机已有的 HTTP 代理（mihomo，监听 127.0.0.1:7890），例如 `HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 make check-lock`；不要把代理写进全局配置。`check-lock` 的结果有两种失败：解析本身失败（包索引或网络不可用、依赖解不出来）时报 `check-lock did not run`，make 显示 `Error 2`，锁文件没有比较过，不能因此重做锁；只有解析成功而内容不同时才报 `requirements.lock is stale`（make 显示 `Error 1`）。两种情况 make 都以非零状态结束。
 
-- 直接依赖写在 `requirements.txt`（运行 + 测试 + ruff）、`requirements-contract.txt`（契约 wheel 的版本和 sha256）；模型调用用 OpenAI 官方 `openai` 库（`app/llm.py`，任何 OpenAI 兼容服务；超时和重试由库处理，`LLM_TIMEOUT_SECONDS`、`LLM_MAX_RETRIES`，默认 180 秒、2 次）；`requirements.lock` 是由它们解析出的完整锁，每个包都带 sha256，解析目标是 CPython 3.12、x86_64-unknown-linux-gnu（锁文件头一行写着解析命令）。改了这些文件后运行 `make lock`，再提交锁文件。
+- 直接依赖写在 `requirements.txt`（运行 + 测试 + ruff）；模型调用用 OpenAI 官方 `openai` 库（`app/llm.py`，任何 OpenAI 兼容服务；超时和重试由库处理，`LLM_TIMEOUT_SECONDS`、`LLM_MAX_RETRIES`，默认 180 秒、2 次）；`requirements.lock` 是由它们解析出的完整锁，每个包都带 sha256，解析目标是 CPython 3.12、x86_64-unknown-linux-gnu（锁文件头一行写着解析命令）。改了这些文件后运行 `make lock`，再提交锁文件。
 - 已验证的组合：uv 0.13.0、CPython 3.12.15；通过数量以 `make check` 的输出为准，这里不写数字。
 
 `tests/test_checker_golden.py` 用 `tests/fixtures/checker_golden.jsonl` 逐字节比对三个契约的全部样例回执；只有提升 `CHECKER_VERSION` 时才用 `PYTHONPATH=. python tests/golden.py` 重新生成。

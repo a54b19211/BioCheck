@@ -12,9 +12,8 @@ import re
 from datetime import date, timedelta
 from decimal import Decimal
 
-from extraction_contract import normalize as norm
-
 from . import item_rules
+from . import normalize as norm
 from .claims import squash
 from .item_rules import ContractError, ends, outcome, stated, written_as
 
