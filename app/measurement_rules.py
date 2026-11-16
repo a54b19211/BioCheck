@@ -1086,7 +1086,7 @@ def check_measurement(item, P):
 def check(request, contract_version, checker_version):
     """Measurement items only, answered under the given contract and checker version. Raises ContractError on a
     contract break. The normalisation is extraction_normalize v4 (unit), v5 (whole period) and v6 (spelled
-    counts); the output units and wording and the English wording rules (docs/decisions/0007: spelled counts,
+    counts); the output units and wording and the English wording rules (docs/设计.md: spelled counts,
     more period forms, one period for a list of quantities, "a total of", values that are marks, ends of ranges
     or old values) are read."""
     item_rules.check_request(request, primary=False)

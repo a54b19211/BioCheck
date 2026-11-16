@@ -1,5 +1,5 @@
-"""Measurements, asked to /v3 without dimensions. Real samples: tests/fixtures/p3_matrix.json (matrix v2 of
-extraction-contract: real clauses of fixed clean_text.v11 artifacts with their real offsets, every field's literal
+"""Measurements, asked to /v3 without dimensions. Real samples: tests/fixtures/p3_matrix.json (sample matrix
+v2: real clauses of fixed clean_text.v11 artifacts with their real offsets, every field's literal
 span, the final values and the expected outcome). Each matrix row becomes a real HTTP request; negatives of the kind
 "wrong final value at a real span" change only the final value. Synthetic texts cover what no real sample has
 yet: heading hierarchy, tables, period edge cases, decimal bounds."""

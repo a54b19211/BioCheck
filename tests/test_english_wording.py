@@ -1,4 +1,4 @@
-"""Contract v3, English wording (docs/decisions/0008): the sentences are those of the 24 sealed windows of the D1
+"""Contract v3, English wording (docs/设计.md): the sentences are those of the 24 sealed windows of the D1
 measurement batch (WHO Disease Outbreak News; the annotation is AI-assisted and not reviewed by a person). Per
 item of the ruling one or two readings that are right and ones that are wrong, each with the text of its notice."""
 

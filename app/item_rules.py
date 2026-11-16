@@ -19,7 +19,7 @@ from .claims import DATE, TIMESTAMP, squash
 
 CONTRACT_VERSION = "extraction_consistency.v1"
 # Bump whenever a rule, the unit table, the number conversions or the clause rule below changes.
-CHECKER_VERSION = "biocheck.extraction_rules.v3"  # docs/decisions/0001
+CHECKER_VERSION = "biocheck.extraction_rules.v3"  # docs/设计.md
 
 # Units the rules know, canonical -> spellings. The longest spelling wins at a position ("mg/kg" is never "mg",
 # "mg/day" is no ratio). A unit not listed here is "unsupported", never guessed.

@@ -4,7 +4,7 @@
 A measurement item is answered exactly as measurement_rules answers it (its fields and its status), with the
 normalisation of this contract - extraction_normalize.v4 for the unit in the bound metric phrase, v5 for the
 whole written period, v6 for a spelled value - and the output units and wording and the English wording rules
-(docs/decisions/0007). Beside the fields, each business dimension the request
+(docs/设计.md). Beside the fields, each business dimension the request
 states is judged. A dimension is "match" only when all of these hold, each from the text alone:
 1. its literal is written at its span;
 2. the role its kind names has evidence in the text - a closed grammar of explicit labels and forms (a disease
@@ -27,7 +27,7 @@ from . import normalize as norm
 from .item_rules import outcome, written_as
 
 CONTRACT_VERSION = "extraction_consistency.v3"
-# Bump whenever a role grammar, a phrase rule or a normalisation function changes (docs/decisions/0001).
+# Bump whenever a role grammar, a phrase rule or a normalisation function changes (docs/设计.md).
 CHECKER_VERSION = "biocheck.extraction_rules.v17"
 NORMALIZE_VERSION = norm.NORMALIZE_V4  # the bound-unit rule; the whole-period rule is v5's, the value rule v6's
 

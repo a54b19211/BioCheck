@@ -1,4 +1,4 @@
-"""POST /v2/verify: verify a draft by assertion unit (docs/decisions/0004, report sections 0005).
+"""POST /v2/verify: verify a draft by assertion unit (docs/设计.md, report sections).
 
 The program cuts each sentence into numbered candidate segments (segment_rules.py). The model reads the whole
 sentence, its neighbours and the cited texts, reports the units (a verbatim fragment at a segment each) and says

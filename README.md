@@ -1,7 +1,5 @@
 # BioCheck
 
-维护人：潘倩。
-
 BioCheck 是 BioRadar 的一个专业服务：根据雷达给的固定材料写一份中文研究回答，然后**逐句**核对这份稿子是否被它引用的原文支持，最后只对明确有错的句子做一次有限修订。材料检索、版本、预算和报告保存都由雷达负责；BioCheck 只看本次请求里给的材料，不联网补事实。
 
 ## 运行服务
@@ -21,7 +19,7 @@ export SERVICE_TOKEN=一个足够长的随机串
 uvicorn app.service:app --host 127.0.0.1 --port 18562
 ```
 
-契约包钉在 2.0.0（只描述 checker v3 和 v17；v17 / 契约 v3 用 normalize 的 `unit_subject_head_v4`、`period_span_whole_v5` 和 `decimal_text_v6` 读数）。`make check-install` 在一个全新的虚拟环境里按锁文件安装，再逐个导入 `app/` 下的模块，并在这个环境里跑一遍测试（规则运行时才会读契约包的函数），钉的版本缺东西时在这里就失败（`UV_OFFLINE=1` 只用本地 uv 缓存）。
+读数字和期间的规则在 `app/normalize.py`（v17 / 契约 v3 用 `unit_subject_head_v4`、`period_span_whole_v5` 和 `decimal_text_v6`）。`make check-install` 在一个全新的虚拟环境里按锁文件安装，再逐个导入 `app/` 下的模块，并在这个环境里跑一遍测试（`UV_OFFLINE=1` 只用本地 uv 缓存）。
 
 `GET /health` 不需要令牌；`/v1/*` 都要请求头 `Authorization: Bearer $SERVICE_TOKEN`。没有配置 `SERVICE_TOKEN` 时服务拒绝所有 `/v1/*` 请求（503）。
 
@@ -224,7 +222,7 @@ uvicorn app.service:app --host 127.0.0.1 --port 18562
 
 - 请求里的测量条目如上一节，另外每个测量条目可以带 `dims`（每类至多一个：disease、population、date_basis、indication、product_or_class、milestone_definition、entity、stage、denominator_definition，各自写明 value 和 span）和 `family`。
 - 测量字段和条目状态用上一节的规则，读法按这一版契约：metric 短语里的单位按 `extraction_normalize.v4`，完整期间按 v5（上一行以完整日期结尾，例如公告的「发布时间」，不算期间的延续）；产出类单位（`120万支` 的单位是 `万支`，数量级不丢）和「实际产出」才算 flow。
-- **英文写法**（`docs/decisions/0008-english-wording-checker-v17.md`；只对不含中日韩字符的局部句生效）：
+- **英文写法**（设计见 `docs/设计.md`；只对不含中日韩字符的局部句生效）：
   - 一句里有多个数时每个数各自核验：值之后的字段，只要它和值之间没有别的数就是这个值的；值之前的字段，前面没有别的数才是；括号里的百分数（`(CFR of 14%)`）不是另一个数；括号里的逗号不切开值所在的组。
   - 一句列出多个数（`N cases, including M deaths`、`N cases and M deaths`）且句中只有一个期间时，期间属于列表里的每个数：条件是它在所有数之前或之后，句中没有别的日期，每个数（第一个除外）由 including / and / of which 等引出。
   - `a total of` 是总量词；`As of <date>, a total of N` 证明累计口径；只写起点的期间（`since September 2012`）是累计，不是 flow。
@@ -253,7 +251,7 @@ make check-lock      # requirements.lock 是否仍与 requirements*.txt 一致�
 | BioRadar | `E`（含行宽 E501，110） |
 | BioCheck | `E`（含行宽 E501，120） |
 
-`make check-lock`、`make lock` 要访问 PyPI（`make venv`、`make check-install` 在 uv 缓存里没有的包也要下载）。zktest 上直连 PyPI 有时超时，这时只给这几条命令临时加上本机已有的 HTTP 代理（mihomo，监听 127.0.0.1:7890），例如 `HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 make check-lock`；不要把代理写进全局配置。`check-lock` 的结果有两种失败：解析本身失败（包索引或网络不可用、依赖解不出来）时报 `check-lock did not run`，make 显示 `Error 2`，锁文件没有比较过，不能因此重做锁；只有解析成功而内容不同时才报 `requirements.lock is stale`（make 显示 `Error 1`）。两种情况 make 都以非零状态结束。
+`make check-lock`、`make lock` 要访问 PyPI（`make venv`、`make check-install` 在 uv 缓存里没有的包也要下载）。直连超时时只给这几条命令临时设 `HTTPS_PROXY`/`HTTP_PROXY`，服务器上可用的代理等共用设施见仓库 `a54b19211/ZK-radar-deploy`；不要把代理写进全局配置。`check-lock` 的结果有两种失败：解析本身失败（包索引或网络不可用、依赖解不出来）时报 `check-lock did not run`，make 显示 `Error 2`，锁文件没有比较过，不能因此重做锁；只有解析成功而内容不同时才报 `requirements.lock is stale`（make 显示 `Error 1`）。两种情况 make 都以非零状态结束。
 
 - 直接依赖写在 `requirements.txt`（运行 + 测试 + ruff）；模型调用用 OpenAI 官方 `openai` 库（`app/llm.py`，任何 OpenAI 兼容服务；超时和重试由库处理，`LLM_TIMEOUT_SECONDS`、`LLM_MAX_RETRIES`，默认 180 秒、2 次）；`requirements.lock` 是由它们解析出的完整锁，每个包都带 sha256，解析目标是 CPython 3.12、x86_64-unknown-linux-gnu（锁文件头一行写着解析命令）。改了这些文件后运行 `make lock`，再提交锁文件。
 - 已验证的组合：uv 0.13.0、CPython 3.12.15；通过数量以 `make check` 的输出为准，这里不写数字。
@@ -262,9 +260,9 @@ make check-lock      # requirements.lock 是否仍与 requirements*.txt 一致�
 
 测试不联网，用 `tests/conftest.py` 里的 `FakeLLM` 代替模型。`evaluation/` 下保留 `tasks.json`（题目及 Fabric 记录版本）、`controls.json` 和 `regressions.json`（正确/错误对照句），供以后用真实材料评测。
 
-## 设计决定
+## 设计
 
-`docs/decisions/` 下记录了仍有用的历史：改成同步 HTTP 服务的原因（0002）、抽取 checker 的版本规则和每个版本改了什么（0001）。
+代码地图、开发约定和设计决定见 `docs/设计.md`。
 
 ## 已知限制
 
@@ -274,15 +272,3 @@ make check-lock      # requirements.lock 是否仍与 requirements*.txt 一致�
 - 每批都会重发所引原文全文，长材料较费 token。
 - 覆盖检查只看到材料标题和逐句结论，看不到原文全文，可能漏报“遗漏了某个重要结果”。
 - 还没有用真实模型跑过新版本的评测；生成/核验共用同一模型，不能代替独立的人工专业标注。
-
-## 从公告里读数字（设计思路，未实现）
-
-2026-11-16 起，Fabric 和雷达删掉了“把公告里的数字抽出来存成序列”的测量程序（只服务 WHO DON 一个来源、78 条公告，线上没跑过）。
-留下的只有下面这几条想法，以后真要用公告里的数字时照着做；这里没有代码。
-
-- **数字要有出处**：每个数字都引自某个来源的某一个版本里的某一句原文（来源、版本号、原句），没有原句的数字不用。
-- **没有公告不等于没有疫情**：通报是选择性的，零条公告只说明“没有通报”，不能当成“零病例”或“已平息”。
-- **更正是新的一条，不是覆盖**：后来的公告更正了前面的数字，就记成“新值取代旧值”，旧值和它的出处都留着，能看出改过几次、谁改的。
-- **累计数和新增数要标清楚**：同一句话里“累计 120 例”和“新增 12 例”是两种量，必须标明是哪种、截至哪天，不能互相比较或相加。
-- **谁来读、谁来核**：数字由分析时的模型从清洗正文里读出并引用原句；BioCheck 用规则核对这个数字确实在引用的原文里、单位和口径对得上。
-  不另建抽取流水线，也不预先存成序列。
