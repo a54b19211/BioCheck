@@ -29,5 +29,5 @@ repeated the answer. In the flat shape the number was the last field of each uni
 
 - The schema is now three levels deep (claims, units, quotes) where AGENTS.md asks for two; one number per group is
   what removes the failure above.
-- The offline stand-in model of devtools tells the unit check from the claim check by how the format line opens
+- The offline stand-in model used in D1 tells the unit check from the claim check by how the format line opens
   (`{"claims":[{"sentence":int,"units":[`), and answers in this shape; a test here pins the opening.

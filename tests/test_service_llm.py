@@ -182,13 +182,30 @@ def test_chat_json_gives_up_after_the_second_invalid_output(monkeypatch):
     assert parsed is None and call["error"] == "invalid_output" and len(sent) == 2
 
 
-def test_empty_output_at_length_limit_and_timeout_are_not_resent():
+def test_empty_output_at_length_limit_and_timeout_are_not_resent(monkeypatch):
+    monkeypatch.setenv("LLM_MAX_RETRIES", "0")  # the openai client's own retries are off here
     client, sent = fake_api([("", "length")])
     parsed, call = chat_json("verify_claims", "sys", {}, CheckBatch, client=client)
     assert parsed is None and call["error"] == "output_empty_after_limit" and len(sent) == 1
     client, sent = fake_api([httpx.ReadTimeout("slow")])
     parsed, call = chat_json("verify_claims", "sys", {}, CheckBatch, client=client)
     assert parsed is None and call["error"] == "timeout" and len(sent) == 1
+
+
+def test_the_openai_client_gets_the_configured_url_key_and_maps_a_refusal(monkeypatch):
+    monkeypatch.setenv("LLM_BASE_URL", "http://model.invalid/v1")
+    monkeypatch.setenv("LLM_API_KEY", "k1")
+    monkeypatch.setenv("LLM_MAX_RETRIES", "0")
+    seen = []
+
+    def handler(req):
+        seen.append((str(req.url), req.headers["authorization"]))
+        return httpx.Response(503, json={})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    parsed, call = chat_json("verify_claims", "sys", {}, CheckBatch, client=client)
+    assert parsed is None and call["error"] == "http_503" and call["requests"] == 1
+    assert seen == [("http://model.invalid/v1/chat/completions", "Bearer k1")]
 
 
 def test_hypotheses_reach_the_writer_over_http(client):
